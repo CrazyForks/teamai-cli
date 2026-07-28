@@ -423,24 +423,17 @@ Where each tool's servers land:
 | Tool | User scope | Project scope |
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
-| tclaude | `~/.tclaude/.claude.json` | shares `<project>/.mcp.json` with claude |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | not supported |
 
-tclaude ships Claude Code with `customUserDataDir: .tclaude`, so its config lives at `~/.tclaude/.claude.json` rather than alongside `~/.claude.json`.
+Codex supports `stdio` and `http`; `sse` is skipped. Ownership is tracked in `~/.teamai/managed-mcp.json` — hand-added servers are left alone; name collisions skip unless `--force`.
 
-Codex takes `stdio` and `http` but has no `sse` transport, so only `sse` servers are skipped there rather than written as config that would fail at session start.
+**Secrets.** Write `${VAR}`, never a literal. Values resolve from the environment, then from `env/env.yaml` → `~/.teamai/env`. Unresolved variables skip the server with a hint.
 
-**Secrets.** Write `${VAR}` instead of a literal token. Values resolve from your process environment first, then from the values the team's `env/env.yaml` channel wrote to `~/.teamai/env`. A server with an unresolved variable is skipped with a hint — a server that cannot connect would otherwise fail on every session start.
+Where the tool can keep secrets off disk, teamai does: Claude project `.mcp.json` keeps the placeholder (Claude expands it); Codex writes `bearer_token_env_var` / `env_http_headers` (variable name only). Elsewhere the value is resolved into a `0600` file. In project scope, tools that cannot expand `${VAR}` skip secret-bearing servers instead of writing plaintext into a committed file.
 
-Where a tool can keep the secret out of its own config file, teamai lets it. Codex names the variable rather than storing its value, so `Authorization: Bearer ${TOKEN}` becomes `bearer_token_env_var = "TOKEN"` and any other whole-value placeholder becomes an `env_http_headers` entry; the token itself never reaches `config.toml`. A placeholder that codex cannot name — one embedded in a longer string, or in the URL — is resolved as usual.
-
-**Secrets in project scope.** Project-scope config files live inside the repo and get committed, so a resolved token there would land in version control. Claude Code expands `${VAR}` itself, so `<project>/.mcp.json` receives the placeholder verbatim and the secret stays out of git. No other tool expands it, so in project scope a server that references a variable is skipped for those tools with an explanatory message; distribute such a server at user scope instead. Servers with no secrets are unaffected and install everywhere.
-
-**Approving project servers.** Claude Code treats a `.mcp.json` arriving from a repo as untrusted and lists its servers as `⏸ Pending approval` until you accept them once in an interactive `claude` session. This is Claude's own prompt, not something teamai suppresses.
-
-**What is safe.** teamai only ever rewrites the specific server keys it installed, tracked in `~/.teamai/managed-mcp.json`. Servers you added by hand are left untouched, and a team server whose name collides with one of yours is skipped unless you pass `--force`. Unrelated content in the target file — your Claude OAuth session, your Codex model settings and comments — is preserved byte for byte.
+Claude Code may show project `.mcp.json` servers as pending approval until you accept them once in an interactive session.
 
 ```bash
 teamai mcp list              # servers, secret status, and where they are installed
@@ -448,7 +441,6 @@ teamai mcp inject            # apply now; --dry-run to preview, --force to overr
 teamai mcp remove            # remove every teamai-managed server
 ```
 
-MCP servers are read when a session starts, so changes take effect in your next session.
 
 ---
 
@@ -763,7 +755,7 @@ teamai hooks inject    # Re-inject
 teamai hooks remove    # Remove
 ```
 
-Both commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed, so uninstalled tools such as `.tclaude` / `.tcodex` are left untouched.
+Both commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed.
 
 ### Team Hooks Declaration
 

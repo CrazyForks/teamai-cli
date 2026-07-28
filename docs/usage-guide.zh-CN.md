@@ -421,24 +421,17 @@ servers:
 | 工具 | 用户级 | 项目级 |
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
-| tclaude | `~/.tclaude/.claude.json` | 与 claude 共用 `<project>/.mcp.json` |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | 不支持 |
 
-tclaude 通过 `customUserDataDir: .tclaude` 重定向了 Claude Code 的用户数据目录，因此它的配置在 `~/.tclaude/.claude.json`，而不是与 `~/.claude.json` 并列。
+Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。归属记录在 `~/.teamai/managed-mcp.json`——手动添加的 server 不动；与手写同名则跳过，除非 `--force`。
 
-Codex 支持 `stdio` 与 `http`，但没有 `sse` 传输，因此只有 `sse` 类型在 Codex 上会被跳过，而不是写入一份注定在会话启动时失败的配置。
+**密钥**：写 `${VAR}`，不要写明文。取值优先来自环境变量，其次是 `env/env.yaml` → `~/.teamai/env`。变量无法解析则跳过并提示。
 
-**密钥**：不要写明文 token，写 `${VAR}`。取值优先来自当前进程环境变量，其次是团队 `env/env.yaml` 通道写入 `~/.teamai/env` 的值。变量无法解析的 server 会被跳过并提示——否则它会在每次会话启动时报错。
+能让密钥不落盘的工具会走那条路：Claude 项目级 `.mcp.json` 保留占位符（由 Claude 展开）；Codex 写 `bearer_token_env_var` / `env_http_headers`（只记变量名）。其余情况解析后写入 `0600` 文件。项目级下，不支持 `${VAR}` 展开的工具会跳过带密钥的 server，避免明文进 git。
 
-只要工具本身能让密钥不落到自己的配置文件里，teamai 就会走那条路。Codex 是记变量名而不是存值：`Authorization: Bearer ${TOKEN}` 会写成 `bearer_token_env_var = "TOKEN"`，其他「整个值就是一个占位符」的 header 会写成 `env_http_headers` 项，token 本身不会进入 `config.toml`。Codex 无法用变量名表达的占位符——嵌在更长字符串里的、或者出现在 URL 里的——仍按常规解析。
-
-**项目级的密钥处理**：项目级配置文件位于仓库内、会被提交，因此在那里解析出真实 token 就等于把密钥写进版本库。Claude Code 自己支持 `${VAR}` 展开，所以 `<project>/.mcp.json` 原样保留占位符，密钥不入 git。其他工具不支持展开，因此在项目级，引用了变量的 server 会对这些工具跳过并给出说明——这类 server 请改用用户级分发。不含密钥的 server 不受影响，照常安装到所有工具。
-
-**项目级 server 的批准**：Claude Code 会把来自仓库的 `.mcp.json` 视为不可信，其中的 server 显示为 `⏸ Pending approval`，需要你在交互式 `claude` 会话中确认一次。这是 Claude 自身的安全提示，teamai 不会绕过它。
-
-**安全边界**：teamai 只改写自己装过的那些 server 键，归属记录在 `~/.teamai/managed-mcp.json`。你手动添加的 server 不会被碰；团队 server 与你的重名时会跳过，除非显式加 `--force`。目标文件里的无关内容——Claude 的 OAuth 会话、Codex 的模型设置与注释——逐字节保留。
+Claude Code 可能把来自仓库的 `.mcp.json` 标为待批准，需在交互式会话中确认一次。
 
 ```bash
 teamai mcp list              # 查看 server、密钥状态与安装位置
@@ -446,7 +439,6 @@ teamai mcp inject            # 立即注入；--dry-run 预览，--force 覆盖�
 teamai mcp remove            # 移除所有 teamai 管理的 server
 ```
 
-MCP server 在会话启动时读取，因此变更在你的下一个会话生效。
 
 ---
 
@@ -761,7 +753,7 @@ teamai hooks inject    # 重新注入
 teamai hooks remove    # 移除
 ```
 
-这两个命令只会操作你实际已安装的工具（即 `~/.<tool>/` 根目录已存在的工具）。对于 `toolPaths` 中已配置但未安装的工具，命令不会为其凭空创建根目录，因此像 `.tclaude` / `.tcodex` 这类未安装的工具会被完全跳过。
+这两个命令只会操作你实际已安装的工具（即 `~/.<tool>/` 根目录已存在的工具）。对于 `toolPaths` 中已配置但未安装的工具，命令不会为其凭空创建根目录。
 
 ### 团队 Hooks 声明
 
