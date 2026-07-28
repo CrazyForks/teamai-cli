@@ -541,18 +541,19 @@ export async function uninstall(opts: UninstallOptions): Promise<void> {
       }
     }
 
-    await executeRemoval(plan);
-
-    // MCP servers live in tool-owned config files tracked by their own manifest,
-    // so they are cleaned up through the reconcile engine rather than the plan.
+    // MCP cleanup must run before executeRemoval deletes ~/.teamai/: ownership is
+    // tracked in managed-mcp.json inside that directory. Hooks already do this
+    // inside executeRemoval for the same reason.
     try {
       const { reconcileMcpForConfig } = await import('./mcp-reconcile.js');
       const { changes } = await reconcileMcpForConfig(teamConfig, localConfig, { removeAll: true });
       const removed = changes.filter((c) => c.action === 'removed');
-      if (removed.length > 0) log.info(`移除 ${removed.length} 个 teamai 管理的 MCP server`);
+      if (removed.length > 0) log.info(`Removed ${removed.length} teamai-managed MCP server(s)`);
     } catch (e) {
-      log.warn(`移除 MCP server 失败: ${(e as Error).message}`);
+      log.warn(`Failed to remove MCP servers: ${(e as Error).message}`);
     }
+
+    await executeRemoval(plan);
 
     log.success('teamai 卸载完成');
   } else {

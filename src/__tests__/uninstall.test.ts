@@ -239,6 +239,53 @@ describe('uninstall', () => {
     expect(await fse.pathExists(teamaiHome)).toBe(false);
   });
 
+  // Regression: MCP cleanup used to run after ~/.teamai/ was deleted, so the
+  // ownership manifest was already gone and removeAll became a no-op.
+  it('卸载时移除 teamai 管理的 MCP server，并保留用户自建的', async () => {
+    const { homeDir, repoPath, teamaiHome } = await setupFixture(tmpDir);
+    vi.stubEnv('HOME', homeDir);
+    vi.stubEnv('SHELL', '/bin/zsh');
+
+    await fse.writeJson(path.join(homeDir, '.claude.json'), {
+      mcpServers: {
+        'team-mcp': { type: 'http', url: 'https://team.example/mcp' },
+        'my-own': { command: 'my-server' },
+      },
+    });
+    await fse.writeJson(path.join(teamaiHome, 'managed-mcp.json'), {
+      claude: [{ name: 'team-mcp', hash: 'abc' }],
+    });
+
+    const teamConfig = makeTeamConfig({
+      toolPaths: {
+        claude: {
+          skills: '.claude/skills',
+          rules: '.claude/rules',
+          settings: '.claude/settings.json',
+          claudemd: '.claude/CLAUDE.md',
+          mcp: '.claude.json',
+          mcpProject: '.mcp.json',
+        },
+      },
+      sharing: {
+        skills: {},
+        rules: { enforced: [] },
+        docs: { localDir: `${teamaiHome}/docs` },
+        env: { injectShellProfile: true },
+      },
+    });
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: makeLocalConfig(homeDir, repoPath),
+      teamConfig,
+    });
+
+    await uninstall({ force: true });
+
+    const after = await fse.readJson(path.join(homeDir, '.claude.json'));
+    expect(after.mcpServers['team-mcp']).toBeUndefined();
+    expect(after.mcpServers['my-own']).toEqual({ command: 'my-server' });
+  });
+
   it('移除 OpenClaw 系 agent 的 HOOK.md 目录（无 settings 路径）', async () => {
     const { homeDir, repoPath, teamaiHome } = await setupFixture(tmpDir);
     vi.stubEnv('HOME', homeDir);
