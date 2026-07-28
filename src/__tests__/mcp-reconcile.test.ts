@@ -344,19 +344,70 @@ servers:
     expect(await fse.pathExists(path.join(homeDir, '.codebuddy', 'mcp.json'))).toBe(false);
   });
 
-  it('skips http servers for codex, which cannot express them', async () => {
+  // Verified against codex-cli 0.142.5: it speaks streamable HTTP, and names the
+  // env var for a bearer token rather than storing the value.
+  it('writes an http server into codex config.toml, naming the token env var', async () => {
     await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    process.env.REMOTE_TOKEN = 'super-secret-value';
     await writeMcpYaml(`
 servers:
   - name: remote
     transport: http
     url: https://example.com/mcp
+    headers:
+      Authorization: Bearer \${REMOTE_TOKEN}
+      X-Trace: \${TRACE_ID}
+      X-Team: literal-value
+    timeout: 600000
+    tools: [codex]
+`);
+    process.env.TRACE_ID = 'trace-1';
+
+    await reconcileMcpForConfig(teamConfig, localConfig);
+    const toml = await fse.readFile(path.join(homeDir, '.codex', 'config.toml'), 'utf-8');
+
+    expect(toml).toContain('url = "https://example.com/mcp"');
+    expect(toml).toContain('bearer_token_env_var = "REMOTE_TOKEN"');
+    expect(toml).toContain('env_http_headers = { "X-Trace" = "TRACE_ID" }');
+    expect(toml).toContain('http_headers = { "X-Team" = "literal-value" }');
+    expect(toml).toContain('startup_timeout_sec = 600');
+    // The point of naming the variable: the value never reaches the file.
+    expect(toml).not.toContain('super-secret-value');
+    expect(toml).not.toContain('trace-1');
+    delete process.env.REMOTE_TOKEN;
+    delete process.env.TRACE_ID;
+  });
+
+  it('resolves a codex placeholder it cannot name, such as one inside the url', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    process.env.REGION = 'eu';
+    await writeMcpYaml(`
+servers:
+  - name: regional
+    transport: http
+    url: https://\${REGION}.example.com/mcp
+    tools: [codex]
+`);
+
+    await reconcileMcpForConfig(teamConfig, localConfig);
+    const toml = await fse.readFile(path.join(homeDir, '.codex', 'config.toml'), 'utf-8');
+    expect(toml).toContain('url = "https://eu.example.com/mcp"');
+    delete process.env.REGION;
+  });
+
+  it('still skips sse for codex, which has no such transport', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    await writeMcpYaml(`
+servers:
+  - name: streamy
+    transport: sse
+    url: https://example.com/sse
     tools: [codex]
 `);
 
     const { changes } = await reconcileMcpForConfig(teamConfig, localConfig);
     expect(changes).toContainEqual(
-      expect.objectContaining({ tool: 'codex', server: 'remote', action: 'skipped' }),
+      expect.objectContaining({ tool: 'codex', server: 'streamy', action: 'skipped' }),
     );
     expect(await fse.pathExists(path.join(homeDir, '.codex', 'config.toml'))).toBe(false);
   });

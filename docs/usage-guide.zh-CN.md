@@ -428,9 +428,11 @@ servers:
 
 tclaude 通过 `customUserDataDir: .tclaude` 重定向了 Claude Code 的用户数据目录，因此它的配置在 `~/.tclaude/.claude.json`，而不是与 `~/.claude.json` 并列。
 
-Codex 把 MCP server 建模为被拉起的进程，因此 `http` / `sse` 类型在 Codex 上会被跳过，而不是写入一份注定在会话启动时失败的配置。
+Codex 支持 `stdio` 与 `http`，但没有 `sse` 传输，因此只有 `sse` 类型在 Codex 上会被跳过，而不是写入一份注定在会话启动时失败的配置。
 
 **密钥**：不要写明文 token，写 `${VAR}`。取值优先来自当前进程环境变量，其次是团队 `env/env.yaml` 通道写入 `~/.teamai/env` 的值。变量无法解析的 server 会被跳过并提示——否则它会在每次会话启动时报错。
+
+只要工具本身能让密钥不落到自己的配置文件里，teamai 就会走那条路。Codex 是记变量名而不是存值：`Authorization: Bearer ${TOKEN}` 会写成 `bearer_token_env_var = "TOKEN"`，其他「整个值就是一个占位符」的 header 会写成 `env_http_headers` 项，token 本身不会进入 `config.toml`。Codex 无法用变量名表达的占位符——嵌在更长字符串里的、或者出现在 URL 里的——仍按常规解析。
 
 **项目级的密钥处理**：项目级配置文件位于仓库内、会被提交，因此在那里解析出真实 token 就等于把密钥写进版本库。Claude Code 自己支持 `${VAR}` 展开，所以 `<project>/.mcp.json` 原样保留占位符，密钥不入 git。其他工具不支持展开，因此在项目级，引用了变量的 server 会对这些工具跳过并给出说明——这类 server 请改用用户级分发。不含密钥的 server 不受影响，照常安装到所有工具。
 

@@ -430,9 +430,11 @@ Where each tool's servers land:
 
 tclaude ships Claude Code with `customUserDataDir: .tclaude`, so its config lives at `~/.tclaude/.claude.json` rather than alongside `~/.claude.json`.
 
-Codex models MCP servers as launched processes, so `http` and `sse` servers are skipped there rather than written as config that would fail at session start.
+Codex takes `stdio` and `http` but has no `sse` transport, so only `sse` servers are skipped there rather than written as config that would fail at session start.
 
 **Secrets.** Write `${VAR}` instead of a literal token. Values resolve from your process environment first, then from the values the team's `env/env.yaml` channel wrote to `~/.teamai/env`. A server with an unresolved variable is skipped with a hint — a server that cannot connect would otherwise fail on every session start.
+
+Where a tool can keep the secret out of its own config file, teamai lets it. Codex names the variable rather than storing its value, so `Authorization: Bearer ${TOKEN}` becomes `bearer_token_env_var = "TOKEN"` and any other whole-value placeholder becomes an `env_http_headers` entry; the token itself never reaches `config.toml`. A placeholder that codex cannot name — one embedded in a longer string, or in the URL — is resolved as usual.
 
 **Secrets in project scope.** Project-scope config files live inside the repo and get committed, so a resolved token there would land in version control. Claude Code expands `${VAR}` itself, so `<project>/.mcp.json` receives the placeholder verbatim and the secret stays out of git. No other tool expands it, so in project scope a server that references a variable is skipped for those tools with an explanatory message; distribute such a server at user scope instead. Servers with no secrets are unaffected and install everywhere.
 

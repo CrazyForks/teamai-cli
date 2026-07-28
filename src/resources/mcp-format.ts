@@ -8,7 +8,7 @@ import type { McpServerDef, McpTransport } from '../types.js';
 //    claude family   { "type": "http", "url", "headers" }
 //    cursor          { "url", "headers" }                     (type omitted)
 //    buddy family    { "transportType": "streamable-http", … } (+ timeout)
-//    codex           [mcp_servers.<name>] TOML table          (stdio only)
+//    codex           [mcp_servers.<name>] TOML table          (stdio + http)
 //
 //  Keeping the differences here — rather than in the reconcile engine — is the
 //  same split agents uses between agent-format.ts and its handler.
@@ -33,10 +33,9 @@ const SUPPORTED_TRANSPORTS: Record<McpFormat, Set<McpTransport>> = {
   claude: new Set<McpTransport>(['stdio', 'http', 'sse']),
   cursor: new Set<McpTransport>(['stdio', 'http', 'sse']),
   buddy: new Set<McpTransport>(['stdio', 'http', 'sse']),
-  // Codex's config.toml models MCP servers as launched processes. Remote
-  // transports are not expressible in a way we can verify, so they are skipped
-  // rather than written as a config that would fail at session start.
-  codex: new Set<McpTransport>(['stdio']),
+  // Codex speaks streamable HTTP (`url` + header keys) as well as stdio, but has
+  // no SSE transport, so only that one is skipped.
+  codex: new Set<McpTransport>(['stdio', 'http']),
 };
 
 export function supportsTransport(format: McpFormat, transport: McpTransport): boolean {
@@ -44,14 +43,64 @@ export function supportsTransport(format: McpFormat, transport: McpTransport): b
 }
 
 /**
- * Whether the target file expands ${VAR} itself. Where it does, the placeholder
- * is written through verbatim and the secret never touches disk.
+ * Whether the target file keeps the secret out of itself, letting the ${VAR} be
+ * written through verbatim rather than resolved onto disk.
  *
- * Claude Code expands env vars in project-scope .mcp.json. Everything else gets
- * a resolved value, written with 0600 permissions.
+ * Two tools manage it, by different means. Claude Code expands env vars in a
+ * project-scope .mcp.json. Codex names the variable instead of holding its value
+ * (`bearer_token_env_var`, `env_http_headers`) — but those fields only name a
+ * variable for a whole header value, so a placeholder embedded in a larger
+ * string, or one in the URL, still has to be resolved.
  */
-export function supportsEnvExpansion(format: McpFormat, projectScope: boolean): boolean {
-  return format === 'claude' && projectScope;
+export function supportsEnvExpansion(
+  format: McpFormat,
+  projectScope: boolean,
+  def?: McpServerDef,
+): boolean {
+  if (format === 'claude' && projectScope) return true;
+  if (format === 'codex' && def?.transport === 'http') return codexCanNameEveryVar(def);
+  return false;
+}
+
+/** `Authorization: Bearer ${VAR}` — codex re-adds the "Bearer " prefix itself. */
+const BEARER_PLACEHOLDER_RE = /^Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+/** A header whose entire value is one placeholder. */
+const WHOLE_PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
+function codexCanNameEveryVar(def: McpServerDef): boolean {
+  if (def.url?.includes('${')) return false;
+  for (const value of Object.values(def.headers ?? {})) {
+    if (!value.includes('${')) continue;
+    if (!BEARER_PLACEHOLDER_RE.test(value) && !WHOLE_PLACEHOLDER_RE.test(value)) return false;
+  }
+  return true;
+}
+
+interface CodexHeaderPlan {
+  bearerTokenEnvVar?: string;
+  envHttpHeaders: Record<string, string>;
+  httpHeaders: Record<string, string>;
+}
+
+/** Split headers across the three fields codex offers for them. */
+export function planCodexHeaders(headers: Record<string, string> = {}): CodexHeaderPlan {
+  const plan: CodexHeaderPlan = { envHttpHeaders: {}, httpHeaders: {} };
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === 'authorization') {
+      const bearer = BEARER_PLACEHOLDER_RE.exec(value);
+      if (bearer) {
+        plan.bearerTokenEnvVar = bearer[1];
+        continue;
+      }
+    }
+    const whole = WHOLE_PLACEHOLDER_RE.exec(value);
+    if (whole) {
+      plan.envHttpHeaders[name] = whole[1];
+      continue;
+    }
+    plan.httpHeaders[name] = value;
+  }
+  return plan;
 }
 
 // ─── Placeholder resolution ──────────────────────────────────
@@ -172,6 +221,25 @@ export function renderJsonEntry(format: Exclude<McpFormat, 'codex'>, def: McpSer
 export function renderCodexBlock(def: McpServerDef): string {
   const q = (s: string): string => JSON.stringify(s);
   const lines = [`[mcp_servers.${def.name}]`];
+
+  if (def.transport === 'http') {
+    const inlineTable = (t: Record<string, string>): string =>
+      `{ ${Object.entries(t).map(([k, v]) => `${q(k)} = ${q(v)}`).join(', ')} }`;
+    lines.push(`url = ${q(def.url ?? '')}`);
+    const plan = planCodexHeaders(def.headers);
+    if (plan.bearerTokenEnvVar) lines.push(`bearer_token_env_var = ${q(plan.bearerTokenEnvVar)}`);
+    if (Object.keys(plan.envHttpHeaders).length > 0) {
+      lines.push(`env_http_headers = ${inlineTable(plan.envHttpHeaders)}`);
+    }
+    if (Object.keys(plan.httpHeaders).length > 0) {
+      lines.push(`http_headers = ${inlineTable(plan.httpHeaders)}`);
+    }
+    if (def.timeout !== undefined) {
+      lines.push(`startup_timeout_sec = ${Math.ceil(def.timeout / 1000)}`);
+    }
+    return lines.join('\n') + '\n';
+  }
+
   lines.push(`command = ${q(def.command ?? '')}`);
   lines.push(`args = [${(def.args ?? []).map(q).join(', ')}]`);
   if (def.timeout !== undefined) {

@@ -341,7 +341,7 @@ export async function reconcileMcpForConfig(
 
       // Pass ${VAR} through where the tool expands it itself, so the secret
       // never lands on disk; otherwise resolve and require every var to exist.
-      const passthrough = supportsEnvExpansion(target.format, target.projectScope);
+      const passthrough = supportsEnvExpansion(target.format, target.projectScope, raw);
       let def = raw;
       if (!passthrough) {
         // A project-scope file lives in the repo and gets committed. Resolving a
