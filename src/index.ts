@@ -70,9 +70,10 @@ program
 
 program
   .command('list [type]')
-  .description('List resources (skills|rules|docs|env). For skills, --source local/all also scans installed AI agent skill directories.')
+  .description('List resources (skills|rules|docs|env|agents|hooks|mcp). For skills, --source local/all also scans installed AI agent skill directories.')
   .option('--source <src>', 'Where to look for skills: repo | local | all', 'all')
   .option('--agent <name>', 'Filter local agents by id (only applies to skills)')
+  .option('--reveal', 'Show env values in plaintext (default: masked)')
   .action(async (type, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { list } = await import('./status.js');
@@ -163,7 +164,7 @@ membersCmd
 
 program
   .command('remove <type> <names...>')
-  .description('Remove resource(s) from team repo and all local AI tools (type: skills|rules)')
+  .description('Remove resource(s) from team repo and all local AI tools (type: skills|rules|agents|mcp)')
   .action(async (type, names) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { remove } = await import('./remove.js');

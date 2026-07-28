@@ -200,12 +200,14 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # 查看状态
 teamai members                      # 查看团队成员
-teamai list                         # 查看团队仓库 + 各 AI agent 已安装的 skills（默认 --source all）
-teamai list --source repo           # 只看团队仓库内容（旧行为）
-teamai list --source local          # 只看每个已安装 agent 下的 skills，按来源标注
-teamai list --agent claude --verbose  # 只看 Claude Code 安装的 skills，含描述
+teamai list                         # 全部资源类型（skills|rules|docs|env|agents|hooks|mcp）+ 本地 skills
+teamai list mcp                     # 只看团队 MCP servers
+teamai list --source repo           # 只看团队仓库
+teamai list --source local          # 各已安装 agent 下的 skills
+teamai list --agent claude --verbose
+teamai list env --reveal            # 明文显示 env（默认脱敏）
 
-teamai skill                        # 列出所有 skill（等价于 teamai list skills --source all）
+teamai skill                        # 等价于 teamai list skills --source all
 teamai skill show hai-deploy-test   # 看单个 skill 的来源 / 贡献者 / 安装位置 / 描述摘要
 ```
 

@@ -202,12 +202,14 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # View status
 teamai members                      # View team members
-teamai list                         # View team repo + skills installed by each AI agent (default --source all)
-teamai list --source repo           # Only view team repo contents (legacy behavior)
-teamai list --source local          # Only view skills under each installed agent, labeled by source
-teamai list --agent claude --verbose  # Only view skills installed by Claude Code, with descriptions
+teamai list                         # All resource types (skills|rules|docs|env|agents|hooks|mcp) + local skills
+teamai list mcp                     # Only team MCP servers
+teamai list --source repo           # Team repo only
+teamai list --source local          # Skills under each installed agent
+teamai list --agent claude --verbose
+teamai list env --reveal            # Show env values in plaintext (default: masked)
 
-teamai skill                        # List all skills (equivalent to teamai list skills --source all)
+teamai skill                        # Equivalent to teamai list skills --source all
 teamai skill show hai-deploy-test   # View a single skill's source / contributor / install locations / description summary
 ```
 
