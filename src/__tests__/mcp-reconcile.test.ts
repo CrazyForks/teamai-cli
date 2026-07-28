@@ -27,6 +27,7 @@ const TOOL_PATHS = {
   cursor: { skills: '.cursor/skills', settings: '.cursor/hooks.json', mcp: '.cursor/mcp.json' },
   codebuddy: { skills: '.codebuddy/skills', settings: '.codebuddy/settings.json', mcp: '.codebuddy/mcp.json' },
   codex: { skills: '.codex/skills', settings: '.codex/hooks.json', mcp: '.codex/config.toml' },
+  tclaude: { skills: '.tclaude/skills', settings: '.tclaude/settings.json', mcp: '.tclaude/.claude.json' },
 };
 
 describe('MCP reconcile', () => {
@@ -203,6 +204,51 @@ servers:
 
     const after = await fse.readJson(path.join(homeDir, '.claude.json'));
     expect(after.mcpServers.temp).toBeUndefined();
+  });
+
+  // tclaude relocates Claude Code's user data dir via customUserDataDir, so its
+  // MCP file is ~/.tclaude/.claude.json — a nested path, not ~/.tclaude.json.
+  it('writes tclaude servers to ~/.tclaude/.claude.json in claude format', async () => {
+    const tclaudeJson = path.join(homeDir, '.tclaude', '.claude.json');
+    await fse.ensureDir(path.join(homeDir, '.tclaude', 'skills'));
+    await fse.writeJson(tclaudeJson, { numStartups: 7, projects: { '/p': { trustLevel: 'trusted' } } });
+
+    await writeMcpYaml(`
+servers:
+  - name: gpu
+    transport: http
+    url: https://example.com/mcp
+    tools: [tclaude]
+`);
+
+    await reconcileMcpForConfig(teamConfig, localConfig);
+
+    const after = await fse.readJson(tclaudeJson);
+    expect(after.mcpServers.gpu).toEqual({ type: 'http', url: 'https://example.com/mcp' });
+    // Pre-existing tclaude state survives.
+    expect(after.numStartups).toBe(7);
+    expect(after.projects).toEqual({ '/p': { trustLevel: 'trusted' } });
+    // The sibling path must not be created by mistake.
+    expect(await fse.pathExists(path.join(homeDir, '.tclaude.json'))).toBe(false);
+  });
+
+  it('detects tclaude as installed from its skills dir, not its MCP file', async () => {
+    // ~/.tclaude exists but .claude.json does not yet — a fresh install.
+    await fse.ensureDir(path.join(homeDir, '.tclaude', 'skills'));
+
+    await writeMcpYaml(`
+servers:
+  - name: gpu
+    transport: http
+    url: https://example.com/mcp
+    tools: [tclaude]
+`);
+
+    const { changes } = await reconcileMcpForConfig(teamConfig, localConfig);
+    expect(changes).toContainEqual(
+      expect.objectContaining({ tool: 'tclaude', server: 'gpu', action: 'added' }),
+    );
+    expect(await fse.pathExists(path.join(homeDir, '.tclaude', '.claude.json'))).toBe(true);
   });
 
   it('skips tools that are not installed', async () => {

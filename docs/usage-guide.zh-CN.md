@@ -421,9 +421,12 @@ servers:
 | 工具 | 用户级 | 项目级 |
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
+| tclaude | `~/.tclaude/.claude.json` | 与 claude 共用 `<project>/.mcp.json` |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | 不支持 |
+
+tclaude 通过 `customUserDataDir: .tclaude` 重定向了 Claude Code 的用户数据目录，因此它的配置在 `~/.tclaude/.claude.json`，而不是与 `~/.claude.json` 并列。
 
 Codex 把 MCP server 建模为被拉起的进程，因此 `http` / `sse` 类型在 Codex 上会被跳过，而不是写入一份注定在会话启动时失败的配置。
 

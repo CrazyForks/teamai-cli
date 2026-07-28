@@ -423,9 +423,12 @@ Where each tool's servers land:
 | Tool | User scope | Project scope |
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
+| tclaude | `~/.tclaude/.claude.json` | shares `<project>/.mcp.json` with claude |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | not supported |
+
+tclaude ships Claude Code with `customUserDataDir: .tclaude`, so its config lives at `~/.tclaude/.claude.json` rather than alongside `~/.claude.json`.
 
 Codex models MCP servers as launched processes, so `http` and `sse` servers are skipped there rather than written as config that would fail at session start.
 
