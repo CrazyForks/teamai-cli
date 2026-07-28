@@ -432,6 +432,10 @@ Codex 把 MCP server 建模为被拉起的进程，因此 `http` / `sse` 类型�
 
 **密钥**：不要写明文 token，写 `${VAR}`。取值优先来自当前进程环境变量，其次是团队 `env/env.yaml` 通道写入 `~/.teamai/env` 的值。变量无法解析的 server 会被跳过并提示——否则它会在每次会话启动时报错。
 
+**项目级的密钥处理**：项目级配置文件位于仓库内、会被提交，因此在那里解析出真实 token 就等于把密钥写进版本库。Claude Code 自己支持 `${VAR}` 展开，所以 `<project>/.mcp.json` 原样保留占位符，密钥不入 git。其他工具不支持展开，因此在项目级，引用了变量的 server 会对这些工具跳过并给出说明——这类 server 请改用用户级分发。不含密钥的 server 不受影响，照常安装到所有工具。
+
+**项目级 server 的批准**：Claude Code 会把来自仓库的 `.mcp.json` 视为不可信，其中的 server 显示为 `⏸ Pending approval`，需要你在交互式 `claude` 会话中确认一次。这是 Claude 自身的安全提示，teamai 不会绕过它。
+
 **安全边界**：teamai 只改写自己装过的那些 server 键，归属记录在 `~/.teamai/managed-mcp.json`。你手动添加的 server 不会被碰；团队 server 与你的重名时会跳过，除非显式加 `--force`。目标文件里的无关内容——Claude 的 OAuth 会话、Codex 的模型设置与注释——逐字节保留。
 
 ```bash

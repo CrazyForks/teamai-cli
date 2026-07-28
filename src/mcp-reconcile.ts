@@ -180,7 +180,12 @@ export async function resolveMcpTargets(
     const format = detectMcpFormat(tool);
     if (!format) continue;
 
-    const rel = projectScope ? (paths.mcpProject ?? paths.mcp) : paths.mcp;
+    // No fallback between scopes: a tool's project-scope location is a
+    // different thing from its user-scope one, not a default for it. Absent
+    // `mcpProject` means the tool has no project-scope MCP support (codex), or
+    // is already covered by a sibling target writing the shared file (tclaude
+    // reads the <root>/.mcp.json that `claude` writes).
+    const rel = projectScope ? paths.mcpProject : paths.mcp;
     if (!rel) continue;
 
     const probe = paths.skills ?? paths.settings ?? paths.agents;
@@ -339,6 +344,21 @@ export async function reconcileMcpForConfig(
       const passthrough = supportsEnvExpansion(target.format, target.projectScope);
       let def = raw;
       if (!passthrough) {
+        // A project-scope file lives in the repo and gets committed. Resolving a
+        // placeholder for a tool that cannot expand ${VAR} would put the secret
+        // into version control, so refuse rather than leak it.
+        const referenced = referencedVars(raw);
+        if (target.projectScope && referenced.length > 0) {
+          changes.push({
+            tool: target.tool,
+            server: raw.name,
+            action: 'skipped',
+            reason:
+              `${target.tool} cannot expand \${VAR}, so ${referenced.join(', ')} would be ` +
+              `written in plaintext to a committed file — distribute this server at user scope instead`,
+          });
+          continue;
+        }
         const { def: resolved, missing } = resolvePlaceholders(raw, vars);
         if (missing.length > 0) {
           changes.push({

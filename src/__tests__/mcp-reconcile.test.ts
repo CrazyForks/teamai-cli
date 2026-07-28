@@ -19,13 +19,13 @@ vi.mock('../utils/logger.js', () => ({
   })),
 }));
 
-import { reconcileMcpForConfig, spliceCodexBlock, codexServerNames } from '../mcp-reconcile.js';
+import { reconcileMcpForConfig, resolveMcpTargets, spliceCodexBlock, codexServerNames } from '../mcp-reconcile.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
 
 const TOOL_PATHS = {
   claude: { skills: '.claude/skills', settings: '.claude/settings.json', mcp: '.claude.json', mcpProject: '.mcp.json' },
-  cursor: { skills: '.cursor/skills', settings: '.cursor/hooks.json', mcp: '.cursor/mcp.json' },
-  codebuddy: { skills: '.codebuddy/skills', settings: '.codebuddy/settings.json', mcp: '.codebuddy/mcp.json' },
+  cursor: { skills: '.cursor/skills', settings: '.cursor/hooks.json', mcp: '.cursor/mcp.json', mcpProject: '.cursor/mcp.json' },
+  codebuddy: { skills: '.codebuddy/skills', settings: '.codebuddy/settings.json', mcp: '.codebuddy/mcp.json', mcpProject: '.codebuddy/mcp.json' },
   codex: { skills: '.codex/skills', settings: '.codex/hooks.json', mcp: '.codex/config.toml' },
   tclaude: { skills: '.tclaude/skills', settings: '.tclaude/settings.json', mcp: '.tclaude/.claude.json' },
 };
@@ -249,6 +249,86 @@ servers:
       expect.objectContaining({ tool: 'tclaude', server: 'gpu', action: 'added' }),
     );
     expect(await fse.pathExists(path.join(homeDir, '.tclaude', '.claude.json'))).toBe(true);
+  });
+
+  // Regression: project scope used to fall back to the user-scope path, which
+  // put files where codex/tclaude would never look for them.
+  it('never falls back to the user-scope path in project scope', async () => {
+    const projectRoot = path.join(tmpDir, 'proj');
+    for (const d of ['.claude', '.cursor', '.codebuddy', '.tclaude', '.codex']) {
+      await fse.ensureDir(path.join(projectRoot, d, 'skills'));
+    }
+    const projectConfig = {
+      ...localConfig,
+      scope: 'project',
+      projectRoot,
+    } as unknown as LocalConfig;
+
+    await writeMcpYaml(`
+servers:
+  - name: s1
+    transport: stdio
+    command: echo
+`);
+
+    const targets = await resolveMcpTargets(teamConfig, projectConfig);
+    const byTool = Object.fromEntries(targets.map((t) => [t.tool, t.file]));
+
+    expect(byTool.claude).toBe(path.join(projectRoot, '.mcp.json'));
+    expect(byTool.cursor).toBe(path.join(projectRoot, '.cursor', 'mcp.json'));
+    expect(byTool.codebuddy).toBe(path.join(projectRoot, '.codebuddy', 'mcp.json'));
+    // No project-scope MCP support: codex has no such concept, and tclaude reads
+    // the <root>/.mcp.json that the claude target already writes.
+    expect(byTool.codex).toBeUndefined();
+    expect(byTool.tclaude).toBeUndefined();
+
+    await reconcileMcpForConfig(teamConfig, projectConfig);
+    expect(await fse.pathExists(path.join(projectRoot, '.codex', 'config.toml'))).toBe(false);
+    expect(await fse.pathExists(path.join(projectRoot, '.tclaude', '.claude.json'))).toBe(false);
+    expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
+  });
+
+  it('refuses to write a secret in plaintext into a committed project file', async () => {
+    const projectRoot = path.join(tmpDir, 'proj2');
+    for (const d of ['.claude', '.cursor']) {
+      await fse.ensureDir(path.join(projectRoot, d, 'skills'));
+    }
+    const projectConfig = { ...localConfig, scope: 'project', projectRoot } as unknown as LocalConfig;
+    process.env.SECRET_TOKEN = 'super-secret-value';
+
+    await writeMcpYaml(`
+servers:
+  - name: with-secret
+    transport: http
+    url: https://example.com/mcp
+    headers:
+      Authorization: Bearer \${SECRET_TOKEN}
+  - name: no-secret
+    transport: http
+    url: https://example.com/open
+`);
+
+    const { changes } = await reconcileMcpForConfig(teamConfig, projectConfig);
+
+    // Claude expands ${VAR} itself, so the placeholder is passed through intact.
+    const claudeDoc = await fse.readJson(path.join(projectRoot, '.mcp.json'));
+    expect(claudeDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
+
+    // Cursor cannot, so the server is dropped rather than resolved to plaintext.
+    const cursorDoc = await fse.readJson(path.join(projectRoot, '.cursor', 'mcp.json'));
+    expect(cursorDoc.mcpServers['with-secret']).toBeUndefined();
+    expect(cursorDoc.mcpServers['no-secret']).toBeDefined();
+
+    const skipped = changes.find((c) => c.tool === 'cursor' && c.server === 'with-secret');
+    expect(skipped?.action).toBe('skipped');
+    expect(skipped?.reason).toMatch(/plaintext/);
+
+    // Belt and braces: the secret must not appear anywhere under the project.
+    for (const f of ['.mcp.json', '.cursor/mcp.json']) {
+      const raw = await fse.readFile(path.join(projectRoot, f), 'utf-8');
+      expect(raw).not.toContain('super-secret-value');
+    }
+    delete process.env.SECRET_TOKEN;
   });
 
   it('skips tools that are not installed', async () => {

@@ -434,6 +434,10 @@ Codex models MCP servers as launched processes, so `http` and `sse` servers are 
 
 **Secrets.** Write `${VAR}` instead of a literal token. Values resolve from your process environment first, then from the values the team's `env/env.yaml` channel wrote to `~/.teamai/env`. A server with an unresolved variable is skipped with a hint — a server that cannot connect would otherwise fail on every session start.
 
+**Secrets in project scope.** Project-scope config files live inside the repo and get committed, so a resolved token there would land in version control. Claude Code expands `${VAR}` itself, so `<project>/.mcp.json` receives the placeholder verbatim and the secret stays out of git. No other tool expands it, so in project scope a server that references a variable is skipped for those tools with an explanatory message; distribute such a server at user scope instead. Servers with no secrets are unaffected and install everywhere.
+
+**Approving project servers.** Claude Code treats a `.mcp.json` arriving from a repo as untrusted and lists its servers as `⏸ Pending approval` until you accept them once in an interactive `claude` session. This is Claude's own prompt, not something teamai suppresses.
+
 **What is safe.** teamai only ever rewrites the specific server keys it installed, tracked in `~/.teamai/managed-mcp.json`. Servers you added by hand are left untouched, and a team server whose name collides with one of yours is skipped unless you pass `--force`. Unrelated content in the target file — your Claude OAuth session, your Codex model settings and comments — is preserved byte for byte.
 
 ```bash
