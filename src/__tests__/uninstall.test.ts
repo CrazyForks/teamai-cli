@@ -390,6 +390,45 @@ describe('uninstall', () => {
     expect(claudeMd).toContain(TEAMAI_RULES_START);
   });
 
+  it('uninstall summary lists teamai-managed MCP servers', async () => {
+    const { homeDir, repoPath, teamaiHome } = await setupFixture(tmpDir);
+    vi.stubEnv('HOME', homeDir);
+    vi.stubEnv('SHELL', '/bin/zsh');
+
+    await fse.writeJson(path.join(teamaiHome, 'managed-mcp.json'), {
+      claude: [{ name: 'gpu-analysis', hash: 'abc' }],
+      cursor: [{ name: 'context7', hash: 'def' }],
+    });
+
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: makeLocalConfig(homeDir, repoPath),
+      teamConfig: makeTeamConfig({
+        toolPaths: {
+          claude: {
+            skills: '.claude/skills',
+            rules: '.claude/rules',
+            settings: '.claude/settings.json',
+            claudemd: '.claude/CLAUDE.md',
+            mcp: '.claude.json',
+          },
+        },
+      }),
+    });
+
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+
+    await uninstall({ dryRun: true, force: true });
+    spy.mockRestore();
+
+    const summary = lines.join('\n');
+    expect(summary).toContain('MCP servers (2):');
+    expect(summary).toContain('claude/gpu-analysis');
+    expect(summary).toContain('cursor/context7');
+  });
+
   it('什么都不存在时正常退出', async () => {
     const homeDir = path.join(tmpDir, 'empty-home');
     const repoPath = path.join(tmpDir, 'empty-repo');
