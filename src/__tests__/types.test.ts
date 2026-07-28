@@ -64,6 +64,7 @@ describe('TeamaiConfigSchema', () => {
       agents: '.codebuddy/agents',
       settings: '.codebuddy/settings.json',
       claudemd: '.codebuddy/CODEBUDDY.md',
+      mcp: '.codebuddy/mcp.json',
     });
   });
 

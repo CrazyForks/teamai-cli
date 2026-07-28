@@ -504,6 +504,41 @@ hooksCmd
     await hooksRemove(globalOpts);
   });
 
+// ─── MCP commands ───────────────────────────────────────
+
+const mcpCmd = program
+  .command('mcp')
+  .description('Manage team MCP servers across AI tools');
+
+mcpCmd
+  .command('list')
+  .description('List team MCP servers and their per-tool install status')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { mcpList } = await import('./mcp-cmd.js');
+    await mcpList(globalOpts);
+  });
+
+mcpCmd
+  .command('inject')
+  .description('Inject team MCP servers into all AI tool configs')
+  .option('--dry-run', 'Show what would change without writing')
+  .option('--force', 'Overwrite servers that collide with user-owned entries')
+  .action(async (cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { mcpInject } = await import('./mcp-cmd.js');
+    await mcpInject({ ...globalOpts, ...cmdOpts });
+  });
+
+mcpCmd
+  .command('remove')
+  .description('Remove all teamai-managed MCP servers from AI tool configs')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { mcpRemove } = await import('./mcp-cmd.js');
+    await mcpRemove(globalOpts);
+  });
+
 // ─── Usage tracking commands ────────────────────────────
 
 program

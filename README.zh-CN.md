@@ -83,6 +83,34 @@ teamai hooks inject    # 重新注入到每个已安装的工具
 teamai hooks remove    # 移除所有 teamai 管理的 hooks
 ```
 
+### 团队 MCP Server
+
+在 `mcp/mcp.yaml` 中声明一次，`teamai pull` 会按各工具的原生格式写入它们各自的 MCP
+配置文件——`~/.claude.json`、`~/.cursor/mcp.json`、`~/.codebuddy/mcp.json`、
+`~/.codex/config.toml`：
+
+```yaml
+servers:
+  - name: gpu-analysis
+    description: GPU 存量与价格查询
+    transport: http            # stdio | http | sse
+    url: https://example.com/api/mcp
+    headers:
+      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
+    timeout: 600000
+```
+
+密钥不入库：只写 `${VAR}`，注入时从环境变量或团队 `env/env.yaml` 通道解析。变量无法
+解析的 server 会被跳过并给出提示，而不是装成一个连不上的残缺配置。
+
+```bash
+teamai mcp list        # 查看 server、密钥状态与安装位置
+teamai mcp inject      # 注入到所有已安装工具（支持 --dry-run、--force）
+teamai mcp remove      # 移除所有 teamai 管理的 server
+```
+
+你自己添加的 server 不会被改动；团队 server 与你的同名时会跳过而非覆盖。
+
 ### 跨团队 Skill 订阅
 
 订阅其他团队的公开 skill 仓库：

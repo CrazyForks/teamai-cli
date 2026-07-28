@@ -83,6 +83,36 @@ teamai hooks inject    # re-reconcile into every installed tool
 teamai hooks remove    # remove all teamai-managed hooks
 ```
 
+### Team MCP Servers
+
+Declare MCP servers once in `mcp/mcp.yaml` and `teamai pull` writes them into each
+tool's own MCP config — `~/.claude.json`, `~/.cursor/mcp.json`, `~/.codebuddy/mcp.json`,
+`~/.codex/config.toml` — in that tool's native format:
+
+```yaml
+servers:
+  - name: gpu-analysis
+    description: GPU inventory and pricing queries
+    transport: http            # stdio | http | sse
+    url: https://example.com/api/mcp
+    headers:
+      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
+    timeout: 600000
+```
+
+Secrets are never committed: write `${VAR}` and the value is resolved at inject time
+from your environment or the team's `env/env.yaml` channel. A server whose variables
+cannot be resolved is skipped with a hint rather than installed in a broken state.
+
+```bash
+teamai mcp list        # servers, secret status, and where they are installed
+teamai mcp inject      # apply to every installed tool (--dry-run, --force)
+teamai mcp remove      # remove all teamai-managed servers
+```
+
+Servers you added yourself are never touched, and a team server that collides with
+one of your names is skipped instead of overwriting it.
+
 ### Cross-team Skill Subscription
 
 Subscribe to other teams' public skill repos:

@@ -394,6 +394,53 @@ teamai push
 
 Place documentation in the team repo's `docs/` directory; after pushing, team members will automatically receive it on their next `pull`.
 
+### MCP servers
+
+Declare each server once in the team repo's `mcp/mcp.yaml`. On `teamai pull` it is written into every installed tool's own MCP config, translated into that tool's native format.
+
+```yaml
+servers:
+  - name: gpu-analysis
+    description: GPU inventory and pricing queries
+    transport: http                      # stdio | http | sse
+    url: https://example.com/api/mcp
+    headers:
+      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
+    timeout: 600000
+
+  - name: local-formatter
+    transport: stdio
+    command: npx
+    args: ['-y', '@acme/formatter-mcp']
+    env:
+      FORMATTER_MODE: strict
+    requires: [npx]                      # skipped with a hint when npx is absent
+    tools: [claude, cursor]              # optional; default is every capable tool
+```
+
+Where each tool's servers land:
+
+| Tool | User scope | Project scope |
+|---|---|---|
+| claude | `~/.claude.json` | `<project>/.mcp.json` |
+| cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
+| codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
+| codex | `~/.codex/config.toml` | not supported |
+
+Codex models MCP servers as launched processes, so `http` and `sse` servers are skipped there rather than written as config that would fail at session start.
+
+**Secrets.** Write `${VAR}` instead of a literal token. Values resolve from your process environment first, then from the values the team's `env/env.yaml` channel wrote to `~/.teamai/env`. A server with an unresolved variable is skipped with a hint — a server that cannot connect would otherwise fail on every session start.
+
+**What is safe.** teamai only ever rewrites the specific server keys it installed, tracked in `~/.teamai/managed-mcp.json`. Servers you added by hand are left untouched, and a team server whose name collides with one of yours is skipped unless you pass `--force`. Unrelated content in the target file — your Claude OAuth session, your Codex model settings and comments — is preserved byte for byte.
+
+```bash
+teamai mcp list              # servers, secret status, and where they are installed
+teamai mcp inject            # apply now; --dry-run to preview, --force to override collisions
+teamai mcp remove            # remove every teamai-managed server
+```
+
+MCP servers are read when a session starts, so changes take effect in your next session.
+
 ---
 
 ## Knowledge Capture & Retrieval

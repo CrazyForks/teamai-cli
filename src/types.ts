@@ -11,6 +11,12 @@ export const ToolPathsSchema = z.object({
   /** Per-tool agents directory (Phase 1: teamai-recall subagent target).
    * Optional — tools without subagent support omit this and agents sync skips them. */
   agents: z.string().optional(),
+  /** User-scope MCP config file (relative to $HOME). Omitted = tool has no MCP support. */
+  mcp: z.string().optional(),
+  /** Project-scope MCP config file, when it differs from `mcp`. Claude Code is the
+   * notable case: user scope is ~/.claude.json but project scope is <root>/.mcp.json,
+   * which breaks the usual `.<tool>/<file>` convention. */
+  mcpProject: z.string().optional(),
 });
 
 // ─── Scope ──────────────────────────────────────────────
@@ -44,6 +50,17 @@ export const SharingConfigSchema = z.object({
   recall: z.object({
     enabled: z.boolean().default(false),
   }).optional(),
+  // Optional (not .default) so existing TeamaiConfig literals stay valid; use
+  // getMcpSharing() for the defaulted view.
+  mcp: z.object({
+    /** Auto-apply team MCP servers during `teamai pull`. When false, pull only
+     *  hints; the user must run `teamai mcp inject` to apply (explicit consent). */
+    autoApply: z.boolean().default(true),
+    /** Allowed stdio commands. Empty = no restriction. */
+    allowedCommands: z.array(z.string()).default([]),
+    /** Allowed http/sse hosts (supports a leading `*.` wildcard). Empty = no restriction. */
+    allowedHosts: z.array(z.string()).default([]),
+  }).optional(),
 });
 
 /** Defaulted view of the optional `sharing.hooks` config. */
@@ -55,6 +72,18 @@ export function getHooksSharing(config: { sharing?: { hooks?: { autoApply?: bool
   return {
     autoApply: h?.autoApply ?? true,
     requireTeamScripts: h?.requireTeamScripts ?? false,
+  };
+}
+
+/** Defaulted view of the optional `sharing.mcp` config. */
+export function getMcpSharing(config: {
+  sharing?: { mcp?: { autoApply?: boolean; allowedCommands?: string[]; allowedHosts?: string[] } };
+}): { autoApply: boolean; allowedCommands: string[]; allowedHosts: string[] } {
+  const m = config.sharing?.mcp;
+  return {
+    autoApply: m?.autoApply ?? true,
+    allowedCommands: m?.allowedCommands ?? [],
+    allowedHosts: m?.allowedHosts ?? [],
   };
 }
 
@@ -133,17 +162,20 @@ export const TeamaiConfigSchema = z.object({
    * can override via `updatePolicy` in local config. Undefined = team has no
    * opinion (preserves legacy behavior). */
   autoUpdate: z.boolean().optional(),
+  // MCP paths are only set for tools whose config location has been verified.
+  // Tools left without `mcp` are skipped by MCP sync rather than guessed at, so a
+  // wrong guess can never create a junk config file on a user's machine.
   toolPaths: z.record(z.string(), ToolPathsSchema).default({
-    claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents' },
-    codex: { skills: '.codex/skills', rules: '.codex/rules', settings: '.codex/hooks.json', agents: '.codex/agents' },
+    claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents', mcp: '.claude.json', mcpProject: '.mcp.json' },
+    codex: { skills: '.codex/skills', rules: '.codex/rules', settings: '.codex/hooks.json', agents: '.codex/agents', mcp: '.codex/config.toml' },
     'codex-internal': { skills: '.codex-internal/skills', rules: '.codex-internal/rules', settings: '.codex-internal/hooks.json', agents: '.codex-internal/agents' },
     'claude-internal': { skills: '.claude-internal/skills', rules: '.claude-internal/rules', settings: '.claude-internal/settings.json', claudemd: '.claude-internal/CLAUDE.md', agents: '.claude-internal/agents' },
     tclaude: { skills: '.tclaude/skills', rules: '.tclaude/rules', settings: '.tclaude/settings.json', claudemd: '.tclaude/CLAUDE.md', agents: '.tclaude/agents' },
     tcodex: { skills: '.tcodex/skills', rules: '.tcodex/rules', settings: '.tcodex/hooks.json', agents: '.tcodex/agents' },
-    cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json', agents: '.cursor/agents' },
-    codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents' },
+    cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json', agents: '.cursor/agents', mcp: '.cursor/mcp.json' },
+    codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents', mcp: '.codebuddy/mcp.json' },
     openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules' },
-    workbuddy: { skills: '.workbuddy/skills', rules: '.workbuddy/rules', settings: '.workbuddy/settings.json', claudemd: 'AGENTS.md' },
+    workbuddy: { skills: '.workbuddy/skills', rules: '.workbuddy/rules', settings: '.workbuddy/settings.json', claudemd: 'AGENTS.md', mcp: '.workbuddy/mcp.json' },
   }),
 });
 
@@ -230,7 +262,7 @@ export interface TagsConfig {
 
 // ─── Resource types ─────────────────────────────────────
 
-export type ResourceType = 'skills' | 'rules' | 'docs' | 'env' | 'agents' | 'hooks';
+export type ResourceType = 'skills' | 'rules' | 'docs' | 'env' | 'agents' | 'hooks' | 'mcp';
 
 export type ResourceItemStatus = 'new' | 'modified';
 
@@ -278,6 +310,56 @@ export interface HookDef {
   tools?: string[];
 }
 
+// ─── MCP server definitions ──────────────────────────────
+//
+//  Team-declared MCP servers (mcp/mcp.yaml) are parsed into this tool-neutral
+//  model, then rendered per tool by resources/mcp-format.ts — the same
+//  "intermediate model → per-tool render" shape agents already uses.
+//
+//  Ownership is tracked out-of-band in ~/.teamai/managed-mcp.json, because an
+//  MCP entry has no free-text field to stamp a marker into (hooks stamp
+//  `[teamai:hook:<id>]` into `description`). This mirrors how hooks already
+//  track Cursor/Codex entries, which have no description either.
+
+export type McpTransport = 'stdio' | 'http' | 'sse';
+
+export interface McpServerDef {
+  /** Server key as written into each tool's config. */
+  name: string;
+  description?: string;
+  transport: McpTransport;
+  /** stdio only. */
+  command?: string;
+  args?: string[];
+  /** http/sse only. */
+  url?: string;
+  /** http/sse only. Values may contain ${VAR} placeholders. */
+  headers?: Record<string, string>;
+  /** Env vars passed to the server process. Values may contain ${VAR} placeholders. */
+  env?: Record<string, string>;
+  /** Request timeout in milliseconds, passed through where the tool supports it. */
+  timeout?: number;
+  /** Executables that must be on PATH; missing ones cause a skip-with-hint. */
+  requires?: string[];
+  /** Restrict to these tools (default = every MCP-capable tool). */
+  tools?: string[];
+}
+
+/** One injected MCP server recorded in the manifest. */
+export interface ManagedMcpRecord {
+  name: string;
+  /** sha1 (first 16 hex) of the rendered entry; drives idempotent rewrites. */
+  hash: string;
+}
+
+/** ~/.teamai/managed-mcp.json — team MCP servers injected per tool+scope key. */
+export type ManagedMcpManifest = Record<string, ManagedMcpRecord[]>;
+
+/** Path of the managed-MCP manifest for a scope. */
+export function managedMcpManifestPath(scope: Scope, projectRoot?: string): string {
+  return path.join(getTeamaiHome(scope, projectRoot), 'managed-mcp.json');
+}
+
 // ─── Global options ─────────────────────────────────────
 
 export interface GlobalOptions {
@@ -302,7 +384,7 @@ export const TEAMAI_STATE_PATH = `${TEAMAI_HOME}/state.json`;
 export const TEAMAI_TOKEN_PATH = `${TEAMAI_HOME}/token`;
 export const TEAMAI_UPDATE_LOCK_PATH = `${TEAMAI_HOME}/.update-lock`;
 
-export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'agents', 'hooks'];
+export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'agents', 'hooks', 'mcp'];
 
 export const TEAMAI_RULES_START = '<!-- [teamai:rules:start] -->';
 export const TEAMAI_RULES_END = '<!-- [teamai:rules:end] -->';

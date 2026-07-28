@@ -392,6 +392,53 @@ teamai push
 
 将文档放入团队仓库 `docs/` 目录，push 后团队成员 pull 时自动同步。
 
+### MCP Server
+
+在团队仓库的 `mcp/mcp.yaml` 中声明一次，`teamai pull` 时会按各工具的原生格式写入它们各自的 MCP 配置文件。
+
+```yaml
+servers:
+  - name: gpu-analysis
+    description: GPU 存量与价格查询
+    transport: http                      # stdio | http | sse
+    url: https://example.com/api/mcp
+    headers:
+      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
+    timeout: 600000
+
+  - name: local-formatter
+    transport: stdio
+    command: npx
+    args: ['-y', '@acme/formatter-mcp']
+    env:
+      FORMATTER_MODE: strict
+    requires: [npx]                      # npx 不存在时跳过并提示
+    tools: [claude, cursor]              # 可选；默认所有支持 MCP 的工具
+```
+
+各工具的落点：
+
+| 工具 | 用户级 | 项目级 |
+|---|---|---|
+| claude | `~/.claude.json` | `<project>/.mcp.json` |
+| cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
+| codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
+| codex | `~/.codex/config.toml` | 不支持 |
+
+Codex 把 MCP server 建模为被拉起的进程，因此 `http` / `sse` 类型在 Codex 上会被跳过，而不是写入一份注定在会话启动时失败的配置。
+
+**密钥**：不要写明文 token，写 `${VAR}`。取值优先来自当前进程环境变量，其次是团队 `env/env.yaml` 通道写入 `~/.teamai/env` 的值。变量无法解析的 server 会被跳过并提示——否则它会在每次会话启动时报错。
+
+**安全边界**：teamai 只改写自己装过的那些 server 键，归属记录在 `~/.teamai/managed-mcp.json`。你手动添加的 server 不会被碰；团队 server 与你的重名时会跳过，除非显式加 `--force`。目标文件里的无关内容——Claude 的 OAuth 会话、Codex 的模型设置与注释——逐字节保留。
+
+```bash
+teamai mcp list              # 查看 server、密钥状态与安装位置
+teamai mcp inject            # 立即注入；--dry-run 预览，--force 覆盖同名
+teamai mcp remove            # 移除所有 teamai 管理的 server
+```
+
+MCP server 在会话启动时读取，因此变更在你的下一个会话生效。
+
 ---
 
 ## 知识沉淀与检索
