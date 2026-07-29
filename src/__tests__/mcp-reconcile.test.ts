@@ -288,7 +288,7 @@ servers:
     expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
   });
 
-  it('refuses to write a secret in plaintext into a committed project file', async () => {
+  it('resolves a secret into a project file for tools that cannot expand ${VAR}', async () => {
     const projectRoot = path.join(tmpDir, 'proj2');
     for (const d of ['.claude', '.cursor']) {
       await fse.ensureDir(path.join(projectRoot, d, 'skills'));
@@ -313,21 +313,17 @@ servers:
     // Claude expands ${VAR} itself, so the placeholder is passed through intact.
     const claudeDoc = await fse.readJson(path.join(projectRoot, '.mcp.json'));
     expect(claudeDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
+    const claudeRaw = await fse.readFile(path.join(projectRoot, '.mcp.json'), 'utf-8');
+    expect(claudeRaw).not.toContain('super-secret-value');
 
-    // Cursor cannot, so the server is dropped rather than resolved to plaintext.
+    // Cursor cannot expand ${VAR}, so the value is resolved and written verbatim.
     const cursorDoc = await fse.readJson(path.join(projectRoot, '.cursor', 'mcp.json'));
-    expect(cursorDoc.mcpServers['with-secret']).toBeUndefined();
+    expect(cursorDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer super-secret-value');
     expect(cursorDoc.mcpServers['no-secret']).toBeDefined();
 
-    const skipped = changes.find((c) => c.tool === 'cursor' && c.server === 'with-secret');
-    expect(skipped?.action).toBe('skipped');
-    expect(skipped?.reason).toMatch(/plaintext/);
+    const added = changes.find((c) => c.tool === 'cursor' && c.server === 'with-secret');
+    expect(added?.action).toBe('added');
 
-    // Belt and braces: the secret must not appear anywhere under the project.
-    for (const f of ['.mcp.json', '.cursor/mcp.json']) {
-      const raw = await fse.readFile(path.join(projectRoot, f), 'utf-8');
-      expect(raw).not.toContain('super-secret-value');
-    }
     delete process.env.SECRET_TOKEN;
   });
 

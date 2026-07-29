@@ -341,24 +341,12 @@ export async function reconcileMcpForConfig(
 
       // Pass ${VAR} through where the tool expands it itself, so the secret
       // never lands on disk; otherwise resolve and require every var to exist.
+      // A resolved value is written verbatim into the target file, including
+      // project-scope files that get committed — the team has opted into that
+      // by declaring the server with a ${VAR} a tool cannot expand itself.
       const passthrough = supportsEnvExpansion(target.format, target.projectScope, raw);
       let def = raw;
       if (!passthrough) {
-        // A project-scope file lives in the repo and gets committed. Resolving a
-        // placeholder for a tool that cannot expand ${VAR} would put the secret
-        // into version control, so refuse rather than leak it.
-        const referenced = referencedVars(raw);
-        if (target.projectScope && referenced.length > 0) {
-          changes.push({
-            tool: target.tool,
-            server: raw.name,
-            action: 'skipped',
-            reason:
-              `${target.tool} cannot expand \${VAR}, so ${referenced.join(', ')} would be ` +
-              `written in plaintext to a committed file — distribute this server at user scope instead`,
-          });
-          continue;
-        }
         const { def: resolved, missing } = resolvePlaceholders(raw, vars);
         if (missing.length > 0) {
           changes.push({

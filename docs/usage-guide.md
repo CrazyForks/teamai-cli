@@ -433,7 +433,9 @@ Codex supports `stdio` and `http`; `sse` is skipped. Ownership is tracked in `~/
 
 **Secrets.** Write `${VAR}`, never a literal. Values resolve from the environment, then from `env/env.yaml` → `~/.teamai/env`. Unresolved variables skip the server with a hint.
 
-Where the tool can keep secrets off disk, teamai does: Claude project `.mcp.json` keeps the placeholder (Claude expands it); Codex writes `bearer_token_env_var` / `env_http_headers` (variable name only). Elsewhere the value is resolved into a `0600` file. In project scope, tools that cannot expand `${VAR}` skip secret-bearing servers instead of writing plaintext into a committed file.
+Where the tool can keep secrets off disk, teamai does: Claude project `.mcp.json` keeps the placeholder (Claude expands it); Codex writes `bearer_token_env_var` / `env_http_headers` (variable name only). Everywhere else the value is resolved and written verbatim into the target file (new files are created `0600`).
+
+> ⚠️ In **project scope**, tools that cannot expand `${VAR}` (Cursor, CodeBuddy) get the resolved value written into their config file — which lives in the repo and is typically committed. Add `.cursor/mcp.json` / `.codebuddy/mcp.json` to `.gitignore`, or distribute secret-bearing servers at **user scope**, if you do not want the secret in version control.
 
 Claude Code may show project `.mcp.json` servers as pending approval until you accept them once in an interactive session.
 

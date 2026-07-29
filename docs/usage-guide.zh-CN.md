@@ -431,7 +431,9 @@ Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。归属记录在 `~/.teama
 
 **密钥**：写 `${VAR}`，不要写明文。取值优先来自环境变量，其次是 `env/env.yaml` → `~/.teamai/env`。变量无法解析则跳过并提示。
 
-能让密钥不落盘的工具会走那条路：Claude 项目级 `.mcp.json` 保留占位符（由 Claude 展开）；Codex 写 `bearer_token_env_var` / `env_http_headers`（只记变量名）。其余情况解析后写入 `0600` 文件。项目级下，不支持 `${VAR}` 展开的工具会跳过带密钥的 server，避免明文进 git。
+能让密钥不落盘的工具会走那条路：Claude 项目级 `.mcp.json` 保留占位符（由 Claude 展开）；Codex 写 `bearer_token_env_var` / `env_http_headers`（只记变量名）。其余情况会把取值解析后原样写入目标文件（新建文件权限为 `0600`）。
+
+> ⚠️ 在**项目级**下，不支持 `${VAR}` 展开的工具（Cursor、CodeBuddy）会把解析后的密钥明文写入其配置文件——该文件位于仓库内且通常会被提交。若不希望密钥进入版本控制，请把 `.cursor/mcp.json` / `.codebuddy/mcp.json` 加入 `.gitignore`，或改用**用户级**下发带密钥的 server。
 
 Claude Code 可能把来自仓库的 `.mcp.json` 标为待批准，需在交互式会话中确认一次。
 
