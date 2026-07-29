@@ -46,28 +46,19 @@ export function supportsTransport(format: McpFormat, transport: McpTransport): b
  * Whether the target file keeps the secret out of itself, letting the ${VAR} be
  * written through verbatim rather than resolved onto disk.
  *
- * Each tool manages it by different means:
- *   claude    expands env vars, but only in a project-scope .mcp.json.
- *   cursor    interpolates ${env:NAME} anywhere, in every scope — the renderer
- *             rewrites our ${NAME} into that syntax.
- *   codebuddy the CLI would expand a bare ${NAME}, but the IDE runs as a GUI app
- *             that never inherits the user's shell exports, so the placeholder
- *             resolves to empty and the server 401s. We resolve to plaintext
- *             instead so the token is present regardless of how the tool starts.
- *   codex     names the variable instead of holding its value
- *             (`bearer_token_env_var`, `env_http_headers`) — but those fields
- *             only name a variable for a whole header value, so a placeholder
- *             embedded in a larger string, or one in the URL, still has to be
- *             resolved.
+ * Always false: teamai resolves every secret to plaintext before writing it.
+ * Env-var passthrough was tried per tool, but each tool expands variables under
+ * different, fragile conditions — most decisively, IDEs launched from the GUI
+ * never inherit the user's shell exports, so a ${VAR} placeholder resolves to
+ * empty and the server 401s. Resolving to plaintext makes the token present no
+ * matter how the tool is started, at the cost of the value landing on disk (new
+ * files are created 0600; users should gitignore project-scope MCP configs).
  */
 export function supportsEnvExpansion(
-  format: McpFormat,
-  projectScope: boolean,
-  def?: McpServerDef,
+  _format: McpFormat,
+  _projectScope: boolean,
+  _def?: McpServerDef,
 ): boolean {
-  if (format === 'claude') return projectScope;
-  if (format === 'cursor') return true;
-  if (format === 'codex' && def?.transport === 'http') return codexCanNameEveryVar(def);
   return false;
 }
 
@@ -75,15 +66,6 @@ export function supportsEnvExpansion(
 const BEARER_PLACEHOLDER_RE = /^Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 /** A header whose entire value is one placeholder. */
 const WHOLE_PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
-
-function codexCanNameEveryVar(def: McpServerDef): boolean {
-  if (def.url?.includes('${')) return false;
-  for (const value of Object.values(def.headers ?? {})) {
-    if (!value.includes('${')) continue;
-    if (!BEARER_PLACEHOLDER_RE.test(value) && !WHOLE_PLACEHOLDER_RE.test(value)) return false;
-  }
-  return true;
-}
 
 interface CodexHeaderPlan {
   bearerTokenEnvVar?: string;
