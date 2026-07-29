@@ -154,6 +154,8 @@ servers:
   });
 
   it('skips a server whose ${VAR} cannot be resolved instead of injecting it broken', async () => {
+    // Scoped to claude at user scope — the target that resolves ${VAR} onto disk.
+    // Tools that pass placeholders through (cursor/codebuddy) never reach this path.
     await writeMcpYaml(`
 servers:
   - name: needs-token
@@ -161,6 +163,7 @@ servers:
     url: https://example.com/mcp
     headers:
       Authorization: Bearer \${DEFINITELY_UNSET_TOKEN_XYZ}
+    tools: [claude]
 `);
 
     const { changes } = await reconcileMcpForConfig(teamConfig, localConfig);
@@ -288,9 +291,9 @@ servers:
     expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
   });
 
-  it('resolves a secret into a project file for tools that cannot expand ${VAR}', async () => {
+  it('passes a secret placeholder through to a project file, in each tool\'s own syntax', async () => {
     const projectRoot = path.join(tmpDir, 'proj2');
-    for (const d of ['.claude', '.cursor']) {
+    for (const d of ['.claude', '.cursor', '.codebuddy']) {
       await fse.ensureDir(path.join(projectRoot, d, 'skills'));
     }
     const projectConfig = { ...localConfig, scope: 'project', projectRoot } as unknown as LocalConfig;
@@ -308,21 +311,29 @@ servers:
     url: https://example.com/open
 `);
 
-    const { changes } = await reconcileMcpForConfig(teamConfig, projectConfig);
+    await reconcileMcpForConfig(teamConfig, projectConfig);
 
     // Claude expands ${VAR} itself, so the placeholder is passed through intact.
     const claudeDoc = await fse.readJson(path.join(projectRoot, '.mcp.json'));
     expect(claudeDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
-    const claudeRaw = await fse.readFile(path.join(projectRoot, '.mcp.json'), 'utf-8');
-    expect(claudeRaw).not.toContain('super-secret-value');
 
-    // Cursor cannot expand ${VAR}, so the value is resolved and written verbatim.
+    // CodeBuddy interpolates the bare ${VAR}, so the placeholder survives unchanged
+    // and the transport is keyed off `type` (not the ignored `transportType`).
+    const buddyDoc = await fse.readJson(path.join(projectRoot, '.codebuddy', 'mcp.json'));
+    expect(buddyDoc.mcpServers['with-secret'].type).toBe('http');
+    expect(buddyDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
+
+    // Cursor interpolates ${env:NAME}, so the placeholder is rewritten into that syntax.
     const cursorDoc = await fse.readJson(path.join(projectRoot, '.cursor', 'mcp.json'));
-    expect(cursorDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer super-secret-value');
+    expect(cursorDoc.mcpServers['with-secret'].type).toBe('http');
+    expect(cursorDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${env:SECRET_TOKEN}');
     expect(cursorDoc.mcpServers['no-secret']).toBeDefined();
 
-    const added = changes.find((c) => c.tool === 'cursor' && c.server === 'with-secret');
-    expect(added?.action).toBe('added');
+    // No plaintext secret is ever written to any project file.
+    for (const f of ['.mcp.json', '.cursor/mcp.json', '.codebuddy/mcp.json']) {
+      const raw = await fse.readFile(path.join(projectRoot, f), 'utf-8');
+      expect(raw).not.toContain('super-secret-value');
+    }
 
     delete process.env.SECRET_TOKEN;
   });

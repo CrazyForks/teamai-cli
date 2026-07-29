@@ -431,9 +431,18 @@ Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。归属记录在 `~/.teama
 
 **密钥**：写 `${VAR}`，不要写明文。取值优先来自环境变量，其次是 `env/env.yaml` → `~/.teamai/env`。变量无法解析则跳过并提示。
 
-能让密钥不落盘的工具会走那条路：Claude 项目级 `.mcp.json` 保留占位符（由 Claude 展开）；Codex 写 `bearer_token_env_var` / `env_http_headers`（只记变量名）。其余情况会把取值解析后原样写入目标文件（新建文件权限为 `0600`）。
+对于自身能展开环境变量的工具，teamai 让密钥不落盘，只写入占位符，且使用该工具各自的语法：
 
-> ⚠️ 在**项目级**下，不支持 `${VAR}` 展开的工具（Cursor、CodeBuddy）会把解析后的密钥明文写入其配置文件——该文件位于仓库内且通常会被提交。若不希望密钥进入版本控制，请把 `.cursor/mcp.json` / `.codebuddy/mcp.json` 加入 `.gitignore`，或改用**用户级**下发带密钥的 server。
+| 工具 | 落盘内容 |
+|---|---|
+| Claude（项目级 `.mcp.json`） | `${VAR}` |
+| CodeBuddy | `${VAR}` |
+| Cursor | `${env:VAR}` |
+| Codex | `bearer_token_env_var` / `env_http_headers`（只记变量名） |
+
+其余情况——用户级的 Claude,或 Codex 无法用「整个 header 一个变量」表达的占位符——会把取值解析后原样写入目标文件(新建文件权限为 `0600`)。
+
+> ⚠️ 只有上述回退情况才会把解析后的密钥明文落盘。Cursor 与 CodeBuddy 现在在所有 scope 下都保留占位符,因此即便 `.cursor/mcp.json` / `.codebuddy/mcp.json` 被提交,里面记的也是变量名而非取值——读取方仍需在自己的环境中设置 `${VAR}`。
 
 Claude Code 可能把来自仓库的 `.mcp.json` 标为待批准，需在交互式会话中确认一次。
 
