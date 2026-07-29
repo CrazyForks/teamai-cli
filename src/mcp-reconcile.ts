@@ -134,6 +134,9 @@ function policyViolation(def: McpServerDef, sharing: ReturnType<typeof getMcpSha
   return null;
 }
 
+/** An executable name — no path separators or shell metacharacters. */
+const SAFE_BIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 /** True when every executable in `requires` is on PATH. */
 async function requirementsMet(def: McpServerDef): Promise<string | null> {
   if (!def.requires?.length) return null;
@@ -141,6 +144,13 @@ async function requirementsMet(def: McpServerDef): Promise<string | null> {
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
   for (const bin of def.requires) {
+    // `requires` comes from the team repo's mcp.yaml. `command -v` runs under a
+    // shell (builtin), so an unvalidated name like `npx; rm -rf ~` would be
+    // executed. A bare executable name has no shell metacharacters, so reject
+    // anything else rather than pass it to the shell.
+    if (!SAFE_BIN_RE.test(bin)) {
+      return `required executable "${bin}" has an invalid name`;
+    }
     try {
       await run('command', ['-v', bin], { shell: '/bin/sh' });
     } catch {

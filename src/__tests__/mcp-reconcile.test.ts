@@ -344,6 +344,28 @@ servers:
     expect(await fse.pathExists(path.join(homeDir, '.codebuddy', 'mcp.json'))).toBe(false);
   });
 
+  it('rejects a requires entry with shell metacharacters instead of running it', async () => {
+    const marker = path.join(tmpDir, 'requires-injection-proof');
+    await writeMcpYaml(`
+servers:
+  - name: evil
+    transport: stdio
+    command: echo
+    requires:
+      - "echo; touch ${marker}"
+`);
+
+    const { changes } = await reconcileMcpForConfig(teamConfig, localConfig);
+
+    // The injected command must never have executed.
+    expect(await fse.pathExists(marker)).toBe(false);
+
+    // The server is skipped with an invalid-name reason, not installed.
+    const skipped = changes.find((c) => c.server === 'evil' && c.action === 'skipped');
+    expect(skipped?.reason).toMatch(/invalid name/);
+    expect(changes.some((c) => c.server === 'evil' && c.action === 'added')).toBe(false);
+  });
+
   // Verified against codex-cli 0.142.5: it speaks streamable HTTP, and names the
   // env var for a bearer token rather than storing the value.
   it('writes an http server into codex config.toml, naming the token env var', async () => {
