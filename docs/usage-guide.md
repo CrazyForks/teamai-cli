@@ -431,20 +431,11 @@ Where each tool's servers land:
 
 Codex supports `stdio` and `http`; `sse` is skipped. Ownership is tracked in `~/.teamai/managed-mcp.json` — hand-added servers are left alone; name collisions skip unless `--force`.
 
-**Secrets.** Write `${VAR}`, never a literal. Values resolve from the environment, then from `env/env.yaml` → `~/.teamai/env`. Unresolved variables skip the server with a hint.
+**Secrets.** Write `${VAR}`, never a literal, in `mcp.yaml`. Values resolve from the environment, then from `env/env.yaml` → `~/.teamai/env`. Unresolved variables skip the server with a hint.
 
-Where the tool can expand env vars itself, teamai keeps the secret off disk and writes only the placeholder, in that tool's own syntax:
+teamai **resolves every `${VAR}` to its value and writes it verbatim** into each tool's config (new files are created `0600`). It does not rely on any tool's own env-var expansion: that expansion is fragile — most decisively, IDEs launched from the GUI (Dock/Launchpad) never inherit your shell's exported variables, so a `${VAR}` placeholder expands to empty and the server 401s. Resolving to plaintext makes the token present no matter how the tool is started.
 
-| tool | on disk |
-|---|---|
-| Claude (project `.mcp.json`) | `${VAR}` |
-| Cursor | `${env:VAR}` |
-| Codex | `bearer_token_env_var` / `env_http_headers` (variable name only) |
-| CodeBuddy | resolved to plaintext (see below) |
-
-Everywhere else — Claude at **user** scope, CodeBuddy, or any placeholder Codex cannot express as a whole-header variable — the value is resolved and written verbatim into the target file (new files are created `0600`).
-
-> ⚠️ **CodeBuddy is resolved to plaintext on purpose.** Its IDE runs as a GUI app that never inherits your shell's exported variables, so a `${VAR}` placeholder would expand to empty and the server would 401. teamai therefore writes the resolved token into `.codebuddy/mcp.json`. Do not commit that file — add it to `.gitignore`. Cursor and Claude keep the placeholder in every scope, so a committed `.cursor/mcp.json` / `.mcp.json` carries the variable name, not the value.
+> ⚠️ **The resolved token lands on disk.** Project-scope MCP configs (`.mcp.json`, `.cursor/mcp.json`, `.codebuddy/mcp.json`, `.codex/config.toml`) then contain the literal secret — add them to `.gitignore` and never commit them.
 
 Claude Code may show project `.mcp.json` servers as pending approval until you accept them once in an interactive session.
 
