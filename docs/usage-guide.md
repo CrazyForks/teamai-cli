@@ -438,13 +438,13 @@ Where the tool can expand env vars itself, teamai keeps the secret off disk and 
 | tool | on disk |
 |---|---|
 | Claude (project `.mcp.json`) | `${VAR}` |
-| CodeBuddy | `${VAR}` |
 | Cursor | `${env:VAR}` |
 | Codex | `bearer_token_env_var` / `env_http_headers` (variable name only) |
+| CodeBuddy | resolved to plaintext (see below) |
 
-Everywhere else — Claude at **user** scope, or any placeholder Codex cannot express as a whole-header variable — the value is resolved and written verbatim into the target file (new files are created `0600`).
+Everywhere else — Claude at **user** scope, CodeBuddy, or any placeholder Codex cannot express as a whole-header variable — the value is resolved and written verbatim into the target file (new files are created `0600`).
 
-> ⚠️ A resolved (literal) secret only lands on disk in the fallback cases above. Cursor and CodeBuddy now keep the placeholder in every scope, so a committed `.cursor/mcp.json` / `.codebuddy/mcp.json` carries the variable name, not the value — the reader still needs `${VAR}` set in their environment.
+> ⚠️ **CodeBuddy is resolved to plaintext on purpose.** Its IDE runs as a GUI app that never inherits your shell's exported variables, so a `${VAR}` placeholder would expand to empty and the server would 401. teamai therefore writes the resolved token into `.codebuddy/mcp.json`. Do not commit that file — add it to `.gitignore`. Cursor and Claude keep the placeholder in every scope, so a committed `.cursor/mcp.json` / `.mcp.json` carries the variable name, not the value.
 
 Claude Code may show project `.mcp.json` servers as pending approval until you accept them once in an interactive session.
 

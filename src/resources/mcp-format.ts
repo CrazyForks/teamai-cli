@@ -50,7 +50,10 @@ export function supportsTransport(format: McpFormat, transport: McpTransport): b
  *   claude    expands env vars, but only in a project-scope .mcp.json.
  *   cursor    interpolates ${env:NAME} anywhere, in every scope — the renderer
  *             rewrites our ${NAME} into that syntax.
- *   codebuddy interpolates the bare ${NAME} anywhere, in every scope.
+ *   codebuddy the CLI would expand a bare ${NAME}, but the IDE runs as a GUI app
+ *             that never inherits the user's shell exports, so the placeholder
+ *             resolves to empty and the server 401s. We resolve to plaintext
+ *             instead so the token is present regardless of how the tool starts.
  *   codex     names the variable instead of holding its value
  *             (`bearer_token_env_var`, `env_http_headers`) — but those fields
  *             only name a variable for a whole header value, so a placeholder
@@ -63,7 +66,7 @@ export function supportsEnvExpansion(
   def?: McpServerDef,
 ): boolean {
   if (format === 'claude') return projectScope;
-  if (format === 'cursor' || format === 'buddy') return true;
+  if (format === 'cursor') return true;
   if (format === 'codex' && def?.transport === 'http') return codexCanNameEveryVar(def);
   return false;
 }

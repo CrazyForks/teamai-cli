@@ -155,7 +155,7 @@ servers:
 
   it('skips a server whose ${VAR} cannot be resolved instead of injecting it broken', async () => {
     // Scoped to claude at user scope — the target that resolves ${VAR} onto disk.
-    // Tools that pass placeholders through (cursor/codebuddy) never reach this path.
+    // Cursor passes placeholders through in its own syntax and never reaches this path.
     await writeMcpYaml(`
 servers:
   - name: needs-token
@@ -291,7 +291,7 @@ servers:
     expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
   });
 
-  it('passes a secret placeholder through to a project file, in each tool\'s own syntax', async () => {
+  it('writes a project secret in each tool\'s own form: placeholder for claude/cursor, plaintext for codebuddy', async () => {
     const projectRoot = path.join(tmpDir, 'proj2');
     for (const d of ['.claude', '.cursor', '.codebuddy']) {
       await fse.ensureDir(path.join(projectRoot, d, 'skills'));
@@ -317,11 +317,13 @@ servers:
     const claudeDoc = await fse.readJson(path.join(projectRoot, '.mcp.json'));
     expect(claudeDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
 
-    // CodeBuddy interpolates the bare ${VAR}, so the placeholder survives unchanged
-    // and the transport is keyed off `type` (not the ignored `transportType`).
+    // CodeBuddy's IDE is a GUI app that never inherits the user's shell exports,
+    // so a ${VAR} placeholder resolves to empty and 401s. We resolve to plaintext
+    // instead — the token is present regardless of how the tool is launched. The
+    // transport is keyed off `type` (not the ignored `transportType`).
     const buddyDoc = await fse.readJson(path.join(projectRoot, '.codebuddy', 'mcp.json'));
     expect(buddyDoc.mcpServers['with-secret'].type).toBe('http');
-    expect(buddyDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${SECRET_TOKEN}');
+    expect(buddyDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer super-secret-value');
 
     // Cursor interpolates ${env:NAME}, so the placeholder is rewritten into that syntax.
     const cursorDoc = await fse.readJson(path.join(projectRoot, '.cursor', 'mcp.json'));
@@ -329,8 +331,9 @@ servers:
     expect(cursorDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer ${env:SECRET_TOKEN}');
     expect(cursorDoc.mcpServers['no-secret']).toBeDefined();
 
-    // No plaintext secret is ever written to any project file.
-    for (const f of ['.mcp.json', '.cursor/mcp.json', '.codebuddy/mcp.json']) {
+    // Claude and cursor keep the secret off disk; codebuddy is the deliberate
+    // exception, so it is excluded from the no-plaintext check.
+    for (const f of ['.mcp.json', '.cursor/mcp.json']) {
       const raw = await fse.readFile(path.join(projectRoot, f), 'utf-8');
       expect(raw).not.toContain('super-secret-value');
     }
