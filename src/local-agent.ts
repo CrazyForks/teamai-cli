@@ -909,8 +909,14 @@ export async function bindWorkspaceToProject(
 async function ensureWorkspaceBinding(
   config: LocalAgentConfig,
   workspacePath: string,
+  sessionId?: string,
 ): Promise<void> {
   if (config.workspaceBindings[workspacePath]) return;
+
+  const markerKey = sessionId || `ppid-${process.ppid}`;
+  const hintMarker = path.join(os.tmpdir(), `teamai-bind-session-${markerKey}`);
+  if (fs.existsSync(hintMarker)) return;
+  try { fs.writeFileSync(hintMarker, ''); } catch {}
 
   let projects: LocalAgentProject[];
   try {
@@ -966,11 +972,13 @@ function isBindPromptEnabled(): boolean {
 async function emitBindingHint(
   config: LocalAgentConfig,
   workspacePath: string,
+  sessionId?: string,
 ): Promise<void> {
   if (config.workspaceBindings[workspacePath]) return;
 
-  // Only hint once per session — use a temp marker file
-  const hintMarker = path.join(os.tmpdir(), `teamai-bind-hint-${process.ppid}`);
+  // Only hint once per session — use a temp marker file keyed by sessionId
+  const markerKey = sessionId || `ppid-${process.ppid}`;
+  const hintMarker = path.join(os.tmpdir(), `teamai-bind-hint-${markerKey}`);
   if (fs.existsSync(hintMarker)) return;
   try { fs.writeFileSync(hintMarker, ''); } catch {}
 
@@ -1008,9 +1016,17 @@ async function emitBindingHint(
   process.stdout.write(hookOutput + '\n');
 }
 
+function isEphemeralTaskDir(dir: string): boolean {
+  const segments = dir.split(path.sep);
+  const wbIdx = segments.lastIndexOf('WorkBuddy');
+  if (wbIdx < 0 || wbIdx >= segments.length - 1) return false;
+  return /^\d{4}-\d{2}-\d{2}/.test(segments[wbIdx + 1]);
+}
+
 async function resolveWorkspacePath(cwd?: string): Promise<string | undefined> {
   if (!cwd) return undefined;
   const absolute = path.resolve(cwd);
+  if (isEphemeralTaskDir(absolute)) return undefined;
   try {
     const { stdout } = await execFileAsync('git', ['-C', absolute, 'rev-parse', '--show-toplevel']);
     const root = stdout.trim();
@@ -2012,11 +2028,12 @@ export async function reportAndSyncLocalAgent(context: LocalAgentContext): Promi
   if (isBindPromptEnabled()) {
     const workspacePath = await resolveWorkspacePath(context.cwd);
     if (workspacePath) {
+      const sid = context.event?.sessionId;
       if (context.event?.type === 'session_start') {
-        await ensureWorkspaceBinding(config, workspacePath);
+        await ensureWorkspaceBinding(config, workspacePath, sid);
       }
       if (context.event?.type === 'prompt_submit') {
-        await emitBindingHint(config, workspacePath);
+        await emitBindingHint(config, workspacePath, sid);
       }
     }
   }

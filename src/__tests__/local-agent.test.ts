@@ -19,6 +19,8 @@ let tmpDir: string;
 let origHome: string | undefined;
 let origPpid: number;
 
+const TEST_SESSION_ID = 'test-session';
+
 beforeEach(async () => {
   tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-la-test-'));
   origHome = process.env.HOME;
@@ -26,16 +28,16 @@ beforeEach(async () => {
   origPpid = process.ppid;
   // Bind prompt is on by default — start each test from that baseline.
   delete process.env.TEAMAI_BIND_PROMPT_ENABLED;
-  // Clean hint markers
-  const markerPath = path.join(os.tmpdir(), `teamai-bind-hint-${process.ppid}`);
-  await fse.remove(markerPath);
+  // Clean hint markers (both old ppid-based and new sessionId-based)
+  await fse.remove(path.join(os.tmpdir(), `teamai-bind-hint-${TEST_SESSION_ID}`));
+  await fse.remove(path.join(os.tmpdir(), `teamai-bind-session-${TEST_SESSION_ID}`));
 });
 
 afterEach(async () => {
   process.env.HOME = origHome;
   delete process.env.TEAMAI_BIND_PROMPT_ENABLED;
-  const markerPath = path.join(os.tmpdir(), `teamai-bind-hint-${origPpid}`);
-  await fse.remove(markerPath);
+  await fse.remove(path.join(os.tmpdir(), `teamai-bind-hint-${TEST_SESSION_ID}`));
+  await fse.remove(path.join(os.tmpdir(), `teamai-bind-session-${TEST_SESSION_ID}`));
   await fse.remove(tmpDir);
   vi.restoreAllMocks();
 });
@@ -339,6 +341,92 @@ describe('local-agent: emitBindingHint via reportAndSyncLocalAgent', () => {
 
     const output = stdoutChunks.join('');
     expect(output).not.toContain('hookSpecificOutput');
+  });
+
+  it('does NOT emit hint for WorkBuddy ephemeral task directories', async () => {
+    process.env.TEAMAI_BIND_PROMPT_ENABLED = '1';
+    await setupConfig();
+
+    // Create a WorkBuddy ephemeral task directory (not a git repo)
+    const ephemeralDir = path.join(tmpDir, 'WorkBuddy', '2026-07-31-16-04-39');
+    await fse.ensureDir(ephemeralDir);
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/projects/mine')) {
+        return new Response(JSON.stringify({ ok: true, projects: [{ id: 1, name: 'proj' }] }));
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stdoutChunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: string | Buffer) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+      await reportAndSyncLocalAgent({
+        cwd: ephemeralDir,
+        tool: 'workbuddy',
+        event: { type: 'prompt_submit', timestamp: new Date().toISOString(), sessionId: TEST_SESSION_ID, tool: 'workbuddy' },
+      });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    const output = stdoutChunks.join('');
+    expect(output).not.toContain('hookSpecificOutput');
+    expect(output).not.toContain('ClawPro项目 绑定提示');
+  });
+
+  it('emits hint only once per sessionId', async () => {
+    process.env.TEAMAI_BIND_PROMPT_ENABLED = '1';
+    await setupConfig();
+    const projectDir = path.join(tmpDir, 'dedup-project');
+    await fse.ensureDir(projectDir);
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/projects/mine')) {
+        return new Response(JSON.stringify({ ok: true, projects: [{ id: 1, name: 'proj' }] }));
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const allOutput: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: string | Buffer) => {
+      allOutput.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+      const makeEvent = () => ({
+        type: 'prompt_submit' as const,
+        timestamp: new Date().toISOString(),
+        sessionId: TEST_SESSION_ID,
+        tool: 'claude',
+      });
+
+      // First call — should emit hint
+      await reportAndSyncLocalAgent({ cwd: projectDir, tool: 'claude', event: makeEvent() });
+      const firstOutput = allOutput.join('');
+      expect(firstOutput).toContain('ClawPro项目 绑定提示');
+
+      // Second call with same sessionId — should NOT emit hint
+      allOutput.length = 0;
+      await reportAndSyncLocalAgent({ cwd: projectDir, tool: 'claude', event: makeEvent() });
+      const secondOutput = allOutput.join('');
+      expect(secondOutput).not.toContain('ClawPro项目 绑定提示');
+    } finally {
+      process.stdout.write = origWrite;
+    }
   });
 });
 
