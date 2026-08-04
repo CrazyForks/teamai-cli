@@ -79,6 +79,45 @@ export async function getHeadRev(localPath: string): Promise<string> {
   return git.revparse(['--short', 'HEAD']);
 }
 
+/**
+ * Normalize a git remote URL to HTTPS format.
+ * SSH `git@host:path` → `https://host/path.git`; HTTPS returned as-is.
+ */
+export function normalizeRemoteUrl(url: string): string | null {
+  if (!url) return null;
+  const ssh = url.match(/^git@([^:]+):(.+?)(?:\.git)?\s*$/);
+  if (ssh) {
+    return `https://${ssh[1]}/${ssh[2]}.git`;
+  }
+  if (/^https?:\/\/.+/.test(url)) {
+    return url.trim().replace(/\/$/, '');
+  }
+  return null;
+}
+
+/**
+ * Get the HTTPS URL of the 'origin' remote for the repo at basePath.
+ * Falls back to the first available remote if no 'origin' exists.
+ * Returns null for non-git directories or repos with no remotes.
+ */
+export async function getCwdGitRemoteUrl(basePath: string): Promise<string | null> {
+  try {
+    await fse.access(basePath);
+  } catch {
+    return null;
+  }
+  const git = createGit(basePath);
+  try {
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find((r) => r.name === 'origin');
+    const target = origin ?? remotes[0];
+    if (!target) return null;
+    return normalizeRemoteUrl(target.refs.fetch);
+  } catch {
+    return null;
+  }
+}
+
 export async function pullRepo(localPath: string): Promise<string> {
   const git = createGit(localPath);
   const result = await git.pull();

@@ -1,10 +1,10 @@
 import path from 'node:path';
 import fse from 'fs-extra';
 import matter from 'gray-matter';
-import { requireInit, loadState, saveState, detectProjectConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from './config.js';
-import { pullRepo, getHeadRev } from './utils/git.js';
+import { requireInit, loadState, saveState, detectProjectConfig, loadProjectDeclaration, loadLocalConfigForScope, loadTeamConfig, saveLocalConfigForScope, loadStateForScope, saveStateForScope } from './config.js';
+import { pullRepo, getHeadRev, configureGitUser } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
-import { pathExists, remove, listFiles, listDirs, readFileSafe } from './utils/fs.js';
+import { pathExists, remove, listFiles, listDirs, readFileSafe, ensureDir, writeFile } from './utils/fs.js';
 import { injectClaudeMdSection } from './utils/claudemd.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
 import { ResourceHandler } from './resources/base.js';
@@ -22,6 +22,8 @@ import {
   CultureFrontmatterSchema,
   resolveBaseDir,
   getTeamaiHome,
+  getConfigPath,
+  getProjectDeclarationPath,
   isRecallEnabled,
   isAgentDisabled,
 } from './types.js';
@@ -1087,6 +1089,114 @@ async function autoMigrateHooksIfNeeded(): Promise<void> {
  * before. Cross-team source skills are always pulled, against whichever scope
  * is active.
  */
+
+/**
+ * Auto-bootstrap a project-scope teamai install from .teamai/project.yaml.
+ *
+ * Triggered when project.yaml exists (committed by whoever ran `teamai init .`)
+ * but config.yaml does NOT exist (clone-after state on a new machine).
+ *
+ * Runs non-interactively (inside the 4.5s session-start hook timeout).
+ * Any failure logs a warning and returns — pull continues normally.
+ */
+async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
+  const declPath = getProjectDeclarationPath(cwd);
+  const configPath = getConfigPath('project', cwd);
+
+  if (!await pathExists(declPath)) return;
+  if (await pathExists(configPath)) return;
+
+  if (cwd === process.env.HOME) {
+    log.debug('[bootstrap] cwd is $HOME — skipping project bootstrap');
+    return;
+  }
+
+  const decl = await loadProjectDeclaration(cwd);
+  if (!decl) {
+    log.debug('[bootstrap] .teamai/project.yaml found but could not be parsed — skipping');
+    return;
+  }
+
+  log.info('[teamai] Project config detected — bootstrapping...');
+
+  try {
+    const { detectProvider, getProvider } = await import('./providers/index.js');
+    const providerName = detectProvider(decl.repo);
+    const provider = getProvider(providerName);
+
+    await provider.ensureInstalled();
+
+    let username: string;
+    try {
+      username = await provider.authenticate();
+    } catch (e) {
+      log.warn(`[bootstrap] Auth failed: ${(e as Error).message}. Run 'teamai init .' manually.`);
+      return;
+    }
+
+    const teamaiHome = getTeamaiHome('project', cwd);
+    const localPath = path.join(teamaiHome, 'team-repo');
+
+    if (!await pathExists(localPath)) {
+      await ensureDir(teamaiHome);
+      try {
+        const repoInfo = provider.parseRepoInput(decl.repo);
+        provider.cloneRepo(`${repoInfo.owner}/${repoInfo.repo}`, localPath);
+      } catch (e) {
+        log.warn(`[bootstrap] Clone failed: ${(e as Error).message}. Run 'teamai init .' manually.`);
+        return;
+      }
+    }
+
+    const emailDomain = provider.getDefaultEmailDomain() ?? undefined;
+    await configureGitUser(localPath, username, username, undefined, emailDomain);
+
+    const localConfig: LocalConfig = {
+      repo: { localPath, remote: decl.repo },
+      username,
+      scope: 'project',
+      projectRoot: cwd,
+      primaryRole: decl.defaultRole,
+      additionalRoles: [],
+    };
+
+    await saveLocalConfigForScope(localConfig, 'project', cwd);
+
+    const gitignorePath = path.join(teamaiHome, '.gitignore');
+    if (!await pathExists(gitignorePath)) {
+      const gitignoreContent = [
+        '# teamai local config (do not commit)',
+        '# NOTE: project.yaml is intentionally NOT listed — it is the portable bootstrap file',
+        'config.yaml',
+        'state.json',
+        'token',
+        '.update-lock',
+        'env',
+        'env.sh',
+        'sessions/',
+        'dashboard/',
+        'usage.jsonl',
+        'known-skills.json',
+        'learnings/',
+        'search-index.json',
+        'votes/',
+        '',
+      ].join('\n');
+      await writeFile(gitignorePath, gitignoreContent);
+    }
+
+    const teamConfig = await loadTeamConfig(localPath);
+    if (teamConfig) {
+      const { reconcileTeamHooksForConfig } = await import('./hooks.js');
+      await reconcileTeamHooksForConfig(teamConfig, localConfig);
+    }
+
+    log.success('[teamai] Bootstrap complete — skills, rules, and docs will sync now.');
+  } catch (e) {
+    log.warn(`[bootstrap] Failed: ${(e as Error).message}. Run 'teamai init .' manually.`);
+  }
+}
+
 export async function pull(options: GlobalOptions): Promise<void> {
   // 0. Auto-migrate hooks if settings.json has old format (pre-dispatch era).
   //    This runs on the first session start after a CLI update — the new binary
@@ -1095,6 +1205,14 @@ export async function pull(options: GlobalOptions): Promise<void> {
     await autoMigrateHooksIfNeeded();
   } catch {
     // Non-fatal — pull continues even if hook migration fails
+  }
+
+  // 0.5. Auto-bootstrap: if .teamai/project.yaml exists but config.yaml doesn't,
+  //      the user just cloned a repo with teamai configured. Bootstrap silently.
+  try {
+    await autoBootstrapIfNeeded(process.cwd());
+  } catch {
+    // Non-fatal — pull continues if bootstrap fails
   }
 
   // 1. Detect project scope first. Its presence decides whether user scope is
