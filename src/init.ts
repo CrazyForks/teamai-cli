@@ -8,7 +8,7 @@ import { pushRepoDirectly } from './utils/git.js';
 import { getProvider, detectProvider, RepoNotFoundError } from './providers/index.js';
 import { ensureDir, writeFile, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
-import { TEAMAI_HOME, type GlobalOptions, type LocalConfig, type Scope, getTeamaiHome, getConfigPath, getProjectDeclarationPath } from './types.js';
+import { TEAMAI_HOME, type GlobalOptions, type LocalConfig, type Scope, getTeamaiHome, getConfigPath, getProjectDeclarationPath, PROJECT_GITIGNORE_ENTRIES } from './types.js';
 import { describeRoles, loadRolesManifest } from './roles.js';
 import { askQuestion, askConfirmation, closePrompt } from './utils/prompt.js';
 
@@ -690,28 +690,9 @@ export async function init(options: GlobalOptions & {
     log.success(`Local config saved to ${teamaiHome}/config.yaml`);
 
     // Generate .gitignore for project scope to prevent local config from being committed
-    // NOTE: project.yaml is intentionally NOT listed — it is the bootstrap file for teammates
     const gitignorePath = path.join(teamaiHome, '.gitignore');
     if (!await pathExists(gitignorePath)) {
-      const gitignoreContent = [
-        '# teamai local config (do not commit)',
-        '# NOTE: project.yaml is intentionally NOT listed — it is the portable bootstrap file',
-        'config.yaml',
-        'state.json',
-        'token',
-        '.update-lock',
-        'env',
-        'env.sh',
-        'sessions/',
-        'dashboard/',
-        'usage.jsonl',
-        'known-skills.json',
-        'learnings/',
-        'search-index.json',
-        'votes/',
-        '',
-      ].join('\n');
-      await writeFile(gitignorePath, gitignoreContent);
+      await writeFile(gitignorePath, PROJECT_GITIGNORE_ENTRIES.join('\n'));
       log.debug('Generated .teamai/.gitignore for project scope');
     }
 

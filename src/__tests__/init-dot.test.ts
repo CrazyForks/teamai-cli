@@ -232,6 +232,13 @@ describe('ProjectDeclarationSchema', () => {
     expect(result.defaultRole).toBeUndefined();
   });
 
+  it('rejects scope other than project', () => {
+    expect(() => ProjectDeclarationSchema.parse({
+      repo: 'https://github.com/org/repo.git',
+      scope: 'user',
+    })).toThrow();
+  });
+
   it('rejects empty repo', () => {
     expect(() => ProjectDeclarationSchema.parse({ repo: '' })).toThrow();
   });

@@ -17,7 +17,7 @@ import {
   getStatePath,
   getProjectDeclarationPath,
 } from './types.js';
-import { readFileSafe, readJson, writeFile, writeJson, expandHome, pathExists } from './utils/fs.js';
+import { readFileSafe, readJson, writeFile, writeJson, expandHome, pathExists, ensureDir } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import { loadRolesManifest } from './roles.js';
 
@@ -236,6 +236,7 @@ export async function saveProjectDeclaration(
   projectRoot: string,
 ): Promise<void> {
   const declPath = getProjectDeclarationPath(projectRoot);
+  await ensureDir(path.dirname(declPath));
   await writeFile(declPath, YAML.stringify(decl));
 }
 

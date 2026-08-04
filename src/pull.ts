@@ -24,6 +24,7 @@ import {
   getTeamaiHome,
   getConfigPath,
   getProjectDeclarationPath,
+  PROJECT_GITIGNORE_ENTRIES,
   isRecallEnabled,
   isAgentDisabled,
 } from './types.js';
@@ -1164,25 +1165,7 @@ async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
 
     const gitignorePath = path.join(teamaiHome, '.gitignore');
     if (!await pathExists(gitignorePath)) {
-      const gitignoreContent = [
-        '# teamai local config (do not commit)',
-        '# NOTE: project.yaml is intentionally NOT listed — it is the portable bootstrap file',
-        'config.yaml',
-        'state.json',
-        'token',
-        '.update-lock',
-        'env',
-        'env.sh',
-        'sessions/',
-        'dashboard/',
-        'usage.jsonl',
-        'known-skills.json',
-        'learnings/',
-        'search-index.json',
-        'votes/',
-        '',
-      ].join('\n');
-      await writeFile(gitignorePath, gitignoreContent);
+      await writeFile(gitignorePath, PROJECT_GITIGNORE_ENTRIES.join('\n'));
     }
 
     const teamConfig = await loadTeamConfig(localPath);
