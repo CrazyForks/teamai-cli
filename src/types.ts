@@ -1034,6 +1034,7 @@ export const PROJECT_GITIGNORE_ENTRIES = [
   '# NOTE: project.yaml is intentionally NOT listed — it is the portable bootstrap file',
   'config.yaml',
   'state.json',
+  'team-repo/',
   'token',
   '.update-lock',
   'env',

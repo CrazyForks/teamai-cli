@@ -65,8 +65,12 @@ describe('normalizeRemoteUrl', () => {
     expect(normalizeRemoteUrl('https://github.com/org/repo.git')).toBe('https://github.com/org/repo.git');
   });
 
-  it('trims trailing slash from HTTPS', () => {
-    expect(normalizeRemoteUrl('https://github.com/org/repo/')).toBe('https://github.com/org/repo');
+  it('appends .git to HTTPS without suffix', () => {
+    expect(normalizeRemoteUrl('https://github.com/org/repo')).toBe('https://github.com/org/repo.git');
+  });
+
+  it('trims trailing slash and appends .git', () => {
+    expect(normalizeRemoteUrl('https://github.com/org/repo/')).toBe('https://github.com/org/repo.git');
   });
 
   it('returns null for empty string', () => {

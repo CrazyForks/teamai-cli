@@ -80,8 +80,8 @@ export async function getHeadRev(localPath: string): Promise<string> {
 }
 
 /**
- * Normalize a git remote URL to HTTPS format.
- * SSH `git@host:path` → `https://host/path.git`; HTTPS returned as-is.
+ * Normalize a git remote URL to HTTPS format with a consistent .git suffix.
+ * SSH `git@host:path` → `https://host/path.git`; HTTPS gets .git appended if missing.
  */
 export function normalizeRemoteUrl(url: string): string | null {
   if (!url) return null;
@@ -90,7 +90,11 @@ export function normalizeRemoteUrl(url: string): string | null {
     return `https://${ssh[1]}/${ssh[2]}.git`;
   }
   if (/^https?:\/\/.+/.test(url)) {
-    return url.trim().replace(/\/$/, '');
+    let normalized = url.trim().replace(/\/$/, '');
+    if (!normalized.endsWith('.git')) {
+      normalized += '.git';
+    }
+    return normalized;
   }
   return null;
 }
