@@ -13,9 +13,10 @@
 - [Core Concepts](#core-concepts)
 - [Installation](#installation)
 - [Admin Initialization](#admin-initialization)
-  - [User Scope](#user-scope)
   - [Project Scope](#project-scope)
+  - [User Scope](#user-scope)
   - [How to Choose a Scope?](#how-to-choose-a-scope)
+  - [Layer an organization repo under a project repo](#layer-an-organization-repo-under-a-project-repo)
 - [Member Onboarding](#member-onboarding)
 - [Day-to-Day Use](#day-to-day-use)
 - [Sharing Team Resources](#sharing-team-resources)
@@ -33,7 +34,7 @@
 | Concept | Description |
 |------|------|
 | **Team Repo** | A Git repository that centrally stores a team's shared Skills / Rules / Docs / Env resources |
-| **Scope** | Where resources are installed: `user` (home directory, default) or `project` (project directory) |
+| **Scope** | Where resources are installed: `project` (current project, default) or `user` (home directory) |
 | **Skills** | Custom skills the AI can invoke (a directory containing a `SKILL.md`) |
 | **Rules** | Markdown-formatted team conventions, automatically merged into AI tool configs |
 | **Docs** | Shared team documentation for the AI to reference |
@@ -118,6 +119,8 @@ teamai init <group>/TeamAi-<team> --scope project --role hai_dev --force
 |------|------|
 | `[repo\|.]` / `--repo <url>` | Team repo URL (positional preferred; `--repo` is a permanent alias). Pass `.` to auto-detect cwd's git remote (implies `--scope project`) |
 | `--scope <project\|user>` | Install scope, defaults to `project` (`<cwd>/.teamai`). Use `user` for `~/` |
+| `--inherit-user-scope` | Project scope only: also sync safe user resources and search user knowledge |
+| `--no-inherit-user-scope` | Disable previously configured user-scope inheritance for this project |
 | `--role <id>` | Directly specify the primary role, skipping the interactive role prompt |
 | `--force` | Overwrite existing config, skipping confirmation prompts |
 
@@ -130,6 +133,7 @@ repo:
 username: alice
 scope: project
 projectRoot: /path/to/my-project
+inheritUserScope: true            # optional; project scope only
 primaryRole: hai
 additionalRoles:
   - pm
@@ -164,9 +168,24 @@ Resulting directory structure:
 |------|-------------------|---------------|
 | **Install location** | Under the project directory | Under `~/` |
 | **Best for** | Project-specific skills and rules | General team conventions, cross-project skills |
-| **Can coexist** | ✅ Yes, both scopes can be active at once | ✅ Yes, both scopes can be active at once |
+| **Can coexist** | ✅ Yes; project stays active and can opt into safe user resources | ✅ Yes; remains a separate home-level install |
 
 > **Local install location** is decided only by `teamai init`'s `--scope` (default `project`). A `scope` field in remote `teamai.yaml`, if present, is ignored.
+
+### Layer an organization repo under a project repo
+
+Use two Team Repos when some knowledge is organization-wide and other resources are project-specific. The CLI is installed only once, but each scope has its own local config and repository clone:
+
+```bash
+# Once per developer: organization-wide skills, rules, docs, agents, and learnings
+teamai init https://github.com/yourorg/engineering-practices --scope user
+
+# In a Java project: project resources stay active and recall prefers them
+cd /path/to/java-service
+teamai init https://github.com/yourorg/java-service-teamai --inherit-user-scope
+```
+
+With inheritance enabled, `teamai pull` refreshes user `skills`, `rules`, `docs`, `agents`, shared instructions/culture, and the user search index in their home-level locations, then refreshes the project scope in the project directory. User `env`, hooks, MCP definitions, cross-team sources, usage reporting, and remote repository writes are not inherited. The two configs and repositories remain separate; this feature composes their safe read paths rather than merging Git repositories or files. Installed resources with the same name remain in separate user/project paths, so the AI tool decides runtime precedence; Recall separately guarantees that a project entry shadows the same user resource type and filename.
 
 ---
 
@@ -194,6 +213,11 @@ cd <project-repo>
 # Start any AI session — teamai auto-detects project.yaml, clones team-repo,
 # writes local config, and injects hooks. Skills/rules sync immediately.
 ```
+
+Auto-bootstrap runs inside the session-start hook, so it never launches an
+interactive login. If your git provider (e.g. `gh`) is not yet authenticated,
+it prints a hint and skips — run `teamai init .` once to complete the login,
+and subsequent sessions bootstrap automatically.
 
 **User-scoped teams:**
 
@@ -246,7 +270,7 @@ teamai pull              # Manual pull
 teamai pull --dry-run    # Dry run, no actual changes
 ```
 
-> If you have both a user scope and a project scope, `pull` will pull resources for both scopes in sequence, without conflicts.
+> Project scope is isolated by default. When the current working directory contains a project-scope `.teamai/config.yaml`, `pull` processes that project and skips user scope unless the local config has `inheritUserScope: true`; in that case it first refreshes the safe user-resource channel. Without a project config in the current directory, `pull` processes user scope. User `env`, hooks, MCP definitions, sources, reporting, and writes remain isolated in project mode.
 
 With role-based skills enabled, `pull`'s skill sync source becomes the contents of `skills/<namespace>/`, expanded according to `primaryRole + additionalRoles` and flattened into each local AI tool's skills directory. `rules/`, `docs/`, and `learnings/` keep their original global sync behavior.
 
@@ -473,10 +497,14 @@ teamai mcp remove            # remove every teamai-managed server
 The AI tracks your coding sessions via Hooks. When a session ends (the Stop hook), the system scores it by **friction** — whether you interrupted or corrected the AI, denied a tool call, or the AI had to retry failing tools. A long-but-routine session (many tool calls, no friction) won't trigger; only a session where you actually hit a problem does. If it qualifies, the AI automatically reminds you:
 
 ```
-Recommend running /teamai-share-learnings to share your learnings
+[teamai] This session may contain a problem worth documenting: you interrupted the AI twice, the AI retried failing tools 8 times.
+
+Task: Fix duplicate project-level Hook injection
+
+Consider running /teamai-share-learnings to summarize what you learned and share it with your team.
 ```
 
-Using the built-in `/teamai-share-learnings` skill, the AI will automatically summarize the session's learnings and contribute them to the team knowledge base. Each session is prompted at most once.
+The reminder lists the non-zero friction signals that triggered it. When the first task is available, it also includes a redacted, single-line task summary so you can decide whether the session is worth sharing. Using the built-in `/teamai-share-learnings` skill, the AI will automatically summarize the session's learnings and contribute them to the team knowledge base. Each session is prompted at most once.
 
 You can also specify a file manually:
 
@@ -493,8 +521,9 @@ teamai recall "GPU out of memory"
 ```
 
 - Supports mixed-language search
-- Automatically merges the knowledge bases of both user + project scope, labeling results `[user]`/`[project]` by source
-- Consulted knowledge is automatically upvoted, surfacing high-quality docs to the top
+- Searches the project scope when the current working directory contains its config; with `inheritUserScope: true`, searches project first and user second, labeling results `[project]`/`[user]`. Otherwise searches user scope
+- For the same resource type and filename, the project entry wins; different resource types with the same filename remain separate
+- Consulted active-scope knowledge is automatically upvoted. Inherited user hits remain read-only while the project is active
 - A lightweight relevance precheck is available via `teamai recall --check "<keywords>"`, which prints `RELEVANT score=<n>` or `NOT_RELEVANT score=<n>` without reading files or upvoting — the recall subagent uses it to skip retrieval on unrelated tasks
 
 ### Enabling / Disabling Recall
@@ -993,6 +1022,7 @@ username: your-name
 updatePolicy: auto
 scope: project                 # project (default from init) or user
 projectRoot: /path/to/project  # project scope only
+inheritUserScope: true         # optional; project scope only, defaults to false
 ```
 
 ---
@@ -1044,7 +1074,7 @@ teamai pull
 
 **Q: Can user scope and project scope coexist?**
 
-Yes. `pull` pulls both scopes in sequence, and `recall` merges search results across both scopes' knowledge bases. They don't conflict with each other.
+Yes, but project scope remains isolated by default. When the current working directory contains a project-scope config, it is active and user scope is skipped. Initialize user scope first, then initialize the project with `--inherit-user-scope` (or set `inheritUserScope: true` in the project's local config) to compose safe resources and Recall results. Executable and control-plane configuration remains project-only.
 
 **Q: `teamai init` says it's already initialized?**
 

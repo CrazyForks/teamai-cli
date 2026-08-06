@@ -2,7 +2,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import matter from 'gray-matter';
 import { requireInit, loadState, saveState, detectProjectConfig, loadProjectDeclaration, loadLocalConfigForScope, loadTeamConfig, saveLocalConfigForScope, loadStateForScope, saveStateForScope } from './config.js';
-import { pullRepo, getHeadRev, configureGitUser } from './utils/git.js';
+import { pullRepo, getHeadRev, configureGitUser, resolveRealPath } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
 import { pathExists, remove, listFiles, listDirs, readFileSafe, ensureDir, writeFile } from './utils/fs.js';
 import { injectClaudeMdSection } from './utils/claudemd.js';
@@ -275,8 +275,13 @@ function logSyncDetail(
 async function pullForScope(
   localConfig: LocalConfig,
   options: GlobalOptions,
+  policy: {
+    resourceTypes?: readonly ResourceType[];
+    revisionField?: 'lastPullRev' | 'lastInheritedPullRev';
+  } = {},
 ): Promise<void> {
   const scopeLabel = localConfig.scope;
+  const revisionField = policy.revisionField ?? 'lastPullRev';
   const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
   if (!teamConfig) {
     log.warn(`[${scopeLabel}] Team config (teamai.yaml) not found. Skipping.`);
@@ -304,7 +309,7 @@ async function pullForScope(
   if (!options.force && !options.dryRun) {
     try {
       const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
-      if (currentRev && state.lastPullRev && state.lastPullRev === currentRev) {
+      if (currentRev && state[revisionField] && state[revisionField] === currentRev) {
         log.success(`[${scopeLabel}] Already synced at ${currentRev}, skipping`);
         // 即使 repo 未变化，仍部署 CLI 内置资源（确保 CLI 升级后新版本 agent/rules 生效）
         if (!options.dryRun) {
@@ -349,7 +354,8 @@ async function pullForScope(
   const excludedSkills = new Set(localConfig.excludedSkills ?? []);
 
   // Step 2: Sync each resource type
-  const resourceTypes: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'agents'];
+  const resourceTypes: readonly ResourceType[] = policy.resourceTypes
+    ?? ['skills', 'rules', 'docs', 'env', 'agents'];
   let totalSynced = 0;
   let desiredSkillNames: Set<string> | null = null;
   let knownRepoSkillNames: Set<string> | null = null;
@@ -567,21 +573,6 @@ async function pullForScope(
 
   if (totalSynced === 0) {
     log.info(`[${scopeLabel}] No resources to sync`);
-  } else if (!options.dryRun) {
-    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
-    state.lastPull = new Date().toISOString();
-    if (currentRev !== null) {
-      // HTTP mode: server version already resolved during refresh.
-      state.lastPullRev = currentRev;
-    } else {
-      try {
-        state.lastPullRev = await getHeadRev(localConfig.repo.localPath);
-      } catch {
-        // Non-critical: if we can't get the rev, just clear it
-        state.lastPullRev = null;
-      }
-    }
-    await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
   }
 
   // Step 3.5: Sync learnings and rebuild the multi-category search index
@@ -760,6 +751,26 @@ async function pullForScope(
     } catch (e) {
       log.debug(`[${scopeLabel}] Built-in agents deployment skipped: ${(e as Error).message}`);
     }
+  }
+
+  // Record the revision only after every resource and knowledge phase has had
+  // a chance to run. Inherited pulls use an independent marker so a partial,
+  // safe sync can never suppress a later full user-scope pull.
+  if (!options.dryRun) {
+    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+    if (revisionField === 'lastPullRev') {
+      state.lastPull = new Date().toISOString();
+    }
+    if (currentRev !== null) {
+      state[revisionField] = currentRev;
+    } else {
+      try {
+        state[revisionField] = await getHeadRev(localConfig.repo.localPath);
+      } catch {
+        state[revisionField] = null;
+      }
+    }
+    await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
   }
 
   // Step 5: Auto-report usage data — handled centrally in pull() to avoid
@@ -972,7 +983,10 @@ export function compileRecallRulesBlock(): string {
         '',
         'The subagent will return a compact summary of relevant team knowledge',
         '(skills, learnings, docs, rules) without polluting this conversation',
-        'with raw content.',
+        'with raw content. For **feature/large tasks**, recall returns a',
+        '"Candidate change files" list — check your planned changes cover all',
+        'listed files before starting. For **bugfix/small tasks**, recall runs',
+        'a lighter pass and you may skip it entirely per condition 2–3 above.',
         '',
         '**Important constraints on agent sequencing (when recall is invoked):**',
         '1. Invoke `teamai-recall` subagent **first and alone** — never',
@@ -1084,11 +1098,10 @@ async function autoMigrateHooksIfNeeded(): Promise<void> {
 /**
  * Main pull entry point.
  *
- * Scope isolation (issue #73): when a project-scope install is detected in cwd,
- * the user scope is **not** touched — pull and reconcile run for the project
- * scope only. When no project scope is present, the user scope is pulled as
- * before. Cross-team source skills are always pulled, against whichever scope
- * is active.
+ * Scope isolation (issue #73) remains the default. A project may explicitly
+ * inherit safe user-scope resources and knowledge with `inheritUserScope`.
+ * Executable configuration (env, hooks, and MCP) stays isolated, and external
+ * source skills are pulled only for the active project scope.
  */
 
 /**
@@ -1097,7 +1110,12 @@ async function autoMigrateHooksIfNeeded(): Promise<void> {
  * Triggered when project.yaml exists (committed by whoever ran `teamai init .`)
  * but config.yaml does NOT exist (clone-after state on a new machine).
  *
- * Runs non-interactively (inside the 4.5s session-start hook timeout).
+ * Must stay non-interactive: it runs inside the session-start hook, which has
+ * no TTY and a short timeout. It therefore bootstraps ONLY when the provider is
+ * already authenticated — it never triggers an interactive login (e.g.
+ * `gh auth login --web`), which would hang the hook until it is killed. If the
+ * user is not logged in, it logs a hint and returns; `teamai init .` run
+ * manually handles the interactive login.
  * Any failure logs a warning and returns — pull continues normally.
  */
 async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
@@ -1107,7 +1125,11 @@ async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
   if (!await pathExists(declPath)) return;
   if (await pathExists(configPath)) return;
 
-  if (cwd === process.env.HOME) {
+  // Guard against the home-directory path collision the same way init's
+  // resolveInitScope does: normalize both sides (symlinks, trailing slash,
+  // macOS /var → /private/var) before comparing, not a raw string equality.
+  const home = process.env.HOME;
+  if (home && resolveRealPath(cwd) === resolveRealPath(home)) {
     log.debug('[bootstrap] cwd is $HOME — skipping project bootstrap');
     return;
   }
@@ -1126,6 +1148,13 @@ async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
     const provider = getProvider(providerName);
 
     await provider.ensureInstalled();
+
+    // Never trigger an interactive login inside the hook. If the provider is
+    // not already authenticated, defer to a manual `teamai init .`.
+    if (!provider.isAuthenticated()) {
+      log.info("[teamai] Project config detected, but you're not logged in. Run 'teamai init .' to finish setup.");
+      return;
+    }
 
     let username: string;
     try {
@@ -1168,12 +1197,10 @@ async function autoBootstrapIfNeeded(cwd: string): Promise<void> {
       await writeFile(gitignorePath, PROJECT_GITIGNORE_ENTRIES.join('\n'));
     }
 
-    const teamConfig = await loadTeamConfig(localPath);
-    if (teamConfig) {
-      const { reconcileTeamHooksForConfig } = await import('./hooks.js');
-      await reconcileTeamHooksForConfig(teamConfig, localConfig);
-    }
-
+    // Hooks are intentionally NOT reconciled here: the config we just wrote is
+    // picked up by the normal pull flow later in this same run (via
+    // detectProjectConfig → reconcileHooksAllScopes), so reconciling now would
+    // duplicate the file I/O on the latency-sensitive session-start path.
     log.success('[teamai] Bootstrap complete — skills, rules, and docs will sync now.');
   } catch (e) {
     log.warn(`[bootstrap] Failed: ${(e as Error).message}. Run 'teamai init .' manually.`);
@@ -1207,16 +1234,31 @@ export async function pull(options: GlobalOptions): Promise<void> {
     log.warn(`Project-scope detection error: ${(e as Error).message}`);
   }
   const projectMode = projectConfig !== null;
+  const inheritUserScope = projectConfig?.inheritUserScope === true;
 
-  // 2. User scope — only when NOT in project mode.
-  let userConfig: LocalConfig | null = null;
-  if (projectMode) {
+  // 2. User scope — distinguish an active user install from an inherited one.
+  //    Only the active config may drive control-plane effects below.
+  let activeUserConfig: LocalConfig | null = null;
+  let inheritedUserConfig: LocalConfig | null = null;
+  if (projectMode && !inheritUserScope) {
     log.info('project scope detected, skipped user scope');
   } else {
     try {
-      userConfig = await loadLocalConfigForScope('user');
-      if (userConfig) {
-        await pullForScope(userConfig, options);
+      const loadedUserConfig = await loadLocalConfigForScope('user');
+      if (loadedUserConfig) {
+        if (inheritUserScope) {
+          inheritedUserConfig = loadedUserConfig;
+          log.info('project scope detected, inheriting user-scope resources and knowledge');
+          await pullForScope(inheritedUserConfig, options, {
+            resourceTypes: ['skills', 'rules', 'docs', 'agents'],
+            revisionField: 'lastInheritedPullRev',
+          });
+        } else {
+          activeUserConfig = loadedUserConfig;
+          await pullForScope(activeUserConfig, options);
+        }
+      } else if (inheritUserScope) {
+        log.warn('user-scope inheritance is enabled, but user scope is not initialized');
       } else {
         log.debug('No user-scope config found, skipping user pull');
       }
@@ -1237,12 +1279,13 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // 3.5. Reconcile built-in + team hooks for the active scope only. Runs OUTSIDE
   // pullForScope so it bypasses the "Already synced" rev fast-path — this is
   // what self-heals new built-in hooks and applies hooks.yaml changes on every
-  // session start. In project mode user is null, so user hooks are left alone.
-  await reconcileHooksAllScopes(projectMode ? null : userConfig, projectConfig, options);
+  // session start. In project mode user is null, even when safe resources are
+  // inherited, so executable hook configuration is never composed implicitly.
+  await reconcileHooksAllScopes(activeUserConfig, projectConfig, options);
 
   // 3.6. Reconcile team MCP servers. Outside pullForScope for the same reason as
-  // hooks: mcp.yaml changes must apply even when the rev fast-path short-circuits.
-  await reconcileMcpAllScopes(projectMode ? null : userConfig, projectConfig, options);
+  // hooks. User-scope MCP remains isolated in project mode.
+  await reconcileMcpAllScopes(activeUserConfig, projectConfig, options);
 
   // 4. Auto-report usage data to all active scopes. Events live in a single
   //    shared file (~/.teamai/usage.jsonl), so we report to each repo with
@@ -1261,10 +1304,10 @@ export async function pull(options: GlobalOptions): Promise<void> {
           opts: { skipTruncate: true, projectRoot: projectConfig.projectRoot },
         });
       }
-      if (userConfig && userConfig.repo.kind !== 'http') {
+      if (activeUserConfig && activeUserConfig.repo.kind !== 'http') {
         targets.push({
-          repoPath: userConfig.repo.localPath,
-          username: userConfig.username,
+          repoPath: activeUserConfig.repo.localPath,
+          username: activeUserConfig.username,
           opts: { skipTruncate: true, excludeProjectRoots: projectConfig?.projectRoot ? [projectConfig.projectRoot] : [] },
         });
       }
@@ -1287,7 +1330,7 @@ export async function pull(options: GlobalOptions): Promise<void> {
 
   // 5. Pull cross-team source skills (always — even in project mode), against
   //    the active scope so deploys land in the right base dir.
-  const sourceConfig = projectConfig ?? userConfig;
+  const sourceConfig = projectConfig ?? activeUserConfig;
   if (sourceConfig) {
     try {
       const { pullSources } = await import('./source.js');

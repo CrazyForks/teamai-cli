@@ -79,15 +79,33 @@ export async function getHeadRev(localPath: string): Promise<string> {
   return git.revparse(['--short', 'HEAD']);
 }
 
+/** Resolve + realpath so macOS /var → /private/var (and similar) compare equal. */
+export function resolveRealPath(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 /**
  * Normalize a git remote URL to HTTPS format with a consistent .git suffix.
- * SSH `git@host:path` → `https://host/path.git`; HTTPS gets .git appended if missing.
+ * SSH `git@host:path` → `https://host/path.git`;
+ * SSH URL `ssh://git@host[:port]/path` → `https://host/path.git`;
+ * HTTPS gets .git appended if missing.
  */
 export function normalizeRemoteUrl(url: string): string | null {
   if (!url) return null;
-  const ssh = url.match(/^git@([^:]+):(.+?)(?:\.git)?\s*$/);
-  if (ssh) {
-    return `https://${ssh[1]}/${ssh[2]}.git`;
+  // scp-style: git@host:owner/repo(.git)
+  const scp = url.match(/^git@([^:]+):(.+?)(?:\.git)?\s*$/);
+  if (scp) {
+    return `https://${scp[1]}/${scp[2]}.git`;
+  }
+  // URL form: ssh://[user@]host[:port]/owner/repo(.git)
+  const sshUrl = url.match(/^ssh:\/\/(?:[^@/]+@)?([^:/]+)(?::\d+)?\/(.+?)(?:\.git)?\s*$/);
+  if (sshUrl) {
+    return `https://${sshUrl[1]}/${sshUrl[2]}.git`;
   }
   if (/^https?:\/\/.+/.test(url)) {
     let normalized = url.trim().replace(/\/$/, '');

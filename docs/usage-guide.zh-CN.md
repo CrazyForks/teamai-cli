@@ -13,9 +13,10 @@
 - [核心概念](#核心概念)
 - [安装](#安装)
 - [管理员初始化](#管理员初始化)
-  - [用户级（User Scope）](#用户级user-scope)
   - [项目级（Project Scope）](#项目级project-scope)
+  - [用户级（User Scope）](#用户级user-scope)
   - [如何选择 Scope？](#如何选择-scope)
+  - [在项目仓库下叠加组织级仓库](#在项目仓库下叠加组织级仓库)
 - [成员接入](#成员接入)
 - [日常使用](#日常使用)
 - [共享团队资源](#共享团队资源)
@@ -32,7 +33,7 @@
 | 概念 | 说明 |
 |------|------|
 | **Team Repo** | 一个 Git 仓库，集中存放团队共享的 Skills / Rules / Docs / Env 资源 |
-| **Scope** | 资源安装位置：`user`（用户主目录，默认）或 `project`（项目目录）|
+| **Scope** | 资源安装位置：`project`（当前项目，默认）或 `user`（用户主目录）|
 | **Skills** | AI 可调用的自定义技能（目录形式，含 `SKILL.md`） |
 | **Rules** | Markdown 格式的团队规范，自动合并到 AI 工具配置中 |
 | **Docs** | 团队共享文档，供 AI 参考 |
@@ -116,6 +117,8 @@ teamai init <group>/TeamAi-<team> --scope project --role hai_dev --force
 |------|------|
 | `[repo\|.]` / `--repo <url>` | 团队仓库地址（推荐位置参数；`--repo` 为永久别名）。传 `.` 自动检测当前目录的 git remote（隐含 `--scope project`） |
 | `--scope <project\|user>` | 安装作用域，默认 `project`（`<cwd>/.teamai`）。需要装到 `~/` 时用 `user` |
+| `--inherit-user-scope` | 仅 project scope：同时同步安全的 user 资源并检索 user 知识 |
+| `--no-inherit-user-scope` | 关闭当前项目先前配置的 user scope 继承 |
 | `--role <id>` | 直接指定 primaryRole，跳过角色交互选择 |
 | `--force` | 覆盖已有配置，跳过确认提示 |
 
@@ -128,6 +131,7 @@ repo:
 username: alice
 scope: project
 projectRoot: /path/to/my-project
+inheritUserScope: true            # 可选，仅 project scope
 primaryRole: hai
 additionalRoles:
   - pm
@@ -162,9 +166,24 @@ teamai init <group>/TeamAi-<team> --scope user
 |------|-------------------|---------------|
 | **资源安装位置** | 项目目录下 | `~/` 下 |
 | **适用场景** | 项目特定的技能和规则 | 通用团队规范、跨项目技能 |
-| **能否共存** | ✅ 可以同时拥有两个 scope | ✅ 可以同时拥有两个 scope |
+| **能否共存** | ✅ 可以；project 保持当前 scope，并可选择继承安全的 user 资源 | ✅ 可以；仍是独立的用户主目录级安装 |
 
 > **本机安装位置**仅由 `teamai init` 的 `--scope`（默认 `project`）决定。远端 `teamai.yaml` 中若仍有 `scope` 字段会被忽略。
+
+### 在项目仓库下叠加组织级仓库
+
+当一部分经验全组织通用、另一部分只属于具体项目时，可以使用两个 Team Repo。CLI 只安装一次，但两个 scope 各有独立的本地配置和仓库克隆：
+
+```bash
+# 每位开发者执行一次：组织通用 skills、rules、docs、agents 和 learnings
+teamai init https://github.com/yourorg/engineering-practices --scope user
+
+# 在 Java 项目中：项目资源保持当前 scope，recall 时优先
+cd /path/to/java-service
+teamai init https://github.com/yourorg/java-service-teamai --inherit-user-scope
+```
+
+启用继承后，`teamai pull` 会先把 user 的 `skills`、`rules`、`docs`、`agents`、共享指令/文化和检索索引刷新到用户主目录级位置，再刷新项目目录中的 project scope。user 的 `env`、hooks、MCP 定义、跨团队 sources、usage reporting 和远端仓库写入不会被继承。两个配置和两个 Git 仓库仍然分离；该功能组合的是安全读取路径，不会合并 Git 仓库或文件。同名的已安装资源仍分别位于 user/project 路径，由具体 AI 工具决定运行时优先级；Recall 则明确保证相同资源类型和文件名的 project 条目覆盖 user 条目。
 
 ---
 
@@ -192,6 +211,8 @@ cd <项目目录>
 # 启动任意 AI 会话 — teamai 自动检测 project.yaml，克隆团队仓，
 # 写入本地配置并注入 hooks。skills/rules 即时同步。
 ```
+
+自动引导运行在 session-start hook 内，因此绝不会触发交互式登录。如果 git provider（如 `gh`）尚未认证，它会打印提示并跳过 —— 手动执行一次 `teamai init .` 完成登录后，后续会话即可自动引导。
 
 **用户级团队：**
 
@@ -244,7 +265,7 @@ teamai pull              # 手动拉取
 teamai pull --dry-run    # 试运行，不实际修改
 ```
 
-> 如果你同时有 user 和 project scope，`pull` 会依次拉取两个 scope 的资源，互不冲突。
+> Project scope 默认与 user scope 隔离。当前工作目录包含 project scope 的 `.teamai/config.yaml` 时，`pull` 会处理该项目并跳过 user scope；仅当本地配置包含 `inheritUserScope: true` 时，才会先刷新安全的 user 资源通道。当前目录没有 project 配置时，`pull` 处理 user scope。project 模式下，user 的 `env`、hooks、MCP 定义、sources、reporting 和写入行为仍保持隔离。
 
 启用角色化 skills 后，`pull` 的 skills 同步来源会变成 `skills/<namespace>/` 中的内容，按 `primaryRole + additionalRoles` 展开对应的 namespace，拍平安装到本地各 AI 工具 skills 目录。`rules/`、`docs/`、`learnings/` 仍然保持原有全局同步逻辑。
 
@@ -468,13 +489,17 @@ teamai mcp remove            # 移除所有 teamai 管理的 server
 
 ### 贡献知识
 
-AI 通过 Hooks 追踪你的编码会话。当会话结束时（Stop hook），系统按**摩擦信号**评分——你是否打断/纠正了 AI、拒绝了工具调用，或 AI 反复重试出错的工具。又长又顺的会话（工具调用多但没摩擦）不会触发，真正踩过坑的会话才会。达标后会自动提醒：
+AI 通过 Hooks 追踪你的编码会话。当会话结束时（Stop hook），系统按**摩擦信号**评分——你是否打断/纠正了 AI、拒绝了工具调用，或 AI 反复重试出错的工具。又长又顺的会话（工具调用多但没摩擦）不会触发，真正踩过坑的会话才会。达标后会显示如下英文提醒：
 
 ```
-建议运行 /teamai-share-learnings 分享经验
+[teamai] This session may contain a problem worth documenting: you interrupted the AI twice, the AI retried failing tools 8 times.
+
+Task: Fix duplicate project-level Hook injection
+
+Consider running /teamai-share-learnings to summarize what you learned and share it with your team.
 ```
 
-使用内置 skill `/teamai-share-learnings`，AI 会自动总结本次 session 经验并贡献到团队知识库。每个 session 最多提示一次。
+提醒会列出实际触发它的非零摩擦信号；如果能取得首个任务，还会附上脱敏、单行化后的任务摘要，便于判断本次 session 是否值得分享。使用内置 skill `/teamai-share-learnings`，AI 会自动总结本次 session 经验并贡献到团队知识库。每个 session 最多提示一次。
 
 也可以手动指定文件：
 
@@ -491,8 +516,9 @@ teamai recall "GPU 内存不足"
 ```
 
 - 支持中英文混合搜索
-- 自动合并 user + project 双 scope 的知识库，结果标注 `[user]`/`[project]` 来源
-- 被查阅的知识自动 upvote，好文档浮到顶部
+- 当前工作目录包含 project scope 配置时搜索该项目；配置 `inheritUserScope: true` 后先搜索 project、再搜索 user，并标注 `[project]`/`[user]` 来源；否则搜索 user scope
+- 资源类型和文件名都相同时由 project 条目优先；不同资源类型即使文件名相同也分别保留
+- 当前 scope 中被查阅的知识自动 upvote；项目运行期间继承的 user 命中保持只读
 - 提供轻量相关性预检 `teamai recall --check "<关键词>"`，仅输出 `RELEVANT score=<n>` 或 `NOT_RELEVANT score=<n>`，不读取文件、不 upvote —— recall subagent 用它在任务与团队知识无关时跳过检索
 
 ### 开启 / 关闭 Recall
@@ -988,6 +1014,7 @@ username: your-name
 updatePolicy: auto
 scope: project                 # project（init 默认）或 user
 projectRoot: /path/to/project  # 仅 project scope
+inheritUserScope: true         # 可选，仅 project scope，默认 false
 ```
 
 ---
@@ -1039,7 +1066,7 @@ teamai pull
 
 **Q: User scope 和 Project scope 可以共存吗？**
 
-可以。`pull` 会依次拉取两个 scope，`recall` 会合并搜索两个 scope 的知识库。两者互不冲突。
+可以，但 project scope 默认保持隔离。当前工作目录包含 project scope 配置时，该项目生效并跳过 user scope。先初始化 user scope，再使用 `--inherit-user-scope` 初始化项目（或在项目本地配置中设置 `inheritUserScope: true`），即可组合安全资源和 Recall 结果；可执行配置和控制面配置仍只使用 project scope。
 
 **Q: `teamai init` 提示已初始化？**
 

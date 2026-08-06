@@ -55,6 +55,7 @@ const mockParseRepoInput = vi.fn().mockReturnValue({
 });
 const mockAuthenticate = vi.fn().mockResolvedValue('testuser');
 const mockEnsureInstalled = vi.fn();
+const mockIsAuthenticated = vi.fn().mockReturnValue(true);
 
 vi.mock('../providers/index.js', () => ({
   detectProvider: vi.fn().mockReturnValue('github'),
@@ -63,7 +64,7 @@ vi.mock('../providers/index.js', () => ({
     parseRepoInput: (...args: unknown[]) => mockParseRepoInput(...args),
     authenticate: () => mockAuthenticate(),
     ensureInstalled: () => mockEnsureInstalled(),
-    isAuthenticated: vi.fn().mockReturnValue(true),
+    isAuthenticated: () => mockIsAuthenticated(),
     getDefaultEmailDomain: vi.fn().mockReturnValue(null),
   }),
 }));
@@ -134,6 +135,8 @@ describe('autoBootstrapIfNeeded (via pull)', () => {
     vi.clearAllMocks();
     vi.spyOn(process, 'cwd').mockReturnValue(cwd);
     process.env.HOME = '/home/user';
+    mockIsAuthenticated.mockReturnValue(true);
+    mockAuthenticate.mockResolvedValue('testuser');
   });
 
   it('bootstraps when project.yaml exists and config.yaml does not', async () => {
@@ -227,6 +230,30 @@ describe('autoBootstrapIfNeeded (via pull)', () => {
 
     expect(mockSaveLocalConfigForScope).not.toHaveBeenCalled();
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining('Clone failed'));
+  });
+
+  it('does not trigger interactive login when not authenticated', async () => {
+    mockPathExists.mockImplementation((p: string) => {
+      if (p.endsWith('project.yaml')) return Promise.resolve(true);
+      if (p.endsWith('config.yaml')) return Promise.resolve(false);
+      return Promise.resolve(false);
+    });
+
+    mockLoadProjectDeclaration.mockResolvedValue({
+      repo: 'https://github.com/org/team-repo.git',
+      scope: 'project',
+    });
+
+    mockIsAuthenticated.mockReturnValue(false);
+
+    await pull({ silent: true });
+
+    // Must NOT call authenticate() (which could launch `gh auth login --web`
+    // and hang the session-start hook) and must NOT clone.
+    expect(mockAuthenticate).not.toHaveBeenCalled();
+    expect(mockCloneRepo).not.toHaveBeenCalled();
+    expect(mockSaveLocalConfigForScope).not.toHaveBeenCalled();
+    expect(vi.mocked(log.info)).toHaveBeenCalledWith(expect.stringContaining("teamai init ."));
   });
 
   it('skips bootstrap when cwd is HOME', async () => {

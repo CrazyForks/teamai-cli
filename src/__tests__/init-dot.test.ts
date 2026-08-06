@@ -61,6 +61,22 @@ describe('normalizeRemoteUrl', () => {
     expect(normalizeRemoteUrl('git@git.woa.com:team/repo.git')).toBe('https://git.woa.com/team/repo.git');
   });
 
+  it('converts ssh:// URL form', () => {
+    expect(normalizeRemoteUrl('ssh://git@github.com/org/repo.git')).toBe('https://github.com/org/repo.git');
+  });
+
+  it('converts ssh:// URL without .git suffix', () => {
+    expect(normalizeRemoteUrl('ssh://git@github.com/org/repo')).toBe('https://github.com/org/repo.git');
+  });
+
+  it('converts ssh:// URL with custom port', () => {
+    expect(normalizeRemoteUrl('ssh://git@git.woa.com:2222/team/repo.git')).toBe('https://git.woa.com/team/repo.git');
+  });
+
+  it('converts ssh:// URL without user', () => {
+    expect(normalizeRemoteUrl('ssh://github.com/org/repo.git')).toBe('https://github.com/org/repo.git');
+  });
+
   it('passes HTTPS through unchanged', () => {
     expect(normalizeRemoteUrl('https://github.com/org/repo.git')).toBe('https://github.com/org/repo.git');
   });
