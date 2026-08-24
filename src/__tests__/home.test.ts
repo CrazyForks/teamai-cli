@@ -70,16 +70,16 @@ describe('getUserHome', () => {
     expect(getUserHome()).toBe(os.homedir());
   });
 
-  it('falls back to os.tmpdir when even os.homedir is unresolvable', () => {
+  it('throws instead of returning a shared/relative dir when home is unresolvable', () => {
     delete process.env.HOME;
     delete process.env.USERPROFILE;
     // os.homedir() is documented to return '' when the home cannot be resolved.
+    // Falling back to os.tmpdir() (world-writable) or '' (cwd-relative) would be a
+    // credential-exposure / code-execution vector, so getUserHome() must throw.
     const spy = vi.spyOn(os, 'homedir').mockReturnValue('');
 
     try {
-      const home = getUserHome();
-      expect(home).toBe(os.tmpdir());
-      expect(home).not.toBe('');
+      expect(() => getUserHome()).toThrow(/user home directory/);
     } finally {
       spy.mockRestore();
     }
