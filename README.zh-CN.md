@@ -30,9 +30,7 @@ npm install -g teamai-cli
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、TGit、CNB 或自建 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后让他们运行 `teamai init https://github.com/yourorg/yourrepo`。
-
-> 个人使用无需单独建仓：`teamai init` 会检查目标仓库，不存在时自动创建。
+在 Git 托管平台（GitHub、GitLab（含自建）、CNB、TGit，或任意私有/自建 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后让他们运行 `teamai init https://github.com/yourorg/yourrepo`。
 
 > 自建 GitLab/Gitea 等服务支持 HTTPS Credential Helper 或 SSH Key；需预先创建仓库，MR 暂时手动创建。详见 [Git Provider 说明](docs/providers.md)。
 
@@ -47,11 +45,6 @@ teamai init https://github.com/yourorg/yourrepo
 
 # 用户级初始化（资源安装到 ~/ 下）
 teamai init https://github.com/yourorg/yourrepo --scope user
-
-# 可选的分层模式：项目仓库保持为当前 scope，同时继承已初始化的
-# user scope 中的安全资源和可检索知识
-cd /path/to/my-project
-teamai init https://github.com/yourorg/project-repo --inherit-user-scope
 ```
 
 初始化完成后，每次开启 AI 会话时都会自动拉取管理员发布的 skills / rules 等 Harness 更新，无需手动同步。
@@ -66,15 +59,37 @@ teamai init .                        # 交互式：选择要启用哪些 AI 工�
 teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
 ```
 
-- **知识资产**（skills / rules / docs / learnings）提交到仓库 **main 分支**的 `.teamai/` 目录，因此一次普通 `git clone` 就带上了整套团队配置。
-- **上报数据**（成员注册、会话摘要、投票、使用统计）走独立的 **`teamai-reports` 孤儿分支** —— 永不污染 main。
-- **由你选择启用哪些 AI 工具。** `--agent claude,codex`（可重复/逗号分隔）,省略时弹交互选择框,非交互场景则按你本机 `~/` 下已装的工具来建。teamai 为每个所选工具建目录、注入 hooks、并提交其 settings。
-- **克隆即初始化。** 团队成员 clone 仓库后，下一条 `teamai` 命令（或 AI 会话）会自动识别 `.teamai/teamai.yaml` 里的 `mode: self` 标记并自动完成本机初始化 —— 无需手抄 repo/role 参数。
-- teamai 的所有 git 操作都在隔离的 worktree 中进行，绝不触碰你的工作区和当前分支。
-
-`teamai init .` 会帮你把 `.teamai/`（skills、rules、docs、learnings、`teamai.yaml`、`.gitignore`）以及每个所选工具的 settings（如 `.claude/settings.json`、`.codex/hooks.json`）提交好;推送 main 后团队成员 clone 即可自动初始化。
-
 > **完整使用指南**：[docs/usage-guide.zh-CN.md](docs/usage-guide.zh-CN.md)（[English](docs/usage-guide.md)）— 涵盖从团队创建到日常使用的全流程。
+
+## 功能概览
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Agent</th>
+      <th colspan="7">Harness</th>
+      <th colspan="3">知识库</th>
+      <th colspan="3">治理</th>
+    </tr>
+    <tr>
+      <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
+      <th>learnings</th><th>codebase</th><th>teamwiki</th>
+      <th>usage</th><th>sessions</th><th>dashboard</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Claude Code</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
+    <tr><td>Codex</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
+    <tr><td>Cursor</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
+    <tr><td>CodeBuddy</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
+    <tr><td>OpenCode</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
+    <tr><td>WorkBuddy</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
+    <tr><td>OpenClaw</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
+    <tr><td>Hermes</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
+  </tbody>
+</table>
+
+**Git 托管平台** —— GitHub · GitLab（含自建）· CNB · TGit · 任意私有/自建 Git 服务。
 
 ## Harness 管理和分发
 
@@ -180,18 +195,6 @@ Author: member-b | Score: 12.0 | Tags: deploy, config
 Matched: conflict | Missing: port
 ```
 
-当某条结果未覆盖全部查询词时，会输出 `Matched: … | Missing: …` 行（全部命中时省略）。
-recall 按分数返回 top 结果，**不会**按覆盖度过滤：若你的关键区分词全在 `Missing:` 里，
-说明这条只是主题相邻，并非答案。这个判断由调用方来做 —— 分数本身无法表达它。
-标题、日期、作者与内容均相同的条目会被合并，因此同一条 learning 被分享两次不会占用两个名额。
-
-**检索内容覆盖两部分**：
-
-- **共享检索索引**（`search-index.json`）：learnings（session 经验）、docs（团队文档）、rules（编码规则）、skills（各 `SKILL.md`）四类，源自团队仓库对应目录，在 `teamai pull` / `teamai contribute` 时构建重建。
-- **代码知识图谱**（`teamwiki/`）：由 `teamai import` 生成，检索时实时查询。
-
-排序采用 BM25 + 图谱增强。当前工作目录包含 project scope 配置时，Recall 先检索该项目；如果项目启用了 `--inherit-user-scope`，再检索 user 知识并标注结果来源，相同条目由 project 版本覆盖 user 版本。当前目录没有 project 配置时，Recall 检索 user scope。当前 scope 的命中会隐式投票，项目运行期间继承的 user 命中保持只读。
-
 ### 代码知识图谱
 
 `teamai import` 将源码仓库解析为 `teamwiki/` 下的结构化图谱，实现结构感知的检索：
@@ -228,8 +231,6 @@ teamai codebase --lint                      # 健康检查
 | `teamai digest` | 生成团队周报 |
 | `teamai doctor` | 诊断配置问题 |
 | `teamai uninstall` | 移除所有 teamai 资源和 hooks |
-
-全局选项：`--dry-run`、`--verbose`
 
 ## 许可证
 
