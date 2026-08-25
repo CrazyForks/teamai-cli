@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ensureDir, pathExists, copyFile } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { TeamaiConfig, LocalConfig } from './types.js';
@@ -36,7 +37,10 @@ export const BUILTIN_AGENT_NAMES = new Set<string>(['teamai-recall']);
  * package root, so we walk up to find `agents/`.
  */
 function getBuiltinAgentsDir(): string {
-  const distDir = path.dirname(new URL(import.meta.url).pathname);
+  // __dirname equivalent for ESM: import.meta.url → file path → parent.
+  // Use fileURLToPath (not URL.pathname) so Windows drive-letter paths
+  // resolve correctly — a raw `/C:/…` pathname is not resolvable by fs.
+  const distDir = path.dirname(fileURLToPath(import.meta.url));
   return path.join(distDir, '..', 'agents');
 }
 
