@@ -11,14 +11,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/teamai-cli.svg)](https://www.npmjs.com/package/teamai-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[![用户交流](https://img.shields.io/badge/用户交流-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/gervEZm58g)
-[![开发者交流](https://img.shields.io/badge/开发者交流-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/DeHHxPnfZF)
+面向 AI 智能体的团队 Harness 管理和分发工具。
 
-面向 AI 智能体的团队 Harness 分发工具。
-
-通过 Git 统一管理 skills、rules、docs，驾驭 Claude Code / Codex / CodeBuddy / WorkBuddy / OpenCode 等多种 AI 工具。
-
-一个人也能用，团队用更强。
+通过 Git 统一管理 skills、rules、mcp、环境变量、知识库等 Harness，驾驭 Claude Code / Codex / CodeBuddy / WorkBuddy / OpenCode 等多种 AI 工具。
 
 ## 快速开始
 
@@ -30,34 +25,24 @@ npm install -g teamai-cli
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab（含自建）、CNB、TGit，或任意私有/自建 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后让他们运行 `teamai init https://github.com/yourorg/yourrepo`。
-
-> 自建 GitLab/Gitea 等服务支持 HTTPS Credential Helper 或 SSH Key；需预先创建仓库，MR 暂时手动创建。详见 [Git Provider 说明](docs/providers.md)。
+在 Git 托管平台（GitHub、GitLab、CNB、TGit，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
 
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Use this template** 生成自己的仓库，再对它执行 `teamai init`。
 
 ### 团队成员
 
 ```bash
+# 二选一：按你想要的安装范围选择其中一条
+
 # 项目级初始化（默认，资源安装到项目目录下）
 cd /path/to/my-project
 teamai init https://github.com/yourorg/yourrepo
 
-# 用户级初始化（资源安装到 ~/ 下）
+# 或者，用户级初始化（资源安装到 ~/ 下）
 teamai init https://github.com/yourorg/yourrepo --scope user
 ```
 
 初始化完成后，每次开启 AI 会话时都会自动拉取管理员发布的 skills / rules 等 Harness 更新，无需手动同步。
-
-### 单仓模式（业务仓即团队仓）
-
-无需单独的团队仓库。在已有项目里运行 `teamai init .`，让它自己的 git 仓库直接充当团队仓：
-
-```bash
-cd /path/to/my-project
-teamai init .                        # 交互式：选择要启用哪些 AI 工具
-teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
-```
 
 > **完整使用指南**：[docs/usage-guide.zh-CN.md](docs/usage-guide.zh-CN.md)（[English](docs/usage-guide.md)）— 涵盖从团队创建到日常使用的全流程。
 
@@ -69,7 +54,7 @@ teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
       <th rowspan="2">Agent</th>
       <th colspan="7">Harness</th>
       <th colspan="3">知识库</th>
-      <th colspan="3">治理</th>
+      <th colspan="3">使用分析</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -90,11 +75,31 @@ teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
   </tbody>
 </table>
 
-**Git 托管平台** —— GitHub · GitLab（含自建）· CNB · TGit · 任意私有/自建 Git 服务。
+**Git 托管平台** —— GitHub · GitLab · CNB · TGit · 私有 Git 服务。
+
+### 分发策略
+
+管理员一次配置、随 `teamai pull` 分发给每位成员的团队级设置：
+
+| 能力 | 命令 | 作用 |
+|------|------|------|
+| **角色（Roles）** | `teamai roles` | 定义「角色 → 命名空间」映射，让每位成员只同步与自身角色匹配的 skills。 |
+| **标签（Tags）** | `teamai tags` | 给 skills / rules 打标签，成员只订阅自己需要的标签。 |
+| **订阅源（Sources）** | `teamai source` | 订阅额外的 skill 仓库——其他团队的公开仓库，或本团队内的公共/共享仓库；已订阅的 skills 会在 pull 时自动同步。 |
+
+### 使用分析
+
+洞察团队实际如何使用 AI 工具：
+
+| 能力 | 命令 | 呈现内容 |
+|------|------|----------|
+| **用量（Usage）** | `teamai digest` | 团队周报——token 用量、会话量、干预率。 |
+| **会话（Sessions）** | `teamai session save` | 脱敏的单会话摘要（工具序列、对话轮次、干预次数），喂给周报的 Session Highlights。 |
+| **看板（Dashboard）** | `teamai dashboard` | Web 看板，实时展示成员的编码会话状态、干预次数和 token 用量。 |
 
 ## Harness 管理和分发
 
-TeamAI 把 skills、rules、docs、hooks 统一存放在共享 Git 仓库，通过「push → 评审合并 → pull」的流程分发到每位成员的本地 AI 工具，并支持订阅其他团队的 Harness。
+TeamAI 把 skills、rules、docs、hooks 统一存放在共享 Git 仓库，通过「push → 评审合并 → pull」的流程分发到每位成员的本地 AI 工具，并支持订阅其他团队或公共仓库的 Harness。
 
 ### 工作原理
 
@@ -143,9 +148,9 @@ servers:
 teamai mcp list | inject | remove
 ```
 
-### 跨团队 Skill 订阅
+### Skill 订阅源
 
-订阅其他团队的公开 skill 仓库：
+订阅额外的 skill 仓库——其他团队的公开仓库，或本团队内的公共/共享仓库：
 
 ```bash
 teamai source add https://github.com/other-team/teamai-public.git --name other-team
@@ -225,8 +230,9 @@ teamai codebase --lint                      # 健康检查
 | `teamai ci extract-mr --url <url>` | CI：从 MR 提取知识、发评论、合并后写入 |
 | `teamai members` | 查看团队成员 |
 | `teamai roles` | 管理团队角色和命名空间 |
+| `teamai tags` | 管理基于标签的 skill/rule 过滤 |
 | `teamai skill exclude add/remove/list` | 管理不参与本地同步的 skills（[使用指南](docs/usage-guide.zh-CN.md#排除个人不需要的-skill)） |
-| `teamai source` | 管理跨团队 skill 订阅 |
+| `teamai source` | 管理 skill 订阅源（其他团队或本团队公共仓库） |
 | `teamai remove <type> <name>` | 删除资源并创建 MR |
 | `teamai session save` | 将脱敏后的 session 摘要记录到月度日志（`--push` 可喂给 `digest`） |
 | `teamai digest` | 生成团队周报 |

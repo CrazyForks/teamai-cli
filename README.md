@@ -11,14 +11,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/teamai-cli.svg)](https://www.npmjs.com/package/teamai-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[![User Chat](https://img.shields.io/badge/User_Chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/gervEZm58g)
-[![Developer Chat](https://img.shields.io/badge/Developer_Chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/DeHHxPnfZF)
+Make every AI coding agent work by the best harness.
 
-Make every AI coding agent work by the same harness.
-
-Git-native management of skills, rules, and docs across Claude Code / Codex / CodeBuddy / WorkBuddy / OpenCode and more.
-
-For you or your whole team.
+Git-native management of skills, rules, MCP, env vars, knowledge base, and more — across Claude Code / Codex / CodeBuddy / WorkBuddy / OpenCode and more.
 
 ## Quick Start
 
@@ -30,34 +25,24 @@ npm install -g teamai-cli
 
 ### Team admin / solo user
 
-Create a shared-experience repo on your git host (GitHub, GitLab (incl. self-hosted), CNB, TGit, or any private/self-hosted Git service), **grant write access to team members**, then have them run `teamai init https://github.com/yourorg/yourrepo`.
-
-> Self-hosted GitLab/Gitea-style services use your HTTPS credential helper or SSH key. Create the repository first; merge requests are created manually for now. See [Git Provider docs](docs/providers.md).
+Create a shared-experience repo on your git host (GitHub, GitLab, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
 
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
 ### Team members
 
 ```bash
+# Choose one, depending on where you want resources installed
+
 # Project-scope init (default, resources installed under the project directory)
 cd /path/to/my-project
 teamai init https://github.com/yourorg/yourrepo
 
-# User-scope init (resources installed under ~/)
+# Or, user-scope init (resources installed under ~/)
 teamai init https://github.com/yourorg/yourrepo --scope user
 ```
 
 Once initialized, every AI session automatically pulls the latest skills / rules and other Harness updates published by admins — no manual sync needed.
-
-### Single-repo mode (the business repo *is* the team repo)
-
-No separate team repo. Run `teamai init .` inside an existing project and its own git repo becomes the team repo:
-
-```bash
-cd /path/to/my-project
-teamai init .                        # interactive: pick which AI tools to set up
-teamai init . --agent claude,codex   # non-interactive: Claude Code + Codex
-```
 
 > **Full usage guide:** [docs/usage-guide.md](docs/usage-guide.md) ([中文版](docs/usage-guide.zh-CN.md)) — covers everything from team creation to day-to-day use.
 
@@ -69,7 +54,7 @@ teamai init . --agent claude,codex   # non-interactive: Claude Code + Codex
       <th rowspan="2">Agent</th>
       <th colspan="7">Harness</th>
       <th colspan="3">Knowledge Base</th>
-      <th colspan="3">Governance</th>
+      <th colspan="3">Analytics</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -90,11 +75,31 @@ teamai init . --agent claude,codex   # non-interactive: Claude Code + Codex
   </tbody>
 </table>
 
-**Git providers** — GitHub · GitLab (incl. self-hosted) · CNB · TGit · any private/self-hosted Git service.
+**Git providers** — GitHub · GitLab · CNB · TGit · private Git service.
+
+### Distribution Controls
+
+Team-wide settings an admin configures once and delivers to every member on `teamai pull`:
+
+| Capability | Command | What it does |
+|------------|---------|--------------|
+| **Roles** | `teamai roles` | Define role → namespace mappings so each member syncs only the skills for their role. |
+| **Tags** | `teamai tags` | Tag skills / rules so members subscribe to just the tags they need. |
+| **Sources** | `teamai source` | Subscribe to additional skill repos — other teams' public repos, or shared/public repos within your own org; subscribed skills sync automatically on pull. |
+
+### Analytics
+
+Insight into how the team actually uses its AI tools:
+
+| Capability | Command | What it shows |
+|------------|---------|---------------|
+| **Usage** | `teamai digest` | Weekly team digest — token usage, conversation volume, and intervention rate. |
+| **Sessions** | `teamai session save` | Privacy-scrubbed per-session summaries (tool sequence, prompt turns, interventions) that feed the digest's Session Highlights. |
+| **Dashboard** | `teamai dashboard` | Web dashboard showing team members' live coding-session status, intervention count, and token usage. |
 
 ## Harness Management & Distribution
 
-TeamAI keeps skills, rules, docs, and hooks in a shared git repo and distributes them to every member's local AI tools through a "push → review & merge → pull" flow — with support for subscribing to other teams' Harness.
+TeamAI keeps skills, rules, docs, and hooks in a shared git repo and distributes them to every member's local AI tools through a "push → review & merge → pull" flow — with support for subscribing to other teams' or shared repos' Harness.
 
 ### How It Works
 
@@ -143,9 +148,9 @@ servers:
 teamai mcp list | inject | remove
 ```
 
-### Cross-team Skill Subscription
+### Skill Subscription Sources
 
-Subscribe to other teams' public skill repos:
+Subscribe to additional skill repos — other teams' public repos, or shared/public repos within your own org:
 
 ```bash
 teamai source add https://github.com/other-team/teamai-public.git --name other-team
@@ -225,8 +230,9 @@ When a recall hit comes from a codebase page, the result includes a `Sources:` l
 | `teamai ci extract-mr --url <url>` | CI: extract knowledge from MR, post comments, write after merge |
 | `teamai members` | List team members |
 | `teamai roles` | Manage team roles and namespaces |
+| `teamai tags` | Manage tag-based skill/rule filtering |
 | `teamai skill exclude add/remove/list` | Manage skills excluded from local sync ([usage guide](docs/usage-guide.md#excluding-skills-you-dont-need)) |
-| `teamai source` | Manage cross-team skill subscriptions |
+| `teamai source` | Manage skill subscription sources (other teams or your org's shared repos) |
 | `teamai remove <type> <name>` | Remove a resource and open MR |
 | `teamai session save` | Record a privacy-scrubbed session summary to a monthly log (`--push` feeds `digest`) |
 | `teamai digest` | Generate weekly team usage digest |
