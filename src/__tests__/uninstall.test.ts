@@ -670,7 +670,22 @@ describe('uninstall', () => {
     vi.stubEnv('HOME', homeDir);
     vi.stubEnv('SHELL', '/bin/zsh');
 
-    const teamConfig = makeTeamConfig();
+    const codexRecallAgent = path.join(homeDir, '.codex', 'agents', 'teamai-recall.toml');
+    await fse.ensureDir(path.dirname(codexRecallAgent));
+    await fse.writeFile(codexRecallAgent, 'developer_instructions = "Recall"\n');
+
+    const teamConfig = makeTeamConfig({
+      toolPaths: {
+        claude: {
+          skills: '.claude/skills',
+          rules: '.claude/rules',
+          settings: '.claude/settings.json',
+          claudemd: '.claude/CLAUDE.md',
+          agents: '.claude/agents',
+        },
+        codex: { agents: '.codex/agents' },
+      },
+    });
     const localConfig = makeLocalConfig(homeDir, repoPath);
     mockAutoDetectInit.mockResolvedValue({ localConfig, teamConfig });
 
@@ -679,6 +694,7 @@ describe('uninstall', () => {
     // Built-in recall agent + rule removed
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'agents', 'teamai-recall.md'))).toBe(false);
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'rules', 'teamai-recall.md'))).toBe(false);
+    expect(await fse.pathExists(codexRecallAgent)).toBe(false);
     // Built-in skills removed
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'skills', 'teamai-share-learnings'))).toBe(false);
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'skills', 'team-wiki-codebase'))).toBe(false);
