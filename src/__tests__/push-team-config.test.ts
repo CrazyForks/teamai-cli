@@ -51,7 +51,12 @@ async function initTeamRepos(root: string): Promise<string> {
   const seed = path.join(root, 'seed');
   const teamRepo = path.join(root, 'team-repo');
 
-  await simpleGit().init(['--bare', remote]);
+  // Pin the bare repo's default branch to main. Without this, a runner whose
+  // git defaults to `master` (init.defaultBranch) leaves the bare HEAD pointing
+  // at a branch we never push, so `git clone` lands on an unborn HEAD and the
+  // working clone has no local `main` — `.branch().current` then reads '' and
+  // the "switches back to the default branch" assertion sees '' instead of main.
+  await simpleGit().init(['--bare', '--initial-branch=main', remote]);
 
   fs.mkdirSync(path.join(seed, 'skills', 'ns'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'teamai.yaml'), 'version: 1\npublicSkills: []\n');
@@ -175,5 +180,48 @@ describe('push carries teamai.yaml (source add regression)', () => {
     logSpy.mockRestore();
 
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('config-only: switches back to the default branch when the push throws', async () => {
+    const teamRepo = await initTeamRepos(tmpDir);
+    const yamlPath = path.join(teamRepo, 'teamai.yaml');
+    fs.writeFileSync(yamlPath, 'version: 1\npublicSkills:\n  - beta-proof\n');
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: {
+        repo: { localPath: teamRepo, remote: path.join(tmpDir, 'remote.git'), kind: undefined },
+        username: 'alice',
+        scope: 'project',
+        projectRoot: teamRepo,
+      },
+      teamConfig: { repo: 'acme/team', toolPaths: {} },
+    });
+
+    // Force pushRepoBranch to throw AFTER it has moved the repo onto a push
+    // branch, so the catch path is the only thing that can restore the default
+    // branch. We simulate the mid-push failure by leaving the repo on a stray
+    // branch and rejecting from pushRepoBranch.
+    const git = simpleGit(teamRepo);
+    const gitMod = await import('../utils/git.js');
+    const spy = vi.spyOn(gitMod, 'pushRepoBranch').mockImplementation(async () => {
+      await git.checkoutLocalBranch('teamai/push/alice/stuck-branch');
+      throw new Error('network failure mid-push');
+    });
+    const originalExitCode = process.exitCode;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const { push } = await import('../push.js');
+      await push({ all: true });
+
+      // The catch path must land the repo back on the default branch, not just
+      // off the stuck branch (the seed repo's default branch is 'main').
+      const branch = (await git.branch()).current;
+      expect(branch).toBe('main');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      logSpy.mockRestore();
+      spy.mockRestore();
+      process.exitCode = originalExitCode;
+    }
   });
 });

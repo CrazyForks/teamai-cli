@@ -393,12 +393,18 @@ async function pushCore(
     allItems.push(...items);
   }
 
+  // Snapshot the full scan before --skill/--role narrow allItems. prunePendingPushes
+  // must see every pending resource that is still locally present, or narrowing to
+  // one skill would drop the other skills' open-PR records and duplicate them next run.
+  const fullScan: ResourceItem[] = [...allItems];
+
   spin.stop();
 
   // ── Handle --skill parameter: filter to a single specific skill ──────
   if (options.skill) {
-    // 校验 skill 名称安全性：从输入路径中提取 basename 作为资源名，
-    // 防御路径遍历、URL 编码绕过、非法字符等攻击
+    // Validate the skill name: take the basename of the input path as the
+    // resource name to defend against path traversal, URL-encoded bypasses,
+    // and other illegal characters.
     const skillBasename = path.basename(
       options.skill.startsWith('~')
         ? options.skill.slice(1).replace(/^[/\\]+/, '')
@@ -407,7 +413,7 @@ async function pushCore(
     try {
       assertSafeResourceName(skillBasename);
     } catch (e) {
-      console.error(`[push] --skill 参数不合法: ${(e as Error).message}`);
+      console.error(`[push] Invalid --skill argument: ${(e as Error).message}`);
       process.exitCode = 2;
       return;
     }
@@ -511,6 +517,14 @@ async function pushCore(
     // Replace allItems with just this one skill
     allItems.length = 0;
     allItems.push(matchedItem);
+
+    // A force-constructed matchedItem (scanner returned nothing for this skill
+    // because its content matches the team repo) is absent from fullScan. Add it
+    // so prunePendingPushes still sees this skill as locally present — otherwise
+    // its own open-PR record is dropped and the next run opens a duplicate.
+    if (!fullScan.some((i) => i.type === matchedItem!.type && i.name === matchedItem!.name)) {
+      fullScan.push(matchedItem);
+    }
   }
 
   // An explicit --role is a destination override for every selected skill,
@@ -544,7 +558,7 @@ async function pushCore(
   const pruned = await prunePendingPushes(
     localConfig.repo.localPath,
     pushState.pendingPushes,
-    allItems,
+    fullScan,
   );
   pushState.pendingPushes = pruned.pending;
   if (pruned.changed) {
@@ -826,6 +840,14 @@ async function pushTeamConfigOnly(
     await checkoutMaster(localConfig.repo.localPath);
   } catch (e) {
     pushSpin.fail(`Push failed: ${(e as Error).message}`);
+    // pushRepoBranch may have left the repo on the push branch (e.g. it threw
+    // mid-push after creating the local branch). Switch back to the default
+    // branch so the next `teamai push` starts clean instead of stranded there.
+    try {
+      await checkoutMaster(localConfig.repo.localPath);
+    } catch (cleanupErr) {
+      log.debug(`Could not switch back to default branch: ${(cleanupErr as Error).message}`);
+    }
     process.exitCode = 1;
     return;
   }

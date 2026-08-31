@@ -6,7 +6,10 @@
  * unmerged resource looks "new" forever. Before this guard, every re-run created
  * another branch (names carry a timestamp) and another PR.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { push } from '../push.js';
 import {
   findPendingForItem, partiallySelectedEntries, pendingNamespaceFor, planPushGroups,
@@ -390,5 +393,80 @@ describe('push() with an open PR', () => {
     const saved = mockSaveStateForScope.mock.calls.at(-1)?.[0] as State;
     expect(saved.pendingPushes).toHaveLength(1);
     expect(saved.pendingPushes[0].branch).toBe('teamai/push/testuser/20260827-065032');
+  });
+
+  it('keeps other skills\' open-PR records when pushing a single --skill', async () => {
+    // --skill narrows the push to one skill, but the open PRs of the OTHER
+    // skills must survive: pruning against the narrowed scan would drop them
+    // and the next run would open duplicate PRs for them.
+    const targetEntry = makeEntry({
+      branch: 'teamai/push/testuser/target-branch',
+      prUrl: 'https://github.com/team/repo/pull/1',
+      items: [{ type: 'skills', name: 'target', relativePath: 'skills/js/target', namespace: 'js' }],
+    });
+    const otherEntry = makeEntry({
+      branch: 'teamai/push/testuser/other-branch',
+      prUrl: 'https://github.com/team/repo/pull/2',
+      items: [{ type: 'skills', name: 'other', relativePath: 'skills/js/other', namespace: 'js' }],
+    });
+    mockLoadStateForScope.mockResolvedValue(makeState([targetEntry, otherEntry]));
+    mockGetHandler.mockImplementation((type: string) => ({
+      scanLocalForPush: vi.fn().mockResolvedValue(
+        type === 'skills'
+          ? [makeItem({ name: 'target', sourcePath: '/home/u/.cursor/skills/target' }),
+            makeItem({ name: 'other', sourcePath: '/home/u/.cursor/skills/other' })]
+          : [],
+      ),
+      pushItem: vi.fn(),
+    }));
+
+    await push({ all: true, skill: 'target' });
+
+    const saved = mockSaveStateForScope.mock.calls.at(-1)?.[0] as State;
+    const branches = saved.pendingPushes.map((p) => p.branch).sort();
+    expect(branches).toContain('teamai/push/testuser/other-branch');
+  });
+
+  describe('force-constructed --skill (scanner returns nothing)', () => {
+    let tmpDir: string;
+    let skillDir: string;
+
+    beforeEach(() => {
+      // A real skill dir on disk: force-construct only runs when the target
+      // path exists with a SKILL.md but the scanner returned nothing for it
+      // (local content is byte-identical to the team repo, so no diff).
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-force-skill-'));
+      skillDir = path.join(tmpDir, 'solo-skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# solo\n');
+      // Scanner returns nothing → push must force-construct from the path.
+      mockGetHandler.mockImplementation(() => ({
+        scanLocalForPush: vi.fn().mockResolvedValue([]),
+        pushItem: vi.fn(),
+      }));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('keeps its own open-PR record instead of reopening a duplicate', async () => {
+      const entry = makeEntry({
+        branch: 'teamai/push/testuser/solo-branch',
+        prUrl: 'https://github.com/team/repo/pull/7',
+        items: [{ type: 'skills', name: 'solo-skill', relativePath: 'skills/solo-skill' }],
+      });
+      mockLoadStateForScope.mockResolvedValue(makeState([entry]));
+
+      await push({ all: true, skill: skillDir });
+
+      // The force-constructed skill is still locally present, so its record
+      // must survive the prune and the open PR must be updated, not duplicated.
+      expect(mockCreatePullRequest).not.toHaveBeenCalled();
+      expect(mockPushRepoBranch.mock.calls[0][3]).toBe('teamai/push/testuser/solo-branch');
+      expect(mockPushRepoBranch.mock.calls[0][4]).toEqual({ reuseBranch: true });
+      const saved = mockSaveStateForScope.mock.calls.at(-1)?.[0] as State;
+      expect(saved.pendingPushes.map((p) => p.branch)).toContain('teamai/push/testuser/solo-branch');
+    });
   });
 });
