@@ -153,9 +153,16 @@ export interface TranscriptScanResult {
  *
  * Uses a streaming line reader so large transcripts don't load fully into memory.
  * Returns zero counts on any error (file missing, too large, permission denied).
+ *
+ * Set `opts.frictionOnly` to true for low-latency foreground callers (e.g.
+ * contribute-check) that only need friction signals. On the CodeBuddy index.json
+ * path this skips the token-flush retry loop — friction comes from a single blob
+ * scan that completes before the retry, so no token wait is required. The Claude
+ * JSONL path is a single streaming scan with no retry, so the flag is a no-op there.
  */
 export async function scanTranscriptStop(
   transcriptPath: string,
+  opts?: { frictionOnly?: boolean },
 ): Promise<TranscriptScanResult> {
   let interrupt = 0;
   let toolReject = 0;
@@ -171,7 +178,7 @@ export async function scanTranscriptStop(
   // schema the streaming scanner below expects. Detect and parse that shape
   // separately — otherwise every line fails JSON.parse and tokens stay 0.
   if (path.basename(transcriptPath) === 'index.json') {
-    const cb = await scanCodebuddyIndex(transcriptPath);
+    const cb = await scanCodebuddyIndex(transcriptPath, opts?.frictionOnly ?? false);
     if (cb) return cb;
   }
 
@@ -323,7 +330,9 @@ async function readCodebuddyIndexOnce(
       ? data.messages.filter((m) => m?.role === 'user').length
       : 0;
 
-    // CodeBuddy transcripts don't expose interrupt / tool-reject / tool-error markers.
+    // CodeBuddy index.json carries no interrupt marker (kept 0). toolReject /
+    // toolError are extracted by scanCodebuddyIndex from messages/ blobs, so this
+    // function returns 0 for both and lets the outer layer overwrite them.
     return { interrupt: 0, toolReject: 0, toolError: 0, tokens, prompts };
   } catch (e) {
     log.warn(`dashboard: failed to scan CodeBuddy index: ${(e as Error).message}`);
@@ -339,6 +348,133 @@ function totalTokenCount(t: TokenUsage): number {
 /** Retry budget for waiting on CodeBuddy's post-Stop token-usage flush. */
 const CODEBUDDY_USAGE_MAX_ATTEMPTS = 8;
 const CODEBUDDY_USAGE_RETRY_MS = 250;
+/** Cap on CodeBuddy message blobs scanned for friction, to bound Stop-hook IO. */
+const CODEBUDDY_BLOB_MAX_COUNT = 2000;
+/** User-rejection marker CodeBuddy writes into a cancelled tool's result.errorMessage. */
+const CODEBUDDY_REJECT_MARKER = 'User rejected this command';
+
+/**
+ * Scan CodeBuddy message blobs for tool-reject and tool-error friction signals.
+ *
+ * `index.json` is only a skeleton (tokens + prompt list) and omits tool results,
+ * so the friction signals must be read from the sibling `messages/*.json` blobs,
+ * where each blob is one message turn.
+ *
+ * Detection criteria (verified against real CodeBuddy transcripts):
+ * - toolReject: a blob with `role === 'assistant'` whose `extra` field is a JSON
+ *   *string* (parsed a second time) yielding `extra.toolStatus` as
+ *   `{ [callId]: entry }`. An entry with `status === 'cancelled'` and
+ *   `result.errorMessage` containing {@link CODEBUDDY_REJECT_MARKER} counts as one
+ *   rejection. That marker is CodeBuddy's user-rejection-only fixed string, which
+ *   naturally excludes system auto-cancels (UNFINISHED TOOL / MalformedToolArgs)
+ *   and interrupt residue.
+ * - toolError: a blob with `role === 'tool'` whose `message` field is a JSON
+ *   *string* (parsed a second time) yielding `message.content` as an array of
+ *   `{ type: 'tool-result', toolCallId, isError, result }`. An element with
+ *   `isError === true` counts as one error. Executed tools and rejected tools both
+ *   carry `isError === false`, so only genuine execution errors are counted — this
+ *   aligns with Claude's "is_error=true and not a reject" semantics.
+ *
+ * Counts are de-duplicated per `callId` via Sets, since the same callId may appear
+ * in multiple blobs. The function never throws: any single-blob read/parse/shape
+ * failure is skipped, yielding a best-effort count. Blob count is capped at
+ * {@link CODEBUDDY_BLOB_MAX_COUNT} because this runs on the Stop hook, which
+ * has a fixed timeout budget — a pathologically large directory must not
+ * stall it.
+ */
+async function scanCodebuddyBlobs(
+  messagesDir: string,
+): Promise<{ toolReject: number; toolError: number }> {
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(messagesDir);
+  } catch {
+    return { toolReject: 0, toolError: 0 };
+  }
+
+  const blobPaths = names
+    .filter((n) => n.endsWith('.json'))
+    // Truncation is by lexicographic filename order (not chronological); real
+    // sessions have far fewer message turns than this cap, so correctness is
+    // unaffected — it only bounds Stop-hook IO.
+    .sort()
+    .slice(0, CODEBUDDY_BLOB_MAX_COUNT)
+    .map((n) => path.join(messagesDir, n));
+
+  const rejectedCallIds = new Set<string>();
+  const erroredCallIds = new Set<string>();
+
+  for (const blobPath of blobPaths) {
+    try {
+      const stat = await fs.promises.stat(blobPath);
+      if (stat.size === 0 || stat.size > INTERVENTION_SCAN_MAX_BYTES) continue;
+
+      const raw = await fs.promises.readFile(blobPath, 'utf-8');
+      const blob = JSON.parse(raw) as {
+        role?: unknown;
+        extra?: unknown;
+        message?: unknown;
+      };
+
+      if (blob.role === 'assistant') {
+        if (typeof blob.extra !== 'string') continue;
+        let extra: unknown;
+        try {
+          extra = JSON.parse(blob.extra);
+        } catch {
+          continue;
+        }
+        const toolStatus = (extra as { toolStatus?: unknown } | null)?.toolStatus;
+        if (!toolStatus || typeof toolStatus !== 'object') continue;
+        for (const [callId, entry] of Object.entries(
+          toolStatus as Record<string, unknown>,
+        )) {
+          if (!entry || typeof entry !== 'object') continue;
+          const e = entry as {
+            status?: unknown;
+            result?: { errorMessage?: unknown } | null;
+          };
+          if (
+            e.status === 'cancelled' &&
+            typeof e.result?.errorMessage === 'string' &&
+            e.result.errorMessage.includes(CODEBUDDY_REJECT_MARKER)
+          ) {
+            rejectedCallIds.add(callId);
+          }
+        }
+      } else if (blob.role === 'tool') {
+        if (typeof blob.message !== 'string') continue;
+        let message: unknown;
+        try {
+          message = JSON.parse(blob.message);
+        } catch {
+          continue;
+        }
+        const content = (message as { content?: unknown } | null)?.content;
+        if (!Array.isArray(content)) continue;
+        for (const item of content) {
+          if (!item || typeof item !== 'object') continue;
+          const i = item as {
+            type?: unknown;
+            toolCallId?: unknown;
+            isError?: unknown;
+          };
+          if (
+            i.type === 'tool-result' &&
+            i.isError === true &&
+            typeof i.toolCallId === 'string'
+          ) {
+            erroredCallIds.add(i.toolCallId);
+          }
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { toolReject: rejectedCallIds.size, toolError: erroredCallIds.size };
+}
 
 /**
  * Scan a CodeBuddy `index.json` for a cumulative, idempotent token + prompt
@@ -349,27 +485,65 @@ const CODEBUDDY_USAGE_RETRY_MS = 250;
  * already written (prompts are captured) but `requests[].usage` still zero. Without
  * a retry, single-turn / last-turn sessions would permanently record 0 tokens. We
  * re-read (up to ~1.75s, well within the 60s hook timeout) until usage appears.
+ * This retry path is only exercised by background dashboard callers with a lax hook
+ * timeout; foreground low-latency callers (e.g. contribute-check) pass `frictionOnly`
+ * (see {@link scanTranscriptStop}) and skip the retry loop entirely.
+ *
+ * Friction signals (toolReject / toolError) are extracted once from the sibling
+ * `messages/` blob directory (see {@link scanCodebuddyBlobs}) and merged into the
+ * result. Blob contents don't change during the token-flush retry window, so they
+ * are scanned a single time before the loop to avoid amplifying IO. `interrupt`
+ * stays 0 — CodeBuddy has no on-disk marker for it.
  *
  * Returns null only when the file never parses as a CodeBuddy index — the caller
  * then falls back to the Claude JSONL scanner.
  */
 async function scanCodebuddyIndex(
   transcriptPath: string,
+  frictionOnly = false,
 ): Promise<TranscriptScanResult | null> {
+  const messagesDir = path.join(path.dirname(transcriptPath), 'messages');
+  const friction = await scanCodebuddyBlobs(messagesDir);
+
+  // Friction-only callers (e.g. the foreground contribute-check Stop hook) don't
+  // need token usage, so skip the token-flush retry loop entirely — friction is
+  // already complete from the single blob scan above. Saves up to ~1.75s of
+  // foreground hook budget.
+  if (frictionOnly) {
+    const once = await readCodebuddyIndexOnce(transcriptPath);
+    if (once) {
+      return { ...once, toolReject: friction.toolReject, toolError: friction.toolError };
+    }
+    // index.json unreadable, but we still have friction from the blobs.
+    return {
+      interrupt: 0,
+      toolReject: friction.toolReject,
+      toolError: friction.toolError,
+      tokens: emptyTokenUsage(),
+      prompts: 0,
+    };
+  }
+
   let last: TranscriptScanResult | null = null;
   for (let attempt = 0; attempt < CODEBUDDY_USAGE_MAX_ATTEMPTS; attempt++) {
     const result = await readCodebuddyIndexOnce(transcriptPath);
     if (result) {
       last = result;
       // Usage has been flushed — the snapshot is complete, stop waiting.
-      if (totalTokenCount(result.tokens) > 0) return result;
+      if (totalTokenCount(result.tokens) > 0) {
+        return { ...result, toolReject: friction.toolReject, toolError: friction.toolError };
+      }
     }
     if (attempt < CODEBUDDY_USAGE_MAX_ATTEMPTS - 1) {
       await new Promise((resolve) => setTimeout(resolve, CODEBUDDY_USAGE_RETRY_MS));
     }
   }
-  // Never observed non-zero usage: return the best (zero-token) snapshot we have,
-  // or null so the caller falls back to the Claude JSONL scanner.
+  // Never observed non-zero usage: return the best (zero-token) snapshot we have
+  // (with friction merged in), or null so the caller falls back to the Claude
+  // JSONL scanner.
+  if (last) {
+    return { ...last, toolReject: friction.toolReject, toolError: friction.toolError };
+  }
   return last;
 }
 
