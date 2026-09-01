@@ -1,4 +1,5 @@
 import path from 'node:path';
+import YAML from 'yaml';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
 import { resolveBaseDir, getPushignorePath, isAgentDisabled, scopedToolPaths } from '../types.js';
@@ -14,6 +15,16 @@ import { splitFrontmatter, stringifyFrontmatter } from '../utils/frontmatter.js'
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
 const SKILL_MD = 'SKILL.md';
+
+/** Add fields immediately before the closing delimiter without reformatting existing YAML. */
+function appendFrontmatterFields(raw: string, fields: Record<string, string>): string {
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const yaml = YAML.stringify(fields).trimEnd().replace(/\n/g, eol);
+  return raw.replace(
+    /(\r?\n---[ \t]*)(\r?\n|$)$/,
+    (_match, closing: string, trailing: string) => `${eol}${yaml}${closing}${trailing}`,
+  );
+}
 
 /**
  * Ensure a SKILL.md file has valid YAML frontmatter with `name` and `description`.
@@ -51,17 +62,13 @@ export async function ensureSkillFrontmatter(skillDir: string, skillName: string
 
   if (hasName && hasDescription) return false; // Already complete
 
-  if (!hasName) {
-    data['name'] = skillName;
-  }
-  if (!hasDescription) {
-    data['description'] = extractDescriptionFromContent(body, skillName);
-  }
+  const missingFields: Record<string, string> = {};
+  if (!hasName) missingFields.name = skillName;
+  if (!hasDescription) missingFields.description = extractDescriptionFromContent(body, skillName);
 
-  // Re-serialize the parsed frontmatter with the missing fields filled in. Note: if
-  // the original frontmatter had malformed YAML, splitFrontmatter yields an empty
-  // `data`, so the rebuilt block keeps only name/description and drops the bad content.
-  const newContent = stringifyFrontmatter(data, body);
+  // Preserve existing comments, quoting, key order, and line endings. Re-serializing
+  // the whole block would make an unrelated metadata repair unnecessarily lossy.
+  const newContent = appendFrontmatterFields(raw, missingFields) + body;
   await writeFile(skillMdPath, newContent);
   log.debug(`Added missing frontmatter fields to ${skillName}/SKILL.md`);
   return true;

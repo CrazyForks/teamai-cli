@@ -4,7 +4,7 @@ import matter from 'gray-matter';
 export interface FrontmatterSplit {
   /** Parsed frontmatter fields. Empty object when absent or unparseable. */
   data: Record<string, unknown>;
-  /** Whether the frontmatter parsed to a mapping/object. */
+  /** Whether a present frontmatter block parsed to a plain YAML mapping. Meaningful only when `raw` is non-empty. */
   valid: boolean;
   /** Document body after the frontmatter block (any leading BOM removed). */
   body: string;
@@ -21,6 +21,13 @@ const FRONTMATTER_BLOCK = /^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/
 /** Strip a single leading UTF-8 BOM if present. */
 function stripBom(text: string): string {
     return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+}
+
+/** YAML mappings parse to plain records; scalars such as timestamps may still be objects. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
 }
 
 /**
@@ -41,11 +48,13 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
     let data: Record<string, unknown> = {};
     let valid = false;
     try {
-        const parsed = matter(raw);
-        if (parsed.data === null || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
+        // Passing options disables gray-matter's module-level cache. Cache entries
+        // otherwise survive parse failures and share mutable `data` references.
+        const parsed = matter(raw, {});
+        if (!isPlainRecord(parsed.data)) {
             return { data: {}, valid: false, body, raw };
         }
-        data = parsed.data as Record<string, unknown>;
+        data = { ...parsed.data };
         valid = true;
     } catch {
         data = {};

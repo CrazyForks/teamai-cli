@@ -349,7 +349,7 @@ Choose namespace [1-3] (default: 1 = common):
 
 **更新已存在的 PR 而非重复创建：** 如果某个资源已在一个未合并的 PR 中等待评审，再次对它执行 `teamai push` 会就地更新那个已存在的 PR（通过 force-push 其分支），而不是新开一个重复的 PR。保持该资源被选中即更新其 PR；取消勾选则不动它。同一次运行中选中的其他无关资源会进入各自新开的 PR。一旦该 PR 合并（或其分支从远端删除），记录会被清除，下次 push 照常新开 PR。
 
-**YAML Frontmatter 自动补全：** 推送时 CLI 自动检查 `SKILL.md`，缺少 `name`/`description` 则自动补全，无需手动维护。
+**YAML Frontmatter 自动补全：** 推送时 CLI 自动检查合法的 mapping 形式 `SKILL.md` frontmatter，缺少 `name`/`description` 则自动补全。格式损坏或根节点为标量时会保留原文并告警，需要手动修复。
 
 ### 查看状态
 
@@ -433,6 +433,8 @@ teamai push --role pm
 > tags: [deploy, automation]
 > ---
 > ```
+>
+> YAML 格式损坏或 frontmatter 根节点不是 mapping 时，CLI 会保留原文并输出告警；请手动修复后再推送。
 
 启用角色化 skills 后，push 的目标目录为：
 

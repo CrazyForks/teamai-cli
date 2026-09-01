@@ -351,7 +351,7 @@ Choose namespace [1-3] (default: 1 = common):
 
 **Updating an open PR instead of duplicating it:** If a resource is already waiting in an unmerged PR, re-running `teamai push` on it updates that existing PR in place (by force-pushing its branch) rather than opening a duplicate. Keep the resource selected to update its PR; deselect it to leave the PR untouched. Unrelated resources selected in the same run go into their own new PR. Once the PR merges (or its branch is removed from the remote), the record is cleared and the next push opens a fresh PR as usual.
 
-**Automatic YAML frontmatter completion:** When pushing, the CLI automatically checks `SKILL.md` and fills in `name`/`description` if missing — no manual upkeep required.
+**Automatic YAML frontmatter completion:** When pushing, the CLI automatically checks valid mapping-style `SKILL.md` frontmatter and fills in `name`/`description` if missing. Malformed or scalar frontmatter is left unchanged with a warning and must be fixed manually.
 
 ### Check status
 
@@ -435,6 +435,8 @@ teamai push --role pm
 > tags: [deploy, automation]
 > ---
 > ```
+>
+> Malformed YAML or a non-mapping frontmatter root is preserved unchanged and reported as a warning; fix it manually before pushing again.
 
 With role-based skills enabled, the push target directory becomes:
 

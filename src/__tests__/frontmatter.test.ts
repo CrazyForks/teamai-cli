@@ -45,6 +45,12 @@ describe('parseFrontmatter – malformed YAML', () => {
         const { data } = parseFrontmatter('---\n: : :\n---\nx');
         expect(data).toEqual({});
     });
+
+    it('remains invalid when the same malformed block is parsed repeatedly', () => {
+        const input = '---\nname: original\ncustom: [\n---\nbody';
+        expect(splitFrontmatter(input).valid).toBe(false);
+        expect(splitFrontmatter(input).valid).toBe(false);
+    });
 });
 
 describe('splitFrontmatter – round-trip', () => {
@@ -81,6 +87,18 @@ describe('splitFrontmatter – root shape', () => {
 
     it('marks mapping frontmatter as valid', () => {
         expect(splitFrontmatter('---\nname: foo\n---\nbody').valid).toBe(true);
+    });
+
+    it('marks sequence and timestamp roots as invalid', () => {
+        expect(splitFrontmatter('---\n- item\n---\nbody').valid).toBe(false);
+        expect(splitFrontmatter('---\n2020-01-01\n---\nbody').valid).toBe(false);
+    });
+
+    it('does not share parsed data between identical blocks', () => {
+        const input = '---\ntrigger: shared\n---\nbody';
+        const first = splitFrontmatter(input);
+        first.data.name = 'mutated';
+        expect(splitFrontmatter(input).data).toEqual({ trigger: 'shared' });
     });
 });
 
