@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { log } from './utils/logger.js';
-import { readJson, writeJson, ensureDir } from './utils/fs.js';
+import { readJson, writeJson, ensureDir, readFileSafe, writeFile } from './utils/fs.js';
 import { readEvents, aggregateSessionMetrics, scanTranscriptStop } from './dashboard-collector.js';
 import { readRecallQuality } from './recall-quality.js';
 import { deriveSessionId } from './utils/session-id.js';
@@ -123,6 +123,19 @@ function getSessionPath(sessionId: string): string {
     '.teamai',
     'sessions',
     `${sanitizeSessionId(sessionId)}.json`,
+  );
+}
+
+/**
+ * Get the sidecar used for vote nudges. Keep it separate from the contribute
+ * state JSON because the Stop handlers run concurrently and independently.
+ */
+function getPendingVotesHintPath(sessionId: string): string {
+  return path.join(
+    getUserHome(),
+    '.teamai',
+    'sessions',
+    `${sanitizeSessionId(sessionId)}.votes-hint`,
   );
 }
 
@@ -707,8 +720,11 @@ export async function contributeCheck(toolArg?: string): Promise<void> {
  * Used for tools (codebuddy/workbuddy) whose Stop hook ignores stdout.
  */
 export async function stashVotesHint(sessionId: string, hintText: string): Promise<void> {
-  const state = await readContributeState(sessionId);
-  await writeContributeState(sessionId, { ...state, pendingVotesHint: hintText });
+  try {
+    await writeFile(getPendingVotesHintPath(sessionId), hintText);
+  } catch (e) {
+    log.error(`Failed to write pending votes hint: ${(e as Error).message}`);
+  }
 }
 
 /**
@@ -716,6 +732,14 @@ export async function stashVotesHint(sessionId: string, hintText: string): Promi
  * Returns the hint text or null. Clearing preserves all other state.
  */
 export async function takePendingVotesHint(sessionId: string): Promise<string | null> {
+  const sidecarPath = getPendingVotesHintPath(sessionId);
+  const sidecarHint = await readFileSafe(sidecarPath);
+  if (sidecarHint !== null) {
+    await fs.promises.unlink(sidecarPath).catch(() => undefined);
+    return sidecarHint;
+  }
+
+  // Read legacy state written by an earlier PR 371 build, if present.
   const state = await readContributeState(sessionId);
   if (!state.pendingVotesHint) return null;
   const hint = state.pendingVotesHint;

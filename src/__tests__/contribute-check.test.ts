@@ -8,6 +8,8 @@ import {
   computeSmartScore,
   contributeCheckForSession,
   takePendingHint,
+  stashVotesHint,
+  takePendingVotesHint,
 } from '../contribute-check.js';
 import { appendEvent } from '../dashboard-collector.js';
 import {
@@ -61,6 +63,17 @@ describe('contributeState', () => {
 
     const readB = await readContributeState('session-bbb');
     expect(readB.contributed).toBe(true);
+  });
+
+  it('stores vote hints independently from contribute state', async () => {
+    const sessionId = 'independent-votes-hint';
+    await writeContributeState(sessionId, { contributed: false, pendingHint: 'contribute' });
+
+    await stashVotesHint(sessionId, 'votes');
+
+    expect(await takePendingVotesHint(sessionId)).toBe('votes');
+    expect((await readContributeState(sessionId)).pendingHint).toBe('contribute');
+    expect(await takePendingVotesHint(sessionId)).toBeNull();
   });
 
   it('returns defaults when session file does not exist', async () => {
