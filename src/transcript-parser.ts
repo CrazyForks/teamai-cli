@@ -115,7 +115,9 @@ function extractRecalledDocIds(text: string, out: Set<string>): void {
 }
 
 function extractReferencedDocIds(text: string, out: Set<string>): void {
-  const pattern = /<!--\s*teamai:referenced-doc-ids:\s*\[([^\]]*)\]\s*-->/g;
+  // Case-insensitive; accept --> or —> (em-dash variant) as closing delimiter.
+  // Closed delimiter is required — bare [^\]]* prevents unclosed strings from bleeding past.
+  const pattern = /<!--\s*teamai:referenced-doc-ids:\s*\[([^\]]*)\]\s*(?:-->|—>)/gi;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {

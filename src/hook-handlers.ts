@@ -211,7 +211,7 @@ const pendingHintHandler: HookHandler = {
     const { STOP_STDOUT_UNSUPPORTED_TOOLS } = await import('./utils/tool-names.js');
     if (!STOP_STDOUT_UNSUPPORTED_TOOLS.has(tool)) return null;
 
-    const { takePendingHint } = await import('./contribute-check.js');
+    const { takePendingHint, takePendingVotesHint } = await import('./contribute-check.js');
     // Must match contributeCheckHandler's derivation so Stop and UserPromptSubmit
     // resolve to the same session file. This cross-process handoff relies on
     // codebuddy/workbuddy sending a stable, consistent session_id on BOTH the
@@ -221,12 +221,16 @@ const pendingHintHandler: HookHandler = {
     // differ across the two hook processes and orphan the stash (best-effort).
     const sessionId = deriveSessionId(stdin, { includeCwd: true });
     const hint = await takePendingHint(sessionId);
-    if (!hint) return null;
+    const votesHint = await takePendingVotesHint(sessionId);
+
+    // Merge: combine both pending hints if present, newline-separated.
+    const combined = [hint, votesHint].filter(Boolean).join('\n');
+    if (!combined) return null;
 
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: hint,
+        additionalContext: combined,
       },
     });
   },
@@ -249,13 +253,15 @@ const votesSyncHandler: HookHandler = {
       // autoDetectInit picks project scope when present (so self-mode configs are
       // honored), falling back to user scope otherwise.
       const { localConfig } = await autoDetectInit();
-      const { VOTES_LOCAL_DIR, TEAMAI_SESSIONS_DIR } = await import('./types.js');
+      const { VOTES_LOCAL_DIR } = await import('./types.js');
       const votesDir = VOTES_LOCAL_DIR;
       const votePath = path.join(votesDir, `${localConfig.username}.yaml`);
 
-      // Record the adoptions the main conversation declared.
-      if (voteData.referencedDocIds.length > 0) {
-        await incrementUpvoted(votePath, voteData.referencedDocIds);
+      // Only count upvotes for docs actually recalled this session, to avoid crediting hallucinated/distractor doc-ids
+      const recalledSet = new Set(voteData.recalledDocIds);
+      const verifiedDocIds = voteData.referencedDocIds.filter((id) => recalledSet.has(id));
+      if (verifiedDocIds.length > 0) {
+        await incrementUpvoted(votePath, verifiedDocIds);
       }
       if (localConfig.repo.kind === 'self') {
         // Self mode: votes are report data → the teamai-reports orphan branch,
@@ -277,31 +283,20 @@ const votesSyncHandler: HookHandler = {
       }
 
       // Enforcement: recall happened but nothing was declared → nudge the model
-      // once to declare which recalled docs it actually used. The nudge makes the
+      // to declare which recalled docs it actually used. The nudge makes the
       // model continue; on the next Stop the declaration is recorded above.
+      // No once-per-session marker is needed: if the model declares on the
+      // next turn, declared.length > 0 and this branch is skipped naturally.
+      // Degradation: if the model never declares referenced-doc-ids for the
+      // entire session, every Stop triggers a nudge — this is intentional
+      // (keeps the model honest) and should not be suppressed with a marker.
       const sessionId = deriveSessionId(stdin, { includeCwd: true });
       const recalled = voteData.recalledDocIds;
       const declared = voteData.referencedDocIds;
       let nudged = false;
 
       if (recalled.length > 0 && declared.length === 0) {
-        const fsp = await import('node:fs/promises');
-        const safeId = sessionId.replace(/[^a-zA-Z0-9_.-]/g, '_');
-        const marker = path.join(TEAMAI_SESSIONS_DIR, `${safeId}-adoption-nudged`);
-        let already = false;
-        try { await fsp.access(marker); already = true; } catch { already = false; }
-        if (!already) {
-          try {
-            const { ensureDir } = await import('./utils/fs.js');
-            await ensureDir(TEAMAI_SESSIONS_DIR);
-            await fsp.writeFile(marker, '');
-            // Only nudge once we've persisted the marker, so a write failure
-            // degrades to "no nudge this Stop" rather than re-nudging every Stop.
-            nudged = true;
-          } catch {
-            // Could not persist the marker — skip the nudge this Stop; retry next.
-          }
-        }
+        nudged = true;
       }
 
       // A/B measurement (opt-in): one line per Stop.
@@ -325,9 +320,17 @@ const votesSyncHandler: HookHandler = {
 
       if (nudged) {
         const { formatStopHookOutput } = await import('./utils/hook-output.js');
+        const { STOP_STDOUT_UNSUPPORTED_TOOLS } = await import('./utils/tool-names.js');
         const msg =
           `你本次通过 teamai 召回了团队知识（候选 doc-id：${recalled.join(', ')}）。` +
           `结束前请在回复末尾声明你实际用到的条目：<!-- teamai:referenced-doc-ids: [用到的doc-id] -->；没用到就留空 []。`;
+        // For tools whose Stop stdout is ignored, stash the nudge for delivery
+        // on the next UserPromptSubmit (same cross-process mechanism as contribute).
+        if (STOP_STDOUT_UNSUPPORTED_TOOLS.has(tool ?? '')) {
+          const { stashVotesHint } = await import('./contribute-check.js');
+          await stashVotesHint(sessionId, msg);
+          return null;
+        }
         return formatStopHookOutput(msg, tool ?? 'claude');
       }
     } catch {

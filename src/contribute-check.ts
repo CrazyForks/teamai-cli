@@ -153,6 +153,7 @@ export async function readContributeState(sessionId: string): Promise<Contribute
           ? normalizePromptSummary(raw.promptSummary)
           : undefined,
         pendingHint: typeof raw.pendingHint === 'string' ? raw.pendingHint : undefined,
+        pendingVotesHint: typeof raw.pendingVotesHint === 'string' ? raw.pendingVotesHint : undefined,
       };
     }
     return defaultState();
@@ -699,6 +700,27 @@ export async function contributeCheck(toolArg?: string): Promise<void> {
     const { formatStopHookOutput } = await import('./utils/hook-output.js');
     process.stdout.write(formatStopHookOutput(hint, toolArg ?? 'claude'));
   }
+}
+
+/**
+ * Stash a votes-nudge hint for delivery on the next UserPromptSubmit.
+ * Used for tools (codebuddy/workbuddy) whose Stop hook ignores stdout.
+ */
+export async function stashVotesHint(sessionId: string, hintText: string): Promise<void> {
+  const state = await readContributeState(sessionId);
+  await writeContributeState(sessionId, { ...state, pendingVotesHint: hintText });
+}
+
+/**
+ * Read and clear a pending votes-nudge hint for this session, if any.
+ * Returns the hint text or null. Clearing preserves all other state.
+ */
+export async function takePendingVotesHint(sessionId: string): Promise<string | null> {
+  const state = await readContributeState(sessionId);
+  if (!state.pendingVotesHint) return null;
+  const hint = state.pendingVotesHint;
+  await writeContributeState(sessionId, { ...state, pendingVotesHint: undefined });
+  return hint;
 }
 
 /**

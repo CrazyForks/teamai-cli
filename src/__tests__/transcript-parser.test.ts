@@ -228,4 +228,54 @@ describe('parseTranscriptForVotes', () => {
     const result = await parseTranscriptForVotes(filePath);
     expect(result.recalledDocIds).toEqual(['real-doc-id']);
   });
+
+  // ── 改动 1: extractReferencedDocIds 正则放宽边界测试 ──────────
+
+  it('referenced-doc-ids: case-insensitive variant is parsed (e.g. REFERENCED-DOC-IDS)', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- Teamai:REFERENCED-DOC-IDS: [case-insensitive-doc] -->',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('case-insensitive-doc');
+  });
+
+  it('referenced-doc-ids: em-dash closing (—>) is parsed', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- teamai:referenced-doc-ids: [em-dash-doc] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('em-dash-doc');
+  });
+
+  it('referenced-doc-ids: missing closing delimiter is NOT parsed (negative case)', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- teamai:referenced-doc-ids: [no-close-doc]',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toEqual([]);
+  });
 });

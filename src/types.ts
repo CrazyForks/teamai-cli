@@ -901,6 +901,12 @@ export interface ContributeState {
    * that deliver the hint directly through the Stop hook.
    */
   pendingHint?: string;
+  /**
+   * A votes-nudge message awaiting delivery via UserPromptSubmit (stashed when
+   * Stop stdout is unsupported). Independent of pendingHint so the two channels
+   * never collide. Cleared once injected.
+   */
+  pendingVotesHint?: string;
 }
 
 /**
