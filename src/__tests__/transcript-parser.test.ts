@@ -158,6 +158,32 @@ describe('parseTranscriptForVotes', () => {
     expect(result.referencedDocIds).toEqual([]);
   });
 
+  it('detects recalled markers when message.content is a plain string', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: 'Tool output.<!-- teamai:recalled-doc-ids: [doc-string] -->',
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('doc-string');
+  });
+
+  it('detects recalled markers in top-level toolUseResult stdout', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      toolUseResult: {
+        stdout: '<!-- teamai:recalled-doc-ids: [doc-stdout] -->',
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('doc-stdout');
+  });
+
   it('extracts Bash recall regions from tool_result content', async () => {
     const filePath = path.join(tmpDir, 'transcript.jsonl');
     writeLine(filePath, {

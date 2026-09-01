@@ -32,6 +32,12 @@ export async function parseTranscriptForVotes(transcriptPath: string): Promise<T
     const trimmed = line.trim();
     if (!trimmed) continue;
 
+    // Host transcript schemas vary. Keep a raw-line fallback for recalled
+    // markers that may live outside message.content (for example a plain
+    // content string or top-level toolUseResult.stdout). Parsed scans below
+    // additionally handle multiline recall regions after JSON decoding.
+    extractRecalledDocIdsFromComment(trimmed, recalledSet);
+
     let entry: Record<string, unknown>;
     try {
       entry = JSON.parse(trimmed) as Record<string, unknown>;

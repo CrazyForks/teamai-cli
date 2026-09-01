@@ -754,7 +754,9 @@ export async function claimVotesNudge(sessionId: string): Promise<boolean> {
   try {
     await ensureDir(path.dirname(markerPath));
     await fs.promises.writeFile(markerPath, '{}\n', { encoding: 'utf-8', flag: 'wx' });
-    await cleanupStaleSessions(path.dirname(markerPath), sessionId);
+    // The claim is complete once the exclusive marker write succeeds. Cleanup
+    // is best-effort and must not swallow Cursor's one allowed nudge.
+    await cleanupStaleSessions(path.dirname(markerPath), sessionId).catch(() => undefined);
     return true;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false;

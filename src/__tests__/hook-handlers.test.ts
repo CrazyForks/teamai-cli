@@ -11,7 +11,7 @@ const mockTrackFromParsed = vi.fn().mockResolvedValue(undefined);
 const mockTrackSlashFromParsed = vi.fn().mockResolvedValue(undefined);
 const mockContributeCheckForSession = vi.fn().mockResolvedValue({ hint: null });
 const mockTakePendingHint = vi.fn().mockResolvedValue(null);
-const mockTakePendingVotesHint = vi.fn().mockResolvedValue(undefined);
+const mockTakePendingVotesHint = vi.fn().mockResolvedValue(null);
 const mockStashVotesHint = vi.fn().mockResolvedValue(undefined);
 const mockClaimVotesNudge = vi.fn().mockResolvedValue(true);
 const mockParseTranscriptForVotes = vi.fn().mockResolvedValue({ referencedDocIds: [], recalledDocIds: [] });
@@ -704,7 +704,7 @@ describe('hook-handlers registry', () => {
     )!.handler;
 
     mockTakePendingHint.mockResolvedValueOnce(null);
-    mockTakePendingVotesHint.mockResolvedValueOnce(undefined);
+    mockTakePendingVotesHint.mockResolvedValueOnce(null);
 
     const result = await handler.execute({ session_id: 'sid-both-absent', cwd: '/x' }, 'codebuddy');
     expect(result).toBeNull();

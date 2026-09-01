@@ -85,6 +85,15 @@ describe('contributeState', () => {
     expect(await claimVotesNudge('cursor-nudge')).toBe(false);
   });
 
+  it('keeps a successful Cursor claim when stale cleanup fails', async () => {
+    const readdir = vi.spyOn(fs.promises, 'readdir').mockRejectedValueOnce(new Error('EMFILE'));
+
+    expect(await claimVotesNudge('cursor-cleanup-failure')).toBe(true);
+    expect(await claimVotesNudge('cursor-cleanup-failure')).toBe(false);
+
+    readdir.mockRestore();
+  });
+
   it('returns defaults when session file does not exist', async () => {
     const state = await readContributeState('nonexistent-session');
     expect(state).toEqual({ contributed: false });
