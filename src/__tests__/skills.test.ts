@@ -838,6 +838,49 @@ describe('ensureSkillFrontmatter', () => {
     expect(body).toContain('Does cool things.');
   });
 
+  it('does not throw or overwrite malformed frontmatter', async () => {
+    const skillDir = path.join(tmpDir, 'malformed');
+    await fse.ensureDir(skillDir);
+    const original = '---\nname: original\ncustom: [\n---\n# Body\n';
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), original);
+
+    await expect(ensureSkillFrontmatter(skillDir, 'malformed')).resolves.toBe(false);
+    await expect(fse.readFile(path.join(skillDir, 'SKILL.md'), 'utf8')).resolves.toBe(original);
+  });
+
+  it('does not throw on scalar frontmatter', async () => {
+    const skillDir = path.join(tmpDir, 'scalar');
+    await fse.ensureDir(skillDir);
+    const original = '---\njust-a-scalar\n---\n# Body\n';
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), original);
+
+    await expect(ensureSkillFrontmatter(skillDir, 'scalar')).resolves.toBe(false);
+    await expect(fse.readFile(path.join(skillDir, 'SKILL.md'), 'utf8')).resolves.toBe(original);
+  });
+
+  it('preserves comments and quoting when adding a missing field', async () => {
+    const skillDir = path.join(tmpDir, 'preserve-format');
+    await fse.ensureDir(skillDir);
+    const original = '---\nname: preserve-format\n# keep me\nallowed-tools: "Bash(git:*)"\n---\n# Body\n';
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), original);
+
+    await expect(ensureSkillFrontmatter(skillDir, 'preserve-format')).resolves.toBe(true);
+    const updated = await fse.readFile(path.join(skillDir, 'SKILL.md'), 'utf8');
+    expect(updated).toContain('# keep me\nallowed-tools: "Bash(git:*)"');
+    expect(updated).toContain('description: Body\n---\n# Body\n');
+  });
+
+  it('completes byte-identical frontmatter independently for multiple skills', async () => {
+    for (const skillName of ['skill-a', 'skill-b']) {
+      const skillDir = path.join(tmpDir, skillName);
+      await fse.ensureDir(skillDir);
+      await fse.writeFile(path.join(skillDir, 'SKILL.md'), '---\ntrigger: shared\n---\n# Shared Body\n');
+      await expect(ensureSkillFrontmatter(skillDir, skillName)).resolves.toBe(true);
+      const { data } = parseFrontmatter(await fse.readFile(path.join(skillDir, 'SKILL.md'), 'utf8'));
+      expect(data).toMatchObject({ trigger: 'shared', name: skillName, description: 'Shared Body' });
+    }
+  });
+
   it('does not modify SKILL.md when frontmatter already has name and description', async () => {
     const skillDir = path.join(tmpDir, 'complete-skill');
     await fse.ensureDir(skillDir);

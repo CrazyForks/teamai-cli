@@ -4,6 +4,8 @@ import matter from 'gray-matter';
 export interface FrontmatterSplit {
   /** Parsed frontmatter fields. Empty object when absent or unparseable. */
   data: Record<string, unknown>;
+  /** Whether a present frontmatter block parsed to a plain YAML mapping. Meaningful only when `raw` is non-empty. */
+  valid: boolean;
   /** Document body after the frontmatter block (any leading BOM removed). */
   body: string;
   /** Verbatim leading frontmatter block including delimiters and trailing newline; '' when absent. */
@@ -21,6 +23,13 @@ function stripBom(text: string): string {
     return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
 }
 
+/** YAML mappings parse to plain records; scalars such as timestamps may still be objects. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Split a document into frontmatter data, its verbatim raw block, and the body.
  *
@@ -31,19 +40,26 @@ function stripBom(text: string): string {
 export function splitFrontmatter(content: string): FrontmatterSplit {
     const match = content.match(FRONTMATTER_BLOCK);
     if (!match) {
-        return { data: {}, body: stripBom(content), raw: '' };
+        return { data: {}, valid: false, body: stripBom(content), raw: '' };
     }
     const rawFull = match[0];
     const body = content.slice(rawFull.length);
     const raw = stripBom(rawFull);
     let data: Record<string, unknown> = {};
+    let valid = false;
     try {
-        const parsed = matter(raw);
-        data = (parsed.data ?? {}) as Record<string, unknown>;
+        // Passing options disables gray-matter's module-level cache. Cache entries
+        // otherwise survive parse failures and share mutable `data` references.
+        const parsed = matter(raw, {});
+        if (!isPlainRecord(parsed.data)) {
+            return { data: {}, valid: false, body, raw };
+        }
+        data = { ...parsed.data };
+        valid = true;
     } catch {
         data = {};
     }
-    return { data, body, raw };
+    return { data, valid, body, raw };
 }
 
 /** Parse frontmatter fields and body from a document. */
