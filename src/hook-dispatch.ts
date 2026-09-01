@@ -8,7 +8,7 @@
  * Design:
  *   - Handlers are pure functions: (stdin, tool) → output | null
  *   - Promise.allSettled ensures one handler crash doesn't take down others
- *   - At most one handler per event produces STDOUT output
+ *   - Compatible structured outputs are merged so concurrent hints are preserved
  */
 
 // ─── Public types ───────────────────────────────────────
@@ -43,7 +43,7 @@ export interface DispatchError {
 }
 
 export interface DispatchResult {
-  /** Combined STDOUT output (at most one handler produces output per event). */
+  /** Combined STDOUT output from all compatible output-producing handlers. */
   output: string | null;
   /** Errors from failed handlers (non-fatal — other handlers still ran). */
   errors: DispatchError[];
@@ -69,6 +69,57 @@ export interface Dispatcher {
 
 /** Default timeout: 60 seconds (matches Claude Code's default hook timeout). */
 const DEFAULT_TIMEOUT_MS = 60_000;
+
+type JsonObject = Record<string, unknown>;
+
+function asObject(value: unknown): JsonObject | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonObject
+    : null;
+}
+
+/** Merge the two hook output schemas used by the supported hosts. */
+function mergeHookOutputs(outputs: string[]): string | null {
+  if (outputs.length === 0) return null;
+  if (outputs.length === 1) return outputs[0];
+
+  let parsed: JsonObject[];
+  try {
+    parsed = outputs.map((output) => {
+      const value = asObject(JSON.parse(output));
+      if (!value) throw new Error('Hook output is not an object');
+      return value;
+    });
+  } catch {
+    // Preserve the historical first-output behavior for unknown/plain schemas.
+    return outputs[0];
+  }
+
+  const followups = parsed.map((value) => value.followup_message);
+  if (followups.every((value): value is string => typeof value === 'string')) {
+    return JSON.stringify({ ...parsed[0], followup_message: followups.join('\n') });
+  }
+
+  const specificOutputs = parsed.map((value) => asObject(value.hookSpecificOutput));
+  if (specificOutputs.every((value): value is JsonObject => value !== null)) {
+    const contexts = specificOutputs.map((value) => value.additionalContext);
+    const eventNames = new Set(specificOutputs.map((value) => value.hookEventName).filter(Boolean));
+    if (
+      contexts.every((value): value is string => typeof value === 'string')
+      && eventNames.size <= 1
+    ) {
+      return JSON.stringify({
+        ...parsed[0],
+        hookSpecificOutput: {
+          ...specificOutputs[0],
+          additionalContext: contexts.join('\n'),
+        },
+      });
+    }
+  }
+
+  return outputs[0];
+}
 
 /**
  * Wrap a promise with a timeout. Rejects with a timeout error if not resolved in time.
@@ -121,7 +172,7 @@ export function createDispatcher(config: DispatcherConfig): Dispatcher {
       );
 
       // Collect results
-      let output: string | null = null;
+      const outputs: string[] = [];
       const errors: DispatchError[] = [];
 
       for (let i = 0; i < settled.length; i++) {
@@ -134,14 +185,11 @@ export function createDispatcher(config: DispatcherConfig): Dispatcher {
             error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
           });
         } else if (result.status === 'fulfilled' && result.value != null) {
-          // First non-null output wins (at most one handler should produce output per event)
-          if (output === null) {
-            output = result.value;
-          }
+          outputs.push(result.value);
         }
       }
 
-      return { output, errors };
+      return { output: mergeHookOutputs(outputs), errors };
     },
   };
 }

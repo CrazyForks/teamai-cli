@@ -160,6 +160,35 @@ describe('hook-dispatch', () => {
 
       expect(result.output).toBeNull();
     });
+
+    it('merges additionalContext from concurrent handlers', async () => {
+      const first = createHandler('votes', JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'VOTES' },
+      }));
+      const second = createHandler('contribute', JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'CONTRIBUTE' },
+      }));
+      const dispatcher = createDispatcher({ handlers: [
+        { event: 'stop', matcher: '*', handler: first },
+        { event: 'stop', matcher: '*', handler: second },
+      ] });
+
+      const result = await dispatcher.dispatch('stop', '*', {}, 'claude');
+      const parsed = JSON.parse(result.output!);
+      expect(parsed.hookSpecificOutput.additionalContext).toBe('VOTES\nCONTRIBUTE');
+    });
+
+    it('merges Cursor followup messages from concurrent handlers', async () => {
+      const first = createHandler('votes', JSON.stringify({ followup_message: 'VOTES' }));
+      const second = createHandler('contribute', JSON.stringify({ followup_message: 'CONTRIBUTE' }));
+      const dispatcher = createDispatcher({ handlers: [
+        { event: 'stop', matcher: '*', handler: first },
+        { event: 'stop', matcher: '*', handler: second },
+      ] });
+
+      const result = await dispatcher.dispatch('stop', '*', {}, 'cursor');
+      expect(JSON.parse(result.output!).followup_message).toBe('VOTES\nCONTRIBUTE');
+    });
   });
 
   describe('stdin sharing', () => {

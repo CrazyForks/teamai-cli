@@ -158,6 +158,64 @@ describe('parseTranscriptForVotes', () => {
     expect(result.referencedDocIds).toEqual([]);
   });
 
+  it('detects recalled markers when message.content is a plain string', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: 'Tool output.<!-- teamai:recalled-doc-ids: [doc-string] -->',
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('doc-string');
+  });
+
+  it('detects recalled markers in top-level toolUseResult stdout', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      toolUseResult: {
+        stdout: '<!-- teamai:recalled-doc-ids: [doc-stdout] -->',
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('doc-stdout');
+  });
+
+  it('extracts Bash recall regions from tool_result content', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: '--- [teamai:recall:start] ---\nFile: /path/bash-recall.md\n--- [teamai:recall:end] ---',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('bash-recall');
+  });
+
+  it('parses case-insensitive recalled markers with smart delimiters', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: '<!— TeamAI:RECALLED-DOC-IDS: [smart-recall] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('smart-recall');
+  });
+
   it('referenced-doc-ids in a non-assistant line is NOT counted (assistant-only guard)', async () => {
     const filePath = path.join(tmpDir, 'transcript.jsonl');
     writeLine(filePath, {
@@ -227,5 +285,71 @@ describe('parseTranscriptForVotes', () => {
 
     const result = await parseTranscriptForVotes(filePath);
     expect(result.recalledDocIds).toEqual(['real-doc-id']);
+  });
+
+  // ── 改动 1: extractReferencedDocIds 正则放宽边界测试 ──────────
+
+  it('referenced-doc-ids: case-insensitive variant is parsed (e.g. REFERENCED-DOC-IDS)', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- Teamai:REFERENCED-DOC-IDS: [case-insensitive-doc] -->',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('case-insensitive-doc');
+  });
+
+  it('referenced-doc-ids: em-dash closing (—>) is parsed', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- teamai:referenced-doc-ids: [em-dash-doc] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('em-dash-doc');
+  });
+
+  it('referenced-doc-ids: smart opening and closing are parsed together', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!— teamai:referenced-doc-ids: [smart-doc] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('smart-doc');
+  });
+
+  it('referenced-doc-ids: missing closing delimiter is NOT parsed (negative case)', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!-- teamai:referenced-doc-ids: [no-close-doc]',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toEqual([]);
   });
 });
