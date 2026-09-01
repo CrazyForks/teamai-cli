@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { splitFrontmatter } from './utils/frontmatter.js';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -33,20 +34,8 @@ function slugify(title: string): string {
  * 若不存在，frontmatter 为空字符串。
  */
 function extractFrontmatter(md: string): { frontmatter: string; rest: string } {
-    if (!md.startsWith('---')) {
-        return { frontmatter: '', rest: md };
-    }
-    const endIdx = md.indexOf('\n---', 3);
-    if (endIdx === -1) {
-        return { frontmatter: '', rest: md };
-    }
-    const fmEnd = endIdx + 4; // past '\n---'
-    // 可能后面还有 \n
-    const afterFm = md[fmEnd] === '\n' ? fmEnd + 1 : fmEnd;
-    return {
-        frontmatter: md.slice(0, afterFm),
-        rest: md.slice(afterFm),
-    };
+    const { raw, body } = splitFrontmatter(md);
+    return { frontmatter: raw, rest: body };
 }
 
 // ─── Public API ─────────────────────────────────────────

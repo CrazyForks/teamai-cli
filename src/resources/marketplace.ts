@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readFileSafe, writeFile, pathExists, listDirs } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 
 // ─── Marketplace refresh ────────────────────────────────
 //
@@ -45,21 +46,11 @@ async function extractSkillDescription(skillDir: string): Promise<string> {
   const content = await readFileSafe(skillMdPath);
   if (!content) return '';
 
-  // Parse YAML frontmatter
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return '';
+  const { data } = parseFrontmatter(content);
+  const desc = data['description'];
+  if (!desc) return '';
 
-  const frontmatter = match[1];
-  // Extract description field (handles multi-line with >- or | or single line)
-  const descMatch = frontmatter.match(/description:\s*>-?\s*\n([\s\S]*?)(?=\n\w|\n---)/);
-  if (descMatch) {
-    return descMatch[1].split('\n').map(l => l.trim()).filter(l => l).join(' ');
-  }
-  const singleMatch = frontmatter.match(/description:\s*["']?(.+?)["']?\s*$/m);
-  if (singleMatch) {
-    return singleMatch[1].trim();
-  }
-  return '';
+  return String(desc).replace(/\s+/g, ' ').trim();
 }
 
 /**

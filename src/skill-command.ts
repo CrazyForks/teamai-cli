@@ -13,10 +13,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
-import YAML from 'yaml';
 import { ensureDir, remove, writeFile, pathExists, readFileSafe, readJson, writeJson } from './utils/fs.js';
 import { assertSafeResourceName, assertWithinRoot } from './utils/path-safety.js';
 import { log } from './utils/logger.js';
+import { parseFrontmatter } from './utils/frontmatter.js';
 
 /** Command types in the iWiki/clawpro contract. */
 export type SkillCommandType = 'install_skill' | 'uninstall_skill' | 'update_skill';
@@ -105,19 +105,12 @@ function resolveSkillPrefix(entries: Record<string, Uint8Array>, slug: string): 
   return null;
 }
 
-const FRONTMATTER_REGEX = /^---\n([\s\S]*?)\n---/;
-
 async function readSkillNameFromExtracted(skillDir: string): Promise<string | null> {
   const content = await readFileSafe(path.join(skillDir, 'SKILL.md'));
   if (!content) return null;
-  const fm = content.match(FRONTMATTER_REGEX);
-  if (!fm) return null;
-  try {
-    const parsed = YAML.parse(fm[1]);
-    if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string') {
-      return parsed.name.trim() || null;
-    }
-  } catch { /* malformed YAML — fall through */ }
+  const { data } = parseFrontmatter(content);
+  const name = data['name'];
+  if (typeof name === 'string') return name.trim() || null;
   return null;
 }
 

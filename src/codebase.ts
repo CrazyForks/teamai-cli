@@ -6,6 +6,7 @@ import matter from 'gray-matter';
 
 import { callClaude, getAICliName } from './utils/ai-client.js';
 import { createGit } from './utils/git.js';
+import { stripFrontmatter } from './utils/frontmatter.js';
 import { log } from './utils/logger.js';
 import type { CodebaseSuggestion, LintIssue, LintReport } from './types.js';
 
@@ -261,17 +262,7 @@ function buildFrontmatter(repoPath: string): string {
  * @returns   剥离 frontmatter 后的正文
  */
 function stripExistingFrontmatter(md: string): string {
-  if (!md.startsWith('---\n')) {
-    return md;
-  }
-  // 找到第二个 `---` 行的结束位置
-  const secondDash = md.indexOf('\n---\n', 4);
-  if (secondDash === -1) {
-    return md;
-  }
-  // 跳过 `\n---\n`（5 个字符），再跳过可能的空行
-  const afterFrontmatter = md.slice(secondDash + 5);
-  return afterFrontmatter.replace(/^\n+/, '');
+  return stripFrontmatter(md);
 }
 
 /**

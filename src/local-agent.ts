@@ -4,8 +4,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fse from 'fs-extra';
-import YAML from 'yaml';
 import { log } from './utils/logger.js';
+import { parseFrontmatter } from './utils/frontmatter.js';
 import {
   ensureDir,
   listDirs,
@@ -1593,14 +1593,7 @@ async function findMarkdownFile(extractDir: string, preferredName: string): Prom
 async function readFrontmatter(filePath: string): Promise<Record<string, unknown>> {
   const content = await readFileSafe(filePath);
   if (!content) return {};
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  try {
-    const parsed = YAML.parse(match[1]);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
+  return parseFrontmatter(content).data;
 }
 
 /**
