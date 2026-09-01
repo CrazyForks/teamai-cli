@@ -9,11 +9,11 @@ import { resolveOpenclawWorkspaceDir } from '../openclaw-hooks.js';
 import { getHermesHome } from '../hermes-home.js';
 import { loadRolesManifest, resolveRoleResourceNamespaces } from '../roles.js';
 import { assertWithinRoot } from '../utils/path-safety.js';
+import { splitFrontmatter, stringifyFrontmatter } from '../utils/frontmatter.js';
 
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
 const SKILL_MD = 'SKILL.md';
-const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---/;
 
 /**
  * Ensure a SKILL.md file has valid YAML frontmatter with `name` and `description`.
@@ -29,38 +29,34 @@ export async function ensureSkillFrontmatter(skillDir: string, skillName: string
   const content = await readFileSafe(skillMdPath);
   if (!content) return false;
 
-  const fmMatch = content.match(FRONTMATTER_REGEX);
+  const { data, body, raw } = splitFrontmatter(content);
 
-  if (!fmMatch) {
+  if (!raw) {
     // No frontmatter at all — derive description from first heading or first non-empty line
-    const description = extractDescriptionFromContent(content, skillName);
-    const frontmatter = `---\nname: ${skillName}\ndescription: ${description}\n---\n`;
-    const newContent = frontmatter + (content.startsWith('\n') ? content : '\n' + content);
+    const description = extractDescriptionFromContent(body, skillName);
+    const newContent = stringifyFrontmatter({ name: skillName, description }, body);
     await writeFile(skillMdPath, newContent);
     log.debug(`Injected YAML frontmatter into ${skillName}/SKILL.md`);
     return true;
   }
 
   // Frontmatter exists — check for missing fields
-  const fmBlock = fmMatch[0];
-  const fmBody = fmBlock.slice(4, fmBlock.length - 4); // strip leading/trailing ---\n
-  const hasName = /^name:\s*.+/m.test(fmBody);
-  const hasDescription = /^description:\s*.+/m.test(fmBody);
+  const hasName = typeof data['name'] === 'string' && String(data['name']).trim() !== '';
+  const hasDescription = typeof data['description'] === 'string' && String(data['description']).trim() !== '';
 
   if (hasName && hasDescription) return false; // Already complete
 
-  const lines = fmBody.split('\n');
   if (!hasName) {
-    lines.push(`name: ${skillName}`);
+    data['name'] = skillName;
   }
   if (!hasDescription) {
-    const restContent = content.slice(fmMatch[0].length);
-    const description = extractDescriptionFromContent(restContent, skillName);
-    lines.push(`description: ${description}`);
+    data['description'] = extractDescriptionFromContent(body, skillName);
   }
 
-  const newFrontmatter = `---\n${lines.join('\n')}\n---`;
-  const newContent = content.replace(FRONTMATTER_REGEX, newFrontmatter);
+  // Re-serialize the parsed frontmatter with the missing fields filled in. Note: if
+  // the original frontmatter had malformed YAML, splitFrontmatter yields an empty
+  // `data`, so the rebuilt block keeps only name/description and drops the bad content.
+  const newContent = stringifyFrontmatter(data, body);
   await writeFile(skillMdPath, newContent);
   log.debug(`Added missing frontmatter fields to ${skillName}/SKILL.md`);
   return true;

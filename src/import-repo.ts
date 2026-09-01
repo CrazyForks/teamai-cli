@@ -15,6 +15,7 @@ import {
 } from './utils/repo-cache.js';
 import { touchCacheEntry } from './utils/cache-index.js';
 import { log } from './utils/logger.js';
+import { hasFrontmatter, stripFrontmatter } from './utils/frontmatter.js';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -351,14 +352,14 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                 if (codebaseMd) {
                     const overviewPath = path.join(evidenceDest, 'overview.md');
                     const existing = await fs.readFile(overviewPath, 'utf8').catch(() => '');
-                    const aiNarrative = codebaseMd.replace(/^---[\s\S]*?---\n*/m, '');
+                    const aiNarrative = stripFrontmatter(codebaseMd);
                     const marker = '## AI Architecture Narrative';
                     const oldMarker = '## AI 架构叙事';
                     let markerIdx = existing.indexOf(marker);
                     if (markerIdx < 0) markerIdx = existing.indexOf(oldMarker);
                     const base = markerIdx >= 0 ? existing.slice(0, markerIdx).trimEnd() : existing.trimEnd();
                     let combined: string;
-                    if (!base || !base.startsWith('---')) {
+                    if (!base || !hasFrontmatter(base)) {
                         combined = `---\ntitle: ${slug} overview\ndomain: code-knowledge\n---\n\n${marker}\n\n${aiNarrative}`;
                     } else {
                         combined = base + '\n\n---\n\n' + marker + '\n\n' + aiNarrative;

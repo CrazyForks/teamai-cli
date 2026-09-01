@@ -1,10 +1,10 @@
 import path from 'node:path';
-import YAML from 'yaml';
 import { listDirs, pathExists, readFileSafe } from './utils/fs.js';
 import { detectInstalledAgents, type ResolvedAgent } from './known-agents.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { LocalConfig, TeamaiConfig } from './types.js';
 import { getUserHome } from './utils/home.js';
+import { parseFrontmatter } from './utils/frontmatter.js';
 
 // ─── Local agent skill scanning ─────────────────────────
 //
@@ -14,8 +14,6 @@ import { getUserHome } from './utils/home.js';
 //  from the team repo, which are CLI built-ins, which were
 //  pulled from a cross-team source, and which are local-only
 //  drafts that have not been pushed yet.
-
-const FRONTMATTER_REGEX = /^---\n([\s\S]*?)\n---/;
 
 export type SkillSource =
   | { kind: 'team'; namespace?: string }
@@ -195,17 +193,8 @@ export async function scanInstalledAgents(
 export async function readSkillDescription(skillMdPath: string): Promise<string> {
   const content = await readFileSafe(skillMdPath);
   if (!content) return '';
-  const fm = content.match(FRONTMATTER_REGEX);
-  if (!fm) return '';
-
-  let parsed: unknown;
-  try {
-    parsed = YAML.parse(fm[1]);
-  } catch {
-    return '';
-  }
-  if (!parsed || typeof parsed !== 'object') return '';
-  const desc = (parsed as Record<string, unknown>).description;
+  const { data } = parseFrontmatter(content);
+  const desc = data['description'];
   if (typeof desc !== 'string') return '';
 
   // Normalize whitespace: collapse newlines + indentation into single spaces

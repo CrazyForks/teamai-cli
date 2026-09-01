@@ -3,6 +3,7 @@ import fse from 'fs-extra';
 import YAML from 'yaml';
 import { loadTeamConfig, autoDetectInit, loadLocalConfig, detectProjectConfig } from './config.js';
 import { createGit, pullRepo } from './utils/git.js';
+import { parseFrontmatter } from './utils/frontmatter.js';
 import { detectProvider, getProvider } from './providers/index.js';
 import { log, spinner } from './utils/logger.js';
 import {
@@ -575,22 +576,11 @@ async function extractSkillDescription(skillDir: string): Promise<string> {
   const content = await readFileSafe(path.join(skillDir, 'SKILL.md'));
   if (!content) return '';
 
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return '';
+  const { data } = parseFrontmatter(content);
+  const desc = data['description'];
+  if (!desc) return '';
 
-  const frontmatter = match[1];
-
-  // Single-line description
-  const singleMatch = frontmatter.match(/description:\s*["']?(.+?)["']?\s*$/m);
-  if (singleMatch) return singleMatch[1].trim();
-
-  // Multi-line description
-  const multiMatch = frontmatter.match(/description:\s*>-?\s*\n([\s\S]*?)(?=\n\w|\n---)/);
-  if (multiMatch) {
-    return multiMatch[1].split('\n').map((l) => l.trim()).filter((l) => l).join(' ');
-  }
-
-  return '';
+  return String(desc).replace(/\s+/g, ' ').trim();
 }
 
 /**
