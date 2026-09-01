@@ -72,6 +72,18 @@ describe('splitFrontmatter – round-trip', () => {
     });
 });
 
+describe('splitFrontmatter – root shape', () => {
+    it('marks scalar frontmatter as invalid without exposing it as a record', () => {
+        const result = splitFrontmatter('---\njust-a-scalar\n---\nbody');
+        expect(result.valid).toBe(false);
+        expect(result.data).toEqual({});
+    });
+
+    it('marks mapping frontmatter as valid', () => {
+        expect(splitFrontmatter('---\nname: foo\n---\nbody').valid).toBe(true);
+    });
+});
+
 describe('parseFrontmatter – no trailing newline after closing delimiter', () => {
     it('parses frontmatter at end of string with no trailing newline', () => {
         const { data, body } = parseFrontmatter('---\nname: x\n---');

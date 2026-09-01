@@ -29,7 +29,7 @@ export async function ensureSkillFrontmatter(skillDir: string, skillName: string
   const content = await readFileSafe(skillMdPath);
   if (!content) return false;
 
-  const { data, body, raw } = splitFrontmatter(content);
+  const { data, body, raw, valid } = splitFrontmatter(content);
 
   if (!raw) {
     // No frontmatter at all — derive description from first heading or first non-empty line
@@ -38,6 +38,11 @@ export async function ensureSkillFrontmatter(skillDir: string, skillName: string
     await writeFile(skillMdPath, newContent);
     log.debug(`Injected YAML frontmatter into ${skillName}/SKILL.md`);
     return true;
+  }
+
+  if (!valid) {
+    log.warn(`Could not repair malformed frontmatter in ${skillName}/SKILL.md; leaving it unchanged`);
+    return false;
   }
 
   // Frontmatter exists — check for missing fields

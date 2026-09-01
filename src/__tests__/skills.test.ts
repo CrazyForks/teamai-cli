@@ -838,6 +838,24 @@ describe('ensureSkillFrontmatter', () => {
     expect(body).toContain('Does cool things.');
   });
 
+  it('does not throw or overwrite malformed frontmatter', async () => {
+    const skillDir = path.join(tmpDir, 'malformed');
+    await fse.ensureDir(skillDir);
+    const original = '---\nname: original\ncustom: [\n---\n# Body\n';
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), original);
+
+    await expect(ensureSkillFrontmatter(skillDir, 'malformed')).resolves.toBe(false);
+    await expect(fse.readFile(path.join(skillDir, 'SKILL.md'), 'utf8')).resolves.toBe(original);
+  });
+
+  it('does not throw on scalar frontmatter', async () => {
+    const skillDir = path.join(tmpDir, 'scalar');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), '---\njust-a-scalar\n---\n# Body\n');
+
+    await expect(ensureSkillFrontmatter(skillDir, 'scalar')).resolves.toBe(false);
+  });
+
   it('does not modify SKILL.md when frontmatter already has name and description', async () => {
     const skillDir = path.join(tmpDir, 'complete-skill');
     await fse.ensureDir(skillDir);

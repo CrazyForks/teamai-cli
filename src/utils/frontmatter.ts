@@ -4,6 +4,8 @@ import matter from 'gray-matter';
 export interface FrontmatterSplit {
   /** Parsed frontmatter fields. Empty object when absent or unparseable. */
   data: Record<string, unknown>;
+  /** Whether the frontmatter parsed to a mapping/object. */
+  valid: boolean;
   /** Document body after the frontmatter block (any leading BOM removed). */
   body: string;
   /** Verbatim leading frontmatter block including delimiters and trailing newline; '' when absent. */
@@ -31,19 +33,24 @@ function stripBom(text: string): string {
 export function splitFrontmatter(content: string): FrontmatterSplit {
     const match = content.match(FRONTMATTER_BLOCK);
     if (!match) {
-        return { data: {}, body: stripBom(content), raw: '' };
+        return { data: {}, valid: false, body: stripBom(content), raw: '' };
     }
     const rawFull = match[0];
     const body = content.slice(rawFull.length);
     const raw = stripBom(rawFull);
     let data: Record<string, unknown> = {};
+    let valid = false;
     try {
         const parsed = matter(raw);
-        data = (parsed.data ?? {}) as Record<string, unknown>;
+        if (parsed.data === null || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
+            return { data: {}, valid: false, body, raw };
+        }
+        data = parsed.data as Record<string, unknown>;
+        valid = true;
     } catch {
         data = {};
     }
-    return { data, body, raw };
+    return { data, valid, body, raw };
 }
 
 /** Parse frontmatter fields and body from a document. */
