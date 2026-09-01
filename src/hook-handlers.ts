@@ -368,9 +368,38 @@ const todowriteHintHandler: HookHandler = {
 
 const mrHintHandler: HookHandler = {
   name: 'mr-hint',
-  async execute(_stdin, _tool) {
-    const { computeMrHintOutput } = await import('./mr-hint.js');
-    return computeMrHintOutput();
+  async execute(stdin, _tool) {
+    const [{ computeMrHintOutput }, { computePackageHintOutput }] = await Promise.all([
+      import('./mr-hint.js'),
+      import('./pkg/pkg-hint.js'),
+    ]);
+    const [mrOutput, packageOutput] = await Promise.all([
+      computeMrHintOutput(),
+      computePackageHintOutput(resolveHookCwd(stdin) ?? process.cwd()),
+    ]);
+    if (!mrOutput) return packageOutput;
+    if (!packageOutput) return mrOutput;
+
+    try {
+      const mr = JSON.parse(mrOutput) as {
+        hookSpecificOutput?: { additionalContext?: string };
+      };
+      const pkg = JSON.parse(packageOutput) as {
+        hookSpecificOutput?: { additionalContext?: string };
+      };
+      const contexts = [
+        mr.hookSpecificOutput?.additionalContext,
+        pkg.hookSpecificOutput?.additionalContext,
+      ].filter((value): value is string => !!value);
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: contexts.join('\n\n'),
+        },
+      });
+    } catch {
+      return packageOutput;
+    }
   },
 };
 

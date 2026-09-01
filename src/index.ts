@@ -13,6 +13,7 @@ program
   .description('TeamAI — The team harness for AI agents')
   .version(version)
   .option('--dry-run', 'Preview mode, no changes made')
+  .option('-y, --yes', 'Accept non-interactive installation prompts')
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();
@@ -177,6 +178,17 @@ program
     const globalOpts = program.opts() as GlobalOptions;
     const { remove } = await import('./remove.js');
     await remove(type, names, globalOpts);
+  });
+
+program
+  .command('install [target]')
+  .description('Install team npm packages and Claude plugins declared in teamai.yaml')
+  .option('-g, --global', 'Install an npm target globally (for CLI tools)')
+  .option('--registry <url>', 'Use a specific npm registry for this target')
+  .action(async (target: string | undefined, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { pkgInstall } = await import('./pkg/commands.js');
+    await pkgInstall(target, { ...globalOpts, ...cmdOpts });
   });
 
 program

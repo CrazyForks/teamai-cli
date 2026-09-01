@@ -273,7 +273,23 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
 
     const { withKnowledgeWorktree, EmptyRepoError } = await import('./utils/reports-branch.js');
     try {
-      await withKnowledgeWorktree(localConfig, (wtConfig) => pushCore(wtConfig, teamConfig, options));
+      const activeConfigPath = path.join(localConfig.repo.localPath, 'teamai.yaml');
+      const activeConfig = await readFileSafe(activeConfigPath);
+      const businessRoot = localConfig.repo.businessRepoRoot ?? localConfig.projectRoot;
+      let pendingTeamConfig: string | null = null;
+      if (activeConfig !== null && businessRoot) {
+        const relativeConfigPath = path.relative(businessRoot, activeConfigPath).split(path.sep).join('/');
+        const committed = await getFileContentAtRev(businessRoot, 'HEAD', relativeConfigPath);
+        if (committed === null || committed.toString() !== activeConfig) {
+          pendingTeamConfig = activeConfig;
+        }
+      }
+      await withKnowledgeWorktree(localConfig, async (wtConfig) => {
+        if (pendingTeamConfig !== null) {
+          await writeFile(path.join(wtConfig.repo.localPath, 'teamai.yaml'), pendingTeamConfig);
+        }
+        await pushCore(wtConfig, teamConfig, options, pendingTeamConfig);
+      });
     } catch (e) {
       if (e instanceof EmptyRepoError) {
         log.error(e.message);
@@ -292,6 +308,7 @@ async function pushCore(
   localConfig: LocalConfig,
   teamConfig: TeamaiConfig,
   options: GlobalOptions & { all?: boolean; role?: string },
+  initialPendingTeamConfig: string | null = null,
 ): Promise<void> {
   const selfMode = localConfig.repo.kind === 'self';
   const scopeLabel = localConfig.scope;
@@ -310,7 +327,7 @@ async function pushCore(
   // below does `git reset --hard`, which would silently destroy them. Capture the
   // working-tree content before the reset and restore it after pull, so config edits
   // survive and get committed alongside resources (see gitFiles construction below).
-  let pendingTeamConfig: string | null = null;
+  let pendingTeamConfig: string | null = initialPendingTeamConfig;
   if (!selfMode) {
     const pullSpin = spinner('Pulling latest changes...').start();
     try {

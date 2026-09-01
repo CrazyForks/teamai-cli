@@ -163,6 +163,42 @@ teamai source remove other-team
 The add/remove change takes effect locally right away, and subscribed skills sync on the next
 `teamai pull`. Run `teamai push` when you want to share the `teamai.yaml` change with teammates.
 
+### Team Packages
+
+Use one command to restore npm dependencies and Claude Code plugins declared by
+the team. TeamAI delegates resolution and installation to the native `npm` and
+`claude plugin` CLIs; it does not copy package or plugin internals.
+
+```bash
+teamai install typescript
+teamai install @tencent/tokenlint@latest --global \
+  --registry https://mirrors.tencent.com/npm/
+teamai install code-review@claude-plugins-official
+teamai push                       # share the updated packages declaration for review
+
+teamai install                    # teammates install every declared package
+teamai install --dry-run          # preview native commands without writing files
+```
+
+Declarations live under `packages:` in the team repo's `teamai.yaml`. Successful
+installs write a `teamai.lock` snapshot under the active scope's local `.teamai`
+directory. SessionStart only hints when the
+declaration changes—it never silently executes third-party package or plugin code.
+`teamai doctor` reports the required runtimes and package installation status.
+Project dependencies are local by default. Use `--global` for npm CLI tools;
+`--registry` is persisted with the declaration so teammates use the same npm
+source. Registry credentials must remain in npm config or environment variables,
+not in `teamai.yaml`.
+
+```yaml
+packages:
+  npm:
+    - name: "@tencent/tokenlint"
+      version: latest
+      global: true
+      registry: https://mirrors.tencent.com/npm/
+```
+
 ## Knowledge Base
 
 Beyond distributing the Harness, TeamAI organizes accumulated team experience and code structure into a searchable knowledge base that the AI recalls automatically when needed.
@@ -230,6 +266,7 @@ The WASM parser is a pure-JavaScript dependency — no native toolchain is requi
 | `teamai init` | Initialize: OAuth login, link repo, register member, inject hooks |
 | `teamai pull` | Pull team resources and inject into local AI tools |
 | `teamai push` | Push local resources to a branch and open a Merge Request |
+| `teamai install [target]` | Install declared npm packages and Claude plugins; with a target, also update `teamai.yaml` |
 | `teamai status` | Show local vs team repo diff |
 | `teamai contribute` | Share session experience to team repo |
 | `teamai recall <query>` | Search the team knowledge base (BM25 + graph-boost) |

@@ -163,6 +163,36 @@ teamai source remove other-team
 添加/移除会立即在本机生效，订阅的 skills 会在下一次 `teamai pull` 时同步。需要将
 `teamai.yaml` 的改动分享给团队成员时，再运行 `teamai push`。
 
+### 团队包
+
+TeamAI 可统一恢复团队声明的 npm 依赖和 Claude Code 插件，实际解析与安装仍由
+原生 `npm`、`claude plugin` CLI 完成。
+
+```bash
+teamai install typescript
+teamai install @tencent/tokenlint@latest --global \
+  --registry https://mirrors.tencent.com/npm/
+teamai install code-review@claude-plugins-official
+teamai push                       # 通过评审分享声明
+
+teamai install                    # 队友一键安装全部声明
+teamai install --dry-run          # 只预览，不安装、不写文件
+```
+
+npm 包默认作为项目依赖安装；CLI 工具使用 `--global`。`--registry` 会随声明写入
+团队仓库的 `teamai.yaml`，但 registry 凭据必须存放在 npm 配置或环境变量中，
+不得写入 URL。安装快照存放在当前 scope 的本地 `.teamai/teamai.lock`。
+SessionStart 仅提示环境有更新，不会静默执行第三方代码。
+
+```yaml
+packages:
+  npm:
+    - name: "@tencent/tokenlint"
+      version: latest
+      global: true
+      registry: https://mirrors.tencent.com/npm/
+```
+
 ## 知识库
 
 除了分发 Harness，TeamAI 还把团队沉淀的经验和代码结构组织成可检索的知识库，让 AI 在需要时自动召回。
@@ -230,6 +260,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | `teamai init` | 初始化：OAuth 登录、关联仓库、注册成员、注入 hooks |
 | `teamai pull` | 拉取团队资源并注入到本地 AI 工具 |
 | `teamai push` | 推送本地资源到分支并创建合并请求 |
+| `teamai install [target]` | 安装团队 npm 包和 Claude 插件；带 target 时同步更新声明 |
 | `teamai status` | 显示本地与团队仓库的差异 |
 | `teamai contribute` | 将 session 经验分享到团队仓库 |
 | `teamai recall <query>` | 搜索团队知识库（BM25 + 图谱增强） |
