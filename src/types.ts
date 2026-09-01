@@ -580,10 +580,9 @@ export const SKILL_NAME_REGEX = /^[a-zA-Z0-9_\-:.]{1,200}$/;
 export const TEAMAI_USAGE_PATH = `${TEAMAI_HOME}/usage.jsonl`;
 export const TEAMAI_KNOWN_SKILLS_PATH = `${TEAMAI_HOME}/known-skills.json`;
 export const TEAMAI_PUSHIGNORE_PATH = `${TEAMAI_HOME}/pushignore`;
-export const TEAMAI_SESSIONS_DIR = `${TEAMAI_HOME}/sessions`;
 /**
  * Local monthly session logs (`teamai session save`). Kept in a dedicated dir —
- * not TEAMAI_SESSIONS_DIR, which holds per-session contribute-state `.json`.
+ * not the sessions directory, which holds per-session contribute-state `.json`.
  */
 export const SESSION_LOGS_LOCAL_DIR = `${TEAMAI_HOME}/session-logs`;
 
@@ -901,12 +900,6 @@ export interface ContributeState {
    * that deliver the hint directly through the Stop hook.
    */
   pendingHint?: string;
-  /**
-   * A votes-nudge message awaiting delivery via UserPromptSubmit (stashed when
-   * Stop stdout is unsupported). Independent of pendingHint so the two channels
-   * never collide. Cleared once injected.
-   */
-  pendingVotesHint?: string;
 }
 
 /**

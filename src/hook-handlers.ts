@@ -285,11 +285,9 @@ const votesSyncHandler: HookHandler = {
       // Enforcement: recall happened but nothing was declared → nudge the model
       // to declare which recalled docs it actually used. The nudge makes the
       // model continue; on the next Stop the declaration is recorded above.
-      // No once-per-session marker is needed: if the model declares on the
-      // next turn, declared.length > 0 and this branch is skipped naturally.
-      // Degradation: if the model never declares referenced-doc-ids for the
-      // entire session, every Stop triggers a nudge — this is intentional
-      // (keeps the model honest) and should not be suppressed with a marker.
+      // Most tools can retry until the model declares on the next turn. Cursor
+      // is capped below because followup_message itself forces another turn and
+      // would otherwise create an unbounded Stop loop.
       const sessionId = deriveSessionId(stdin, { includeCwd: true });
       const recalled = voteData.recalledDocIds;
       const declared = voteData.referencedDocIds;
@@ -297,6 +295,13 @@ const votesSyncHandler: HookHandler = {
 
       if (recalled.length > 0 && declared.length === 0) {
         nudged = true;
+        // Cursor's followup_message forces another model turn. Cap it to one
+        // per session so a model that never emits the declaration cannot enter
+        // an unbounded Stop → follow-up loop.
+        if ((tool ?? '').toLowerCase() === 'cursor') {
+          const { claimVotesNudge } = await import('./contribute-check.js');
+          nudged = await claimVotesNudge(sessionId);
+        }
       }
 
       // A/B measurement (opt-in): one line per Stop.

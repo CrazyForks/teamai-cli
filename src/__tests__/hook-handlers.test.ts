@@ -13,6 +13,7 @@ const mockContributeCheckForSession = vi.fn().mockResolvedValue({ hint: null });
 const mockTakePendingHint = vi.fn().mockResolvedValue(null);
 const mockTakePendingVotesHint = vi.fn().mockResolvedValue(undefined);
 const mockStashVotesHint = vi.fn().mockResolvedValue(undefined);
+const mockClaimVotesNudge = vi.fn().mockResolvedValue(true);
 const mockParseTranscriptForVotes = vi.fn().mockResolvedValue({ referencedDocIds: [], recalledDocIds: [] });
 const mockIncrementUpvoted = vi.fn().mockResolvedValue(undefined);
 const mockSyncVotesToTeam = vi.fn().mockResolvedValue(false);
@@ -45,6 +46,7 @@ vi.mock('../contribute-check.js', () => ({
   takePendingHint: mockTakePendingHint,
   takePendingVotesHint: mockTakePendingVotesHint,
   stashVotesHint: mockStashVotesHint,
+  claimVotesNudge: mockClaimVotesNudge,
 }));
 
 vi.mock('../update.js', () => ({
@@ -89,6 +91,8 @@ import { createDispatcher } from '../hook-dispatch.js';
 describe('hook-handlers registry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockParseTranscriptForVotes.mockResolvedValue({ referencedDocIds: [], recalledDocIds: [] });
+    mockClaimVotesNudge.mockResolvedValue(true);
   });
 
   it('returns registrations for all expected events', () => {
@@ -592,7 +596,7 @@ describe('hook-handlers registry', () => {
       { session_id: 'sid-votes-stash', cwd: '/x', transcript_path: '/t/transcript.jsonl' },
       'codebuddy',
     );
-    // Stash path returns null (hint goes to pendingVotesHint)
+    // Stash path returns null (hint goes to the votes-hint sidecar)
     expect(result).toBeNull();
     expect(mockStashVotesHint).toHaveBeenCalledOnce();
     const [calledSessionId, calledMsg] = mockStashVotesHint.mock.calls[0];
@@ -619,7 +623,47 @@ describe('hook-handlers registry', () => {
     expect(mockStashVotesHint).not.toHaveBeenCalled();
   });
 
-  // ── Change 3: pending-hint replays and merges pendingVotesHint ──
+  it('votes-sync caps Cursor follow-up nudges to once per session', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'stop' && r.handler.name === 'votes-sync',
+    )!.handler;
+    mockParseTranscriptForVotes.mockResolvedValue({
+      referencedDocIds: [],
+      recalledDocIds: ['doc-cursor'],
+    });
+    mockClaimVotesNudge
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const stdin = { session_id: 'sid-cursor', cwd: '/x', transcript_path: '/t/transcript.jsonl' };
+    expect(await handler.execute(stdin, 'cursor')).not.toBeNull();
+    expect(await handler.execute(stdin, 'cursor')).toBeNull();
+    expect(mockClaimVotesNudge).toHaveBeenCalledTimes(2);
+  });
+
+  it('stop dispatcher preserves both votes and contribute hints', async () => {
+    mockParseTranscriptForVotes.mockResolvedValue({
+      referencedDocIds: [],
+      recalledDocIds: ['doc-a'],
+    });
+    mockContributeCheckForSession.mockResolvedValueOnce({ hint: 'CONTRIBUTE-HINT' });
+    const dispatcher = createDispatcher({ handlers: buildHandlerRegistry() });
+
+    const result = await dispatcher.dispatch(
+      'stop',
+      '*',
+      { session_id: 'sid-merged-stop', cwd: '/x', transcript_path: '/t/transcript.jsonl' },
+      'claude',
+      'foreground',
+    );
+
+    const context = JSON.parse(result.output!).hookSpecificOutput.additionalContext;
+    expect(context).toContain('doc-a');
+    expect(context).toContain('CONTRIBUTE-HINT');
+  });
+
+  // ── Change 3: pending-hint replays and merges the votes hint ──
 
   it('pending-hint merges contribute hint and votes hint for codebuddy', async () => {
     const registry = buildHandlerRegistry();

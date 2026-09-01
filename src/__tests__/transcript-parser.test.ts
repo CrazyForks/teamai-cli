@@ -158,6 +158,38 @@ describe('parseTranscriptForVotes', () => {
     expect(result.referencedDocIds).toEqual([]);
   });
 
+  it('extracts Bash recall regions from tool_result content', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: '--- [teamai:recall:start] ---\nFile: /path/bash-recall.md\n--- [teamai:recall:end] ---',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('bash-recall');
+  });
+
+  it('parses case-insensitive recalled markers with smart delimiters', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: '<!— TeamAI:RECALLED-DOC-IDS: [smart-recall] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.recalledDocIds).toContain('smart-recall');
+  });
+
   it('referenced-doc-ids in a non-assistant line is NOT counted (assistant-only guard)', async () => {
     const filePath = path.join(tmpDir, 'transcript.jsonl');
     writeLine(filePath, {
@@ -261,6 +293,22 @@ describe('parseTranscriptForVotes', () => {
 
     const result = await parseTranscriptForVotes(filePath);
     expect(result.referencedDocIds).toContain('em-dash-doc');
+  });
+
+  it('referenced-doc-ids: smart opening and closing are parsed together', async () => {
+    const filePath = path.join(tmpDir, 'transcript.jsonl');
+    writeLine(filePath, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '<!— teamai:referenced-doc-ids: [smart-doc] —>',
+        }],
+      },
+    });
+
+    const result = await parseTranscriptForVotes(filePath);
+    expect(result.referencedDocIds).toContain('smart-doc');
   });
 
   it('referenced-doc-ids: missing closing delimiter is NOT parsed (negative case)', async () => {

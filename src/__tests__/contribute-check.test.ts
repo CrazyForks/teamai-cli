@@ -10,6 +10,7 @@ import {
   takePendingHint,
   stashVotesHint,
   takePendingVotesHint,
+  claimVotesNudge,
 } from '../contribute-check.js';
 import { appendEvent } from '../dashboard-collector.js';
 import {
@@ -71,9 +72,17 @@ describe('contributeState', () => {
 
     await stashVotesHint(sessionId, 'votes');
 
+    const sidecar = path.join(tmpDir, '.teamai', 'sessions', `${sessionId}.votes-hint.json`);
+    expect(fs.existsSync(sidecar)).toBe(true);
     expect(await takePendingVotesHint(sessionId)).toBe('votes');
+    expect(fs.existsSync(sidecar)).toBe(false);
     expect((await readContributeState(sessionId)).pendingHint).toBe('contribute');
     expect(await takePendingVotesHint(sessionId)).toBeNull();
+  });
+
+  it('claims a Cursor votes nudge only once per session', async () => {
+    expect(await claimVotesNudge('cursor-nudge')).toBe(true);
+    expect(await claimVotesNudge('cursor-nudge')).toBe(false);
   });
 
   it('returns defaults when session file does not exist', async () => {
@@ -967,5 +976,18 @@ describe('sessionId filesystem safety (L2)', () => {
     await cleanupStaleSessions(sessionsDir, sessionId);
 
     expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  it('cleanupStaleSessions removes stale votes-hint sidecars', async () => {
+    const { cleanupStaleSessions } = await import('../contribute-check.js');
+    await stashVotesHint('old-votes-session', 'votes');
+    const sessionsDir = path.join(tmpDir, '.teamai', 'sessions');
+    const sidecarPath = path.join(sessionsDir, 'old-votes-session.votes-hint.json');
+    const past = Date.now() - 25 * 60 * 60 * 1000;
+    fs.utimesSync(sidecarPath, new Date(past), new Date(past));
+
+    await cleanupStaleSessions(sessionsDir, 'current-session');
+
+    expect(fs.existsSync(sidecarPath)).toBe(false);
   });
 });

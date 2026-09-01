@@ -32,13 +32,6 @@ export async function parseTranscriptForVotes(transcriptPath: string): Promise<T
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // The teamai-recall subagent emits `<!-- teamai:recalled-doc-ids: [...] -->`;
-    // in the subagent path it lands in the main transcript as a tool_result (not
-    // an assistant text block), so scan every raw line regardless of role.
-    extractRecalledDocIdsFromComment(trimmed, recalledSet);
-
-    if (!trimmed.includes('"assistant"')) continue;
-
     let entry: Record<string, unknown>;
     try {
       entry = JSON.parse(trimmed) as Record<string, unknown>;
@@ -46,13 +39,17 @@ export async function parseTranscriptForVotes(transcriptPath: string): Promise<T
       continue;
     }
 
-    if (entry['type'] !== 'assistant') continue;
-
     const message = entry['message'] as Record<string, unknown> | undefined;
     if (!message || !Array.isArray(message['content'])) continue;
 
     for (const block of message['content'] as Array<Record<string, unknown>>) {
-      if (block['type'] !== 'text') continue;
+      // Subagent and Bash recall output lands in a tool_result. Scan its decoded
+      // content recursively because some hosts represent it as nested blocks.
+      if (block['type'] === 'tool_result') {
+        extractRecalledDocIdsFromValue(block['content'], recalledSet);
+      }
+
+      if (entry['type'] !== 'assistant' || block['type'] !== 'text') continue;
       const text = block['text'];
       if (typeof text !== 'string') continue;
 
@@ -77,12 +74,29 @@ function isValidDocId(docId: string): boolean {
 }
 
 function extractRecalledDocIdsFromComment(text: string, out: Set<string>): void {
-  const pattern = /<!--\s*teamai:recalled-doc-ids:\s*\[([^\]]*)\]\s*-->/g;
+  const pattern = /(?:<!--|<!—)\s*teamai:recalled-doc-ids:\s*\[([^\]]*)\]\s*(?:-->|—>)/gi;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
     for (const item of match[1].split(',')) {
       const docId = item.trim().replace(/^['"]|['"]$/g, '');
       if (isValidDocId(docId)) out.add(docId);
+    }
+  }
+}
+
+function extractRecalledDocIdsFromValue(value: unknown, out: Set<string>): void {
+  if (typeof value === 'string') {
+    extractRecalledDocIdsFromComment(value, out);
+    extractRecalledDocIds(value, out);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) extractRecalledDocIdsFromValue(item, out);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      extractRecalledDocIdsFromValue(item, out);
     }
   }
 }
@@ -115,9 +129,9 @@ function extractRecalledDocIds(text: string, out: Set<string>): void {
 }
 
 function extractReferencedDocIds(text: string, out: Set<string>): void {
-  // Case-insensitive; accept --> or —> (em-dash variant) as closing delimiter.
+  // Case-insensitive; accept smart-punctuation variants of both delimiters.
   // Closed delimiter is required — bare [^\]]* prevents unclosed strings from bleeding past.
-  const pattern = /<!--\s*teamai:referenced-doc-ids:\s*\[([^\]]*)\]\s*(?:-->|—>)/gi;
+  const pattern = /(?:<!--|<!—)\s*teamai:referenced-doc-ids:\s*\[([^\]]*)\]\s*(?:-->|—>)/gi;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
