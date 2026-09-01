@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readJson, writeJson, expandHome, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
-import { TEAMAI_HOOK_DESCRIPTION_PREFIX, TEAMAI_CUSTOM_HOOK_PREFIX, TEAMAI_AGENT_HOOK_PREFIX, getManagedHooksPath, resolveBaseDir } from './types.js';
+import { TEAMAI_HOOK_DESCRIPTION_PREFIX, TEAMAI_CUSTOM_HOOK_PREFIX, TEAMAI_AGENT_HOOK_PREFIX, resolveHookScope, resolveLegacyProjectHookScope } from './types.js';
 import type { HookDef, TeamaiConfig, LocalConfig } from './types.js';
 import { builtinHookDefs, applyBuiltinOverride, ensureWrapperIfShellAvailable, SHELL_DEPENDENT_TOOLS } from './builtin-hooks.js';
 import type { BuiltinHookOverride } from './builtin-hooks.js';
@@ -834,13 +834,20 @@ export async function injectHooksToAllTools(toolPaths: Record<string, { settings
  * Reconcile built-in (A) + team (B) hooks across every tool that has a settings
  * path, using a shared managed-hooks manifest. This is the authoritative
  * injection path used by `teamai pull` / `init` / `hooks inject`.
+ *
+ * `settingsOnly` restricts the pass to tools reconciled through their settings
+ * file, skipping Hermes and OpenCode. Those two go through global adapters that
+ * ignore `baseDir` — `removeHermesHooks()` takes none, and the OpenCode
+ * adapter's removeAll branch always targets HOME — so a caller sweeping a
+ * secondary location (the legacy `<projectRoot>` copy) must opt out, or it
+ * deletes the hooks the primary pass just installed.
  */
 export async function reconcileHooksToAllTools(
   toolPaths: Record<string, { settings?: string }>,
   baseDir: string,
   teamDefs: HookDef[],
   manifestPath: string,
-  opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[] } = {},
+  opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[]; settingsOnly?: boolean } = {},
 ): Promise<void> {
   const activeTools = Object.keys(toolPaths).filter(t => !opts.filterAgents || opts.filterAgents.includes(t));
   let shellAvailable = true;
@@ -860,6 +867,7 @@ export async function reconcileHooksToAllTools(
     // JSON settings file, so it bypasses the settings-based reconcile path.
     // Install when the .hermes home exists; removeAll clears the teamai hook.
     if (tool === 'hermes') {
+      if (opts.settingsOnly) continue;
       try {
         const { getHermesHome } = await import('./hermes-home.js');
         const hermesRoot = getHermesHome();
@@ -879,6 +887,7 @@ export async function reconcileHooksToAllTools(
     // its config dirs. Route it to the plugin-file adapter instead of the
     // settings-based path.
     if (tool === 'opencode') {
+      if (opts.settingsOnly) continue;
       try {
         await reconcileOpencodePlugin(baseDir, opts.removeAll);
       } catch (e) {
@@ -930,6 +939,45 @@ export async function hasInstalledCodexTrustGatedTool(
 }
 
 /**
+ * Sweep the legacy `<projectRoot>` hook copy a pre-#370 CLI wrote alongside
+ * HOME for a non-self project scope. Without it both copies stay live after an
+ * upgrade and every session start fires hook-dispatch twice (two concurrent
+ * background pulls), and the auto-migrate guard never converges.
+ *
+ * Shared by the inject path (`init`/`pull`/`bootstrap`), `hooks inject`, and
+ * `hooks remove` so all three sweep identically. Two rules this encodes:
+ *
+ * - `settingsOnly` — Hermes and OpenCode reconcile through global adapters that
+ *   ignore `baseDir` (removeHermesHooks() takes none; the OpenCode adapter's
+ *   removeAll branch always targets HOME), so letting a secondary-location
+ *   sweep reach them deletes the hooks the primary pass just installed. The
+ *   project-scope OpenCode plugin is instead removed directly below, which is
+ *   the only OpenCode copy this legacy location can own.
+ * - No `filterAgents` — cleanup of a legacy location must be unconditional. A
+ *   tool disabled today may well be the one that wrote the stale copy back when
+ *   it was enabled; filtering it out would leave that copy firing forever.
+ */
+export async function sweepLegacyProjectHooks(
+  toolPaths: Record<string, { settings?: string }>,
+  localConfig: LocalConfig,
+): Promise<void> {
+  const legacy = resolveLegacyProjectHookScope(localConfig);
+  if (!legacy) return;
+  await reconcileHooksToAllTools(toolPaths, legacy.baseDir, [], legacy.manifestPath, {
+    removeAll: true,
+    settingsOnly: true,
+  });
+  if (toolPaths.opencode) {
+    try {
+      const { removeOpencodeHooks } = await import('./opencode-hooks.js');
+      await removeOpencodeHooks(legacy.baseDir, 'project');
+    } catch (e) {
+      log.warn(`Failed to remove legacy OpenCode project plugin: ${(e as Error).message}`);
+    }
+  }
+}
+
+/**
  * Reconcile built-in (A) + team (B) hooks for a single scope's tools.
  * Parses the scope's hooks/hooks.yaml, resolves the scope base dir + manifest,
  * and reconciles every tool. Returns the team defs that were applied (for
@@ -943,8 +991,7 @@ export async function reconcileTeamHooksForConfig(
   const { defs: teamDefs, builtin } = opts.removeAll
     ? { defs: [] as HookDef[], builtin: undefined }
     : await resolveTeamHooks(teamConfig, localConfig.repo.localPath, { auto: opts.auto, silent: opts.silent });
-  const baseDir = resolveBaseDir(localConfig);
-  const manifestPath = getManagedHooksPath(localConfig.scope, localConfig.projectRoot);
+  const { baseDir, manifestPath } = resolveHookScope(localConfig);
   let filterAgents = opts.filterAgents ?? localConfig.enabledAgents;
   const disabled = localConfig.disabledAgents;
   if (disabled && disabled.length > 0) {
@@ -958,5 +1005,6 @@ export async function reconcileTeamHooksForConfig(
     builtinOverride: builtin,
     filterAgents,
   });
+  await sweepLegacyProjectHooks(teamConfig.toolPaths, localConfig);
   return teamDefs;
 }

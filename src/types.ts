@@ -1270,6 +1270,79 @@ export function getManagedHooksPath(scope: Scope, projectRoot?: string): string 
 }
 
 /**
+ * Resolve where hooks are injected on disk for a config: the (baseDir,
+ * manifestPath) pair every hook injection path must share.
+ *
+ * The rule is load-bearing and was previously duplicated (and drifted) across
+ * `init`/`pull`/`bootstrap` (which used resolveBaseDir → projectRoot) and the
+ * `hooks inject` command (which used HOME, per #264). The divergence meant a
+ * project-scope `teamai init` tried to write the SessionStart hook into
+ * `<projectRoot>/.claude`, which does not exist yet on a fresh init, so the
+ * "only inject into installed tools" gate skipped every tool — leaving the
+ * project with no session-start hook and therefore no auto-pull.
+ *
+ * Canonical rule:
+ * - Non-self project scope → HOME + user manifest. `~/.claude` always exists,
+ *   so the gate passes; the dispatch runtime identifies the active project via
+ *   detectProjectConfig(stdin.cwd), so a projectRoot copy is unnecessary (#264).
+ * - Self single-repo mode → projectRoot (its resolveBaseDir). Hooks live in the
+ *   business repo's tool dirs and are committed to main so a teammate's clone
+ *   carries the session-start hook that self-heals ("clone = initialized").
+ * - User scope → HOME (its resolveBaseDir).
+ *
+ * Degrades gracefully: only self mode reaches the projectRoot branch, and a
+ * self config missing `projectRoot` (optional in the schema) falls back to HOME
+ * rather than throwing — so read-only callers like `doctor` never crash on a
+ * partially-broken config.
+ */
+export function resolveHookScope(
+  localConfig: LocalConfig,
+): { baseDir: string; manifestPath: string } {
+  const selfWithRoot = isSelfMode(localConfig) && !!localConfig.projectRoot;
+  if (localConfig.scope === 'project' && !selfWithRoot) {
+    return { baseDir: getUserHome(), manifestPath: getManagedHooksPath('user') };
+  }
+  return {
+    baseDir: resolveBaseDir(localConfig),
+    manifestPath: getManagedHooksPath(localConfig.scope, localConfig.projectRoot),
+  };
+}
+
+/**
+ * The legacy `<projectRoot>` hook location a pre-#370 CLI wrote to for a
+ * non-self project scope, whose hooks now live in HOME (`resolveHookScope`).
+ * Older `init`/`pull` runs wrote the SessionStart hook into
+ * `<projectRoot>/.claude` as well; left behind after upgrade it double-fires
+ * (two `hook-dispatch session-start` → two concurrent background pulls) and
+ * duplicates every team hook. Callers on the inject path (`init`/`pull`) and
+ * `hooks remove`/`uninstall` sweep it clean.
+ *
+ * Returns null when there is nothing project-owned to sweep:
+ * - user scope (only ever HOME),
+ * - project scope without a projectRoot,
+ * - self single-repo mode. Self mode's alternate location is HOME, which is
+ *   shared with any user-scope install and its user manifest — a blind
+ *   removeAll there would clobber genuine user-scope hooks, so we never sweep
+ *   it. (The cross-scope collision itself is tracked separately.)
+ * - projectRoot that IS the home dir (`teamai init .` run in `~`, e.g. a
+ *   dotfiles repo). Then the "legacy" location and the live HOME target are the
+ *   same file, and sweeping it would delete the hooks the primary pass just
+ *   wrote. This is what makes the "never returns HOME" invariant callers rely
+ *   on actually hold.
+ */
+export function resolveLegacyProjectHookScope(
+  localConfig: LocalConfig,
+): { baseDir: string; manifestPath: string } | null {
+  if (localConfig.scope !== 'project' || !localConfig.projectRoot) return null;
+  if (isSelfMode(localConfig)) return null;
+  if (path.resolve(localConfig.projectRoot) === path.resolve(getUserHome())) return null;
+  return {
+    baseDir: localConfig.projectRoot,
+    manifestPath: getManagedHooksPath('project', localConfig.projectRoot),
+  };
+}
+
+/**
  * Get the user-level pushignore path.
  */
 export function getPushignorePath(): string {

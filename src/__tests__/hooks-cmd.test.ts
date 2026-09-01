@@ -12,6 +12,7 @@ vi.mock('../hooks.js', async () => {
     return {
         getHookStatus: vi.fn(),
         reconcileHooksToAllTools: vi.fn(),
+        sweepLegacyProjectHooks: vi.fn(),
         hasInstalledCodexTrustGatedTool: vi.fn(),
         // Keep the real reminder text so assertions verify the actual wording.
         codexTrustReminder: actual.codexTrustReminder,
@@ -36,13 +37,14 @@ vi.mock('../utils/logger.js', () => ({
 // ── Imports (after mocks) ────────────────────────────────
 
 import { autoDetectInit } from '../config.js';
-import { getHookStatus, reconcileHooksToAllTools, hasInstalledCodexTrustGatedTool } from '../hooks.js';
+import { getHookStatus, reconcileHooksToAllTools, sweepLegacyProjectHooks, hasInstalledCodexTrustGatedTool } from '../hooks.js';
 import { parseTeamHooks, resolveTeamHooks } from '../resources/hooks.js';
 import { log } from '../utils/logger.js';
 import { hooksInject, hooksRemove, hooksList } from '../hooks-cmd.js';
 
 const mockedAutoDetectInit = autoDetectInit as Mock;
 const mockedGetHookStatus = getHookStatus as Mock;
+const mockedSweep = sweepLegacyProjectHooks as Mock;
 const mockedReconcile = reconcileHooksToAllTools as Mock;
 const mockedHasCodexTrustGated = hasInstalledCodexTrustGatedTool as Mock;
 const mockedParseTeamHooks = parseTeamHooks as Mock;
@@ -137,7 +139,7 @@ describe('hooksInject', () => {
         await expect(hooksInject({})).rejects.toThrow('not initialized');
     });
 
-    it('reconciles only into HOME when project config detected (#264)', async () => {
+    it('injects into HOME and sweeps the legacy <projectRoot> copy (#264/#370)', async () => {
         const restoreHome = mockHome('/home/testuser');
         mockedAutoDetectInit.mockResolvedValue({
             localConfig: { ...mockLocalConfig, scope: 'project', projectRoot: '/path/to/project' },
@@ -149,15 +151,23 @@ describe('hooksInject', () => {
             restoreHome();
         }
 
-        // #264: project scope no longer writes a redundant copy into projectRoot;
-        // HOME covers all cwds, and dispatch identifies the project via stdin.cwd.
+        // #264: project scope injects the single copy into HOME (covers all cwds;
+        // dispatch identifies the project via stdin.cwd). #370: it also sweeps any
+        // legacy <projectRoot> copy an older CLI wrote, so only HOME's copy fires.
+        // The sweep is delegated to the shared sweepLegacyProjectHooks so this
+        // command, init/pull and hooks remove all clean up identically; what that
+        // helper does on disk is covered in hooks-reconcile-scope.test.ts.
         expect(mockedReconcile).toHaveBeenCalledTimes(1);
         expect(mockedReconcile).toHaveBeenCalledWith(
             mockTeamConfig.toolPaths, '/home/testuser', TEAM_DEFS, expect.any(String), { builtinOverride: undefined },
         );
-        const manifestPath = mockedReconcile.mock.calls[0][3] as string;
-        expect(manifestPath).toContain('/home/testuser');
-        expect(manifestPath).not.toContain('/path/to/project');
+        const injectManifest = mockedReconcile.mock.calls[0][3] as string;
+        expect(injectManifest).toContain('/home/testuser');
+        expect(injectManifest).not.toContain('/path/to/project');
+        expect(mockedSweep).toHaveBeenCalledWith(
+            mockTeamConfig.toolPaths,
+            expect.objectContaining({ scope: 'project', projectRoot: '/path/to/project' }),
+        );
     });
 });
 
@@ -289,22 +299,45 @@ describe('hooksRemove', () => {
         } finally {
             restoreHome();
         }
-        // 1 main (HOME) + 1 legacy cleanup (projectRoot)
-        expect(mockedReconcile).toHaveBeenCalledTimes(2);
-
-        // Main removal targets HOME with user manifest.
-        expect(mockedReconcile).toHaveBeenNthCalledWith(1,
+        // Main removal targets HOME with the user manifest; the legacy
+        // <projectRoot> cleanup is delegated to the shared sweep helper.
+        expect(mockedReconcile).toHaveBeenCalledTimes(1);
+        expect(mockedReconcile).toHaveBeenCalledWith(
             mockTeamConfig.toolPaths, '/home/testuser', [], expect.any(String), { removeAll: true },
         );
         const userManifest = mockedReconcile.mock.calls[0][3] as string;
         expect(userManifest).toContain('/home/testuser');
+        expect(mockedSweep).toHaveBeenCalledWith(
+            mockTeamConfig.toolPaths,
+            expect.objectContaining({ scope: 'project', projectRoot: '/path/to/project' }),
+        );
+    });
 
-        // Legacy cleanup targets projectRoot with project manifest.
-        expect(mockedReconcile).toHaveBeenNthCalledWith(2,
+    it('self single-repo mode removes once, without a redundant legacy sweep (#370)', async () => {
+        const restoreHome = mockHome('/home/testuser');
+        mockedAutoDetectInit.mockResolvedValue({
+            localConfig: {
+                ...mockLocalConfig,
+                scope: 'project',
+                projectRoot: '/path/to/project',
+                repo: { ...mockLocalConfig.repo, kind: 'self' },
+            },
+            teamConfig: mockTeamConfig,
+        });
+        try {
+            await hooksRemove({});
+        } finally {
+            restoreHome();
+        }
+        // Self mode's primary target is <projectRoot>; the legacy sweep would be
+        // the same location (double work) or HOME (would clobber user scope), so
+        // it must not fire — exactly one removal against <projectRoot>. The
+        // "must not fire" half lives in resolveLegacyProjectHookScope, which
+        // returns null for self mode (see types.test.ts).
+        expect(mockedReconcile).toHaveBeenCalledTimes(1);
+        expect(mockedReconcile).toHaveBeenCalledWith(
             mockTeamConfig.toolPaths, '/path/to/project', [], expect.any(String), { removeAll: true },
         );
-        const legacyManifest = mockedReconcile.mock.calls[1][3] as string;
-        expect(legacyManifest).toContain('/path/to/project');
     });
 
     it('propagates error when not initialized', async () => {
