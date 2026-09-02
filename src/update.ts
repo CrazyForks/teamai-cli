@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import fse from 'fs-extra';
 import { loadState, saveState, loadLocalConfig, loadTeamConfig } from './config.js';
 import { resolveEffectiveUpdatePolicy } from './update-policy.js';
 import { log } from './utils/logger.js';
-import { expandHome } from './utils/fs.js';
+import { expandHome, ensureDir } from './utils/fs.js';
 import { TEAMAI_UPDATE_LOCK_PATH } from './types.js';
 import { askConfirmation } from './utils/prompt.js';
 
@@ -116,44 +118,213 @@ export function isCacheValid(lastCheck: string | null, ttlMs: number = CACHE_TTL
 // ─── Lock file management ───────────────────────────────
 
 /**
- * Try to acquire update lock. Returns false if another update is in progress.
+ * Owner tokens for locks this process currently holds, keyed by resolved lock
+ * path. `releaseLock` consults this map + the on-disk owner so it only ever
+ * deletes a lock this process actually acquired — never one another process
+ * later took over after ours went stale.
+ */
+const heldLockOwners = new Map<string, string>();
+
+interface LockPayload {
+  pid: number;
+  startedAt: string;
+  owner: string;
+}
+
+/**
+ * Parse a lock file's contents. Understands both the current JSON payload and
+ * the legacy plain-integer PID format written by older teamai versions, so an
+ * on-disk lock from a previous install is still evaluated for staleness rather
+ * than treated as un-owned garbage.
+ */
+function parseLockContent(content: string): { pid: number; owner?: string } | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<LockPayload>;
+    if (typeof parsed.pid === 'number' && !isNaN(parsed.pid)) {
+      return { pid: parsed.pid, owner: typeof parsed.owner === 'string' ? parsed.owner : undefined };
+    }
+    return null;
+  } catch {
+    // Legacy format: the file held only the bare PID as a string.
+    const pid = parseInt(trimmed, 10);
+    return isNaN(pid) ? null : { pid };
+  }
+}
+
+/**
+ * Inspect the lock at `resolved` and report whether it is stale — its owning
+ * process is gone, or its contents are unparseable (so no live owner can be
+ * confirmed). A missing file is also "stale" (nothing holds it). This is a pure
+ * read; it never mutates the lock.
+ */
+async function isLockStale(resolved: string): Promise<boolean> {
+  let content: string;
+  try {
+    content = await fse.readFile(resolved, 'utf-8');
+  } catch {
+    // File vanished between EEXIST and read — treat as reclaimable.
+    return true;
+  }
+  const parsed = parseLockContent(content);
+  if (!parsed) return true; // unparseable → no confirmable live owner
+  try {
+    process.kill(parsed.pid, 0);
+    return false; // process alive → lock genuinely held
+  } catch {
+    return true; // ESRCH → owning process is gone
+  }
+}
+
+/**
+ * Atomic exclusive create. Returns true when this call created the file, false
+ * when it already existed (EEXIST). Any other error propagates.
+ */
+async function exclusiveCreate(target: string, payload: string): Promise<boolean> {
+  try {
+    await fse.writeFile(target, payload, { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Remove `target` only if its on-disk owner is still `owner` (or it carries no
+ * owner / is already gone). Prevents deleting a file another process legitimately
+ * created after ours was reclaimed.
+ */
+async function removeIfOwner(target: string, owner: string): Promise<void> {
+  try {
+    const content = await fse.readFile(target, 'utf-8').catch(() => null);
+    if (content !== null) {
+      const parsed = parseLockContent(content);
+      if (parsed?.owner && parsed.owner !== owner) return;
+    }
+    await fse.remove(target);
+  } catch {
+    // best effort
+  }
+}
+
+/**
+ * Acquire the reclaim sentinel that serializes stale-lock takeover.
+ *
+ * Serialization is what makes reclaim safe: without it, several processes can all
+ * observe the same stale lock, all delete it, and all recreate it — ending with
+ * more than one "winner". The sentinel is created with the same atomic exclusive
+ * create as the lock itself, so exactly ONE process becomes the reclaimer; the
+ * rest back off. A sentinel whose own holder died (dead pid) is stolen via an
+ * atomic rename (only one process can rename a given file away) so a crashed
+ * reclaimer cannot wedge stale-lock recovery forever.
+ */
+async function acquireReclaimSentinel(sentinel: string, owner: string): Promise<boolean> {
+  const payload = JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    owner,
+  } satisfies LockPayload);
+  if (await exclusiveCreate(sentinel, payload)) return true;
+  // Sentinel is held. Only reclaim it if its holder is gone.
+  if (!(await isLockStale(sentinel))) return false;
+  try {
+    await fse.rename(sentinel, `${sentinel}.reclaim-${owner}`);
+  } catch {
+    return false; // another process stole it first
+  }
+  await fse.remove(`${sentinel}.reclaim-${owner}`).catch(() => {});
+  return exclusiveCreate(sentinel, payload);
+}
+
+/**
+ * Try to acquire a lock. Returns false if another live process holds it.
+ *
+ * The happy path is a single atomic exclusive create (`writeFile(..., { flag: 'wx' })`
+ * = O_CREAT|O_EXCL), so exactly one racing process wins an uncontended lock — this
+ * replaces the previous check-then-write, where two processes could both observe
+ * "no lock" and both succeed.
+ *
+ * Reclaiming a STALE lock (dead owner / unparseable content) is serialized behind
+ * a reclaim sentinel and completed with an atomic rename-into-place, so concurrent
+ * reclaimers cannot each end up believing they hold the lock. (A residual, benign
+ * window exists only if the reclaiming process itself crashes mid-reclaim; the
+ * sentinel's dead-pid recovery bounds that.)
  */
 export async function acquireLock(lockPath?: string): Promise<boolean> {
   const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const owner = randomUUID();
+  const payload = JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    owner,
+  } satisfies LockPayload);
+
   try {
-    if (await fse.pathExists(resolved)) {
-      const content = await fse.readFile(resolved, 'utf-8');
-      const pid = parseInt(content.trim(), 10);
-      if (!isNaN(pid)) {
-        try {
-          process.kill(pid, 0);
-          // Process is alive — lock is held
-          return false;
-        } catch {
-          // Process is dead — stale lock, remove it
-          await fse.remove(resolved);
-        }
-      } else {
-        // Invalid PID content — remove stale lock
-        await fse.remove(resolved);
-      }
+    await ensureDir(path.dirname(resolved));
+  } catch {
+    return false;
+  }
+
+  try {
+    // Fast path: no lock present.
+    if (await exclusiveCreate(resolved, payload)) {
+      heldLockOwners.set(resolved, owner);
+      return true;
     }
-    await fse.writeFile(resolved, String(process.pid));
-    return true;
+    // A lock exists. A live holder means busy; only a stale one may be reclaimed.
+    if (!(await isLockStale(resolved))) return false;
+
+    // Serialize the reclaim so only one process takes over the stale lock.
+    const sentinel = `${resolved}.sentinel`;
+    if (!(await acquireReclaimSentinel(sentinel, owner))) return false;
+    try {
+      // Re-evaluate now that we are the sole reclaimer.
+      if (await exclusiveCreate(resolved, payload)) {
+        heldLockOwners.set(resolved, owner);
+        return true; // stale lock had vanished
+      }
+      if (!(await isLockStale(resolved))) return false; // became live under us
+      // Still stale and present, and no other reclaimer can race us: replace it
+      // atomically (write to a temp sibling, then rename over the stale file, so
+      // the lock is never momentarily absent for a fresh acquirer to slip into).
+      const tmp = `${resolved}.new-${owner}`;
+      await fse.writeFile(tmp, payload);
+      await fse.rename(tmp, resolved);
+      heldLockOwners.set(resolved, owner);
+      return true;
+    } finally {
+      await removeIfOwner(sentinel, owner);
+    }
   } catch {
     return false;
   }
 }
 
 /**
- * Release the update lock
+ * Release a lock — but only one this process actually acquired. If we hold no
+ * owner token for this path we return without touching the file (owner-verified
+ * release: never delete a lock we did not take). If we do, we delete only when the
+ * on-disk owner still matches ours; a mismatch means another process reclaimed it
+ * after ours went stale, so we leave the new holder's lock alone.
  */
 export async function releaseLock(lockPath?: string): Promise<void> {
   const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const ourOwner = heldLockOwners.get(resolved);
+  if (!ourOwner) return;
   try {
+    const content = await fse.readFile(resolved, 'utf-8').catch(() => null);
+    if (content !== null) {
+      const parsed = parseLockContent(content);
+      // A recorded owner mismatch means someone else now holds this lock.
+      if (parsed?.owner && parsed.owner !== ourOwner) return;
+    }
     await fse.remove(resolved);
   } catch {
     // Ignore errors on cleanup
+  } finally {
+    heldLockOwners.delete(resolved);
   }
 }
 

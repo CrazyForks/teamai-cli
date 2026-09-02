@@ -20,6 +20,7 @@ vi.mock('fs-extra', () => ({
     writeFile: vi.fn(),
     remove: vi.fn(),
     ensureDir: vi.fn(),
+    rename: vi.fn(),
   },
 }));
 
@@ -43,6 +44,7 @@ vi.mock('../utils/logger.js', () => ({
 
 vi.mock('../utils/fs.js', () => ({
   expandHome: (p: string) => p.replace('~', '/home/test'),
+  ensureDir: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../types.js', () => ({
@@ -92,6 +94,7 @@ const mockedFse = fse as unknown as {
   writeFile: Mock;
   remove: Mock;
   ensureDir: Mock;
+  rename: Mock;
 };
 const mockedLog = log as unknown as {
   info: Mock;
@@ -129,6 +132,7 @@ beforeEach(() => {
   mockedFse.readFile.mockResolvedValue('');
   mockedFse.writeFile.mockResolvedValue(undefined);
   mockedFse.remove.mockResolvedValue(undefined);
+  mockedFse.rename.mockResolvedValue(undefined);
 });
 
 // ─── Unit tests: compareVersions ────────────────────────
@@ -451,6 +455,7 @@ describe('doUpdate', () => {
     expect(mockedFse.writeFile).toHaveBeenCalledWith(
       expect.stringContaining('update-lock'),
       expect.any(String),
+      { flag: 'wx' },
     );
     expect(mockedLog.success).toHaveBeenCalled();
     expect(mockedFse.remove).toHaveBeenCalledWith(
@@ -461,8 +466,14 @@ describe('doUpdate', () => {
   // ─── Test #12: File lock busy (another process alive) ─
 
   it('should skip when lock is held by another live process', async () => {
-    mockedFse.pathExists.mockResolvedValue(true);
-    mockedFse.readFile.mockResolvedValue(String(process.pid));
+    // Exclusive create fails (EEXIST) and the on-disk owner is a live process,
+    // so acquireLock backs off rather than reclaiming.
+    const eexist = new Error('EEXIST') as NodeJS.ErrnoException;
+    eexist.code = 'EEXIST';
+    mockedFse.writeFile.mockRejectedValue(eexist);
+    mockedFse.readFile.mockResolvedValue(
+      JSON.stringify({ pid: process.pid, owner: 'held', startedAt: 'x' }),
+    );
 
     mockedExecSync.mockResolvedValueOnce({ stdout: '99.0.0\n', stderr: '' });
 
@@ -628,31 +639,94 @@ describe('hook refresh after update', () => {
 });
 
 // ─── Unit tests: acquireLock / releaseLock ──────────────
+// Behavior-level tests against the fs-extra mock. True filesystem atomicity
+// (the `wx` exclusive-create race) and owner semantics are exercised against a
+// real temp dir in lock-atomic.test.ts.
+
+function eexist(): NodeJS.ErrnoException {
+  const e = new Error('EEXIST') as NodeJS.ErrnoException;
+  e.code = 'EEXIST';
+  return e;
+}
 
 describe('acquireLock', () => {
-  it('should acquire lock when no lockfile exists', async () => {
-    mockedFse.pathExists.mockResolvedValue(false);
+  it('acquires via an exclusive (wx) create when no lockfile exists', async () => {
+    mockedFse.writeFile.mockResolvedValue(undefined);
 
     const result = await acquireLock('/tmp/test-lock');
 
     expect(result).toBe(true);
-    expect(mockedFse.writeFile).toHaveBeenCalledWith('/tmp/test-lock', String(process.pid));
+    const [pathArg, payloadArg, optsArg] = mockedFse.writeFile.mock.calls[0];
+    expect(pathArg).toBe('/tmp/test-lock');
+    expect(optsArg).toEqual({ flag: 'wx' });
+    const parsed = JSON.parse(payloadArg as string);
+    expect(parsed.pid).toBe(process.pid);
+    expect(typeof parsed.owner).toBe('string');
+    expect(parsed.owner.length).toBeGreaterThan(0);
   });
 
-  it('should remove stale lock from dead process', async () => {
-    mockedFse.pathExists.mockResolvedValue(true);
-    mockedFse.readFile.mockResolvedValue('99999999');
+  it('reclaims a stale lock via an atomic rename-into-place', async () => {
+    // The main lock's exclusive create always finds it present (a stale lock);
+    // the sentinel and temp writes succeed. Reclaim completes by renaming the
+    // fresh payload over the stale file. (Concurrency/atomicity is proven for
+    // real in lock-atomic.test.ts.)
+    mockedFse.writeFile.mockImplementation((p: string, _data: string, opts?: { flag?: string }) => {
+      if (p === '/tmp/test-lock' && opts?.flag === 'wx') return Promise.reject(eexist());
+      return Promise.resolve(undefined);
+    });
+    mockedFse.readFile.mockResolvedValue('99999999'); // dead pid → stale
+    mockedFse.rename.mockResolvedValue(undefined);
 
     const result = await acquireLock('/tmp/test-lock');
 
-    expect(mockedFse.remove).toHaveBeenCalledWith('/tmp/test-lock');
     expect(result).toBe(true);
+    expect(mockedFse.rename).toHaveBeenCalled(); // reclaimed by atomic replace
+  });
+
+  it('returns false when a live process holds the lock', async () => {
+    mockedFse.writeFile.mockRejectedValue(eexist());
+    // Our own PID is alive → process.kill(pid, 0) succeeds → not stale.
+    mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: process.pid, owner: 'x' }));
+
+    const result = await acquireLock('/tmp/test-lock');
+
+    expect(result).toBe(false);
+    expect(mockedFse.rename).not.toHaveBeenCalled();
   });
 });
 
 describe('releaseLock', () => {
-  it('should remove lockfile', async () => {
-    await releaseLock('/tmp/test-lock');
-    expect(mockedFse.remove).toHaveBeenCalledWith('/tmp/test-lock');
+  it('removes a lock this process owns', async () => {
+    // Acquire so the in-process owner map records our token.
+    mockedFse.writeFile.mockResolvedValue(undefined);
+    await acquireLock('/tmp/owned-lock');
+    const owner = JSON.parse(mockedFse.writeFile.mock.calls[0][1] as string).owner;
+    mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: process.pid, owner }));
+
+    await releaseLock('/tmp/owned-lock');
+
+    expect(mockedFse.remove).toHaveBeenCalledWith('/tmp/owned-lock');
+  });
+
+  it('does NOT remove a lock now owned by another process', async () => {
+    mockedFse.writeFile.mockResolvedValue(undefined);
+    await acquireLock('/tmp/taken-lock');
+    // On disk the owner token differs → another process reclaimed it after ours
+    // went stale. We must leave it alone.
+    mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: 12345, owner: 'someone-else' }));
+
+    await releaseLock('/tmp/taken-lock');
+
+    expect(mockedFse.remove).not.toHaveBeenCalled();
+  });
+
+  it('does NOT delete a lock this process never acquired (no owner token)', async () => {
+    // Owner-verified release: with no recorded owner for this path, releaseLock
+    // must not touch the file even if one exists on disk.
+    mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: process.pid, owner: 'other' }));
+
+    await releaseLock('/tmp/never-acquired-by-us');
+
+    expect(mockedFse.remove).not.toHaveBeenCalled();
   });
 });

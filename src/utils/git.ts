@@ -659,6 +659,75 @@ export async function isDedicatedRepoRoot(repoPath: string): Promise<boolean> {
 }
 
 /**
+ * The two path anchors teamai derives from a git checkout (issue #374).
+ *
+ * These are deliberately distinct because a git worktree has two different
+ * "roots":
+ *  - `workspaceRoot` is the CURRENT checkout (`git rev-parse --show-toplevel`).
+ *    Each worktree has its own. This is where project-scope AI-tool resources
+ *    (skills/rules/agents) must be written, because every tool discovers them by
+ *    scanning up from the launch directory to the current repository root — it
+ *    does NOT follow `git-common-dir` back to the main checkout.
+ *  - `projectAnchor` is the MAIN checkout, shared by the main repo and all of its
+ *    worktrees (the first entry of `git worktree list --porcelain`). This is the
+ *    stable per-project identity that P1 will use to key machine-local data under
+ *    `~/.teamai/projects/<slug>/`.
+ *
+ * For a plain (non-worktree) repository the two are identical.
+ */
+export interface ProjectAnchors {
+  workspaceRoot: string;
+  projectAnchor: string;
+}
+
+/**
+ * Resolve the {@link ProjectAnchors} for `cwd` (defaults to the process cwd).
+ *
+ * Returns `null` when `cwd` is not inside a git repository, or when git cannot
+ * resolve the anchors — callers fall back to their existing cwd-based behavior.
+ *
+ * Implementation notes:
+ *  - `workspaceRoot` is `--show-toplevel` (the current checkout).
+ *  - `projectAnchor` is the MAIN worktree, taken from the FIRST entry of
+ *    `git worktree list --porcelain` (git always lists the main worktree first).
+ *    Every linked worktree reports the same first entry, so all worktrees of a
+ *    repo share one anchor. This is deliberately NOT `dirname(--git-common-dir)`:
+ *    that breaks for `git init --separate-git-dir`, where the common dir lives
+ *    outside the checkout and its parent (e.g. a shared `gitdirs/`) would collide
+ *    across unrelated repos. The porcelain first entry stays a stable, distinct
+ *    identity in that case.
+ *  - Both anchors are realpath-normalized so a symlinked prefix (macOS `/tmp` →
+ *    `/private/tmp`) does not make the same checkout look like two different ones.
+ *    Case-insensitive-filesystem normalization is intentionally NOT done here; it
+ *    is only needed for the P1 slug hash and belongs with that change.
+ */
+export async function resolveAnchors(cwd?: string): Promise<ProjectAnchors | null> {
+  const git = createGit(cwd);
+  let toplevel: string;
+  let mainWorktree: string;
+  try {
+    toplevel = (await git.revparse(['--show-toplevel'])).trim();
+    const list = await git.raw(['worktree', 'list', '--porcelain']);
+    // The first `worktree <path>` line is the main worktree, shared by all
+    // linked worktrees of this repository.
+    const first = list.split('\n').find((l) => l.startsWith('worktree '));
+    mainWorktree = first ? first.slice('worktree '.length).trim() : '';
+  } catch {
+    return null;
+  }
+  if (!toplevel || !mainWorktree) return null;
+  try {
+    const [workspaceRoot, projectAnchor] = await Promise.all([
+      realpath(toplevel),
+      realpath(mainWorktree),
+    ]);
+    return { workspaceRoot, projectAnchor };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reset the team repo to a clean default-branch state.
  *
  * The team repo is a local cache — any uncommitted or conflicted state is
