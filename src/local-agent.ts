@@ -65,6 +65,7 @@ import {
   type TeamaiConfig,
 } from './types.js';
 import { getUserHome } from './utils/home.js';
+import { resolveAnchors } from './utils/git.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -933,6 +934,71 @@ async function promptForProjectBinding(
   return projects[index - 1];
 }
 
+/**
+ * Persist a ClawPro binding decision for the current checkout.
+ *
+ * Binding is a per-project decision, so it is recorded on the `projectAnchor`
+ * (the main checkout, shared by a repo and all of its git worktrees — issue
+ * #374 / #387). It is ALSO stamped on the current `workspaceRoot` so this
+ * checkout is reported with the project_id immediately and its resources land
+ * in the current worktree (#387's workspaceRoot model — every AI tool discovers
+ * resources by scanning up from the launch dir, never via git-common-dir). For a
+ * plain repo the two anchors coincide and this writes a single entry. Falls back
+ * to `resolvedPath` when `cwd` is not inside a git repo.
+ *
+ * Existing fields (e.g. a stamped `ideType`) on any touched entry are preserved.
+ */
+async function persistWorkspaceBinding(
+  config: LocalAgentConfig,
+  cwd: string | undefined,
+  resolvedPath: string,
+  projectId: number,
+  projectName: string,
+): Promise<void> {
+  const anchors = await resolveAnchors(cwd);
+  const keys = new Set<string>([resolvedPath]);
+  if (anchors) {
+    keys.add(anchors.projectAnchor);
+    keys.add(anchors.workspaceRoot);
+  }
+  const boundAt = new Date().toISOString();
+  for (const key of keys) {
+    config.workspaceBindings[key] = {
+      ...(config.workspaceBindings[key] ?? {}),
+      projectId,
+      projectName,
+      boundAt,
+    };
+  }
+  await saveLocalAgentConfig(config);
+}
+
+/**
+ * If the current checkout is an unbound git worktree whose main checkout
+ * (`projectAnchor`) is already bound or skipped, copy that decision onto the
+ * current `workspaceRoot` and report success — so a repo is never re-prompted
+ * for binding once per new worktree (a `--skip` on the main checkout silences
+ * all of them too). Returns true when the worktree inherited a binding.
+ */
+async function inheritWorktreeBinding(
+  config: LocalAgentConfig,
+  cwd: string | undefined,
+  resolvedPath: string,
+): Promise<boolean> {
+  const anchors = await resolveAnchors(cwd);
+  if (!anchors || anchors.projectAnchor === anchors.workspaceRoot) return false;
+  const anchorBinding = config.workspaceBindings[anchors.projectAnchor];
+  if (!anchorBinding) return false;
+  config.workspaceBindings[resolvedPath] = {
+    ...(config.workspaceBindings[resolvedPath] ?? {}),
+    projectId: anchorBinding.projectId,
+    projectName: anchorBinding.projectName,
+    boundAt: new Date().toISOString(),
+  };
+  await saveLocalAgentConfig(config);
+  return true;
+}
+
 export async function bindWorkspaceToProject(
   workspacePath: string,
   projectId?: number,
@@ -953,8 +1019,9 @@ export async function bindWorkspaceToProject(
     projectName: project.name,
     boundAt: new Date().toISOString(),
   };
-  config.workspaceBindings[workspacePath] = binding;
-  await saveLocalAgentConfig(config);
+  // Record on the projectAnchor (shared across the repo's worktrees) and the
+  // current workspaceRoot; workspacePath is already the resolved checkout root.
+  await persistWorkspaceBinding(config, workspacePath, workspacePath, project.id, project.name);
   log.success(`已将工作区绑定到项目：${project.name} [id=${project.id}]`);
   return binding;
 }
@@ -963,8 +1030,11 @@ async function ensureWorkspaceBinding(
   config: LocalAgentConfig,
   workspacePath: string,
   sessionId?: string,
+  cwd?: string,
 ): Promise<void> {
   if (config.workspaceBindings[workspacePath]) return;
+  // A worktree inherits its main checkout's binding/skip decision — never prompt.
+  if (await inheritWorktreeBinding(config, cwd, workspacePath)) return;
 
   const markerKey = sessionId || `ppid-${process.ppid}`;
   const hintMarker = path.join(os.tmpdir(), `teamai-bind-session-${markerKey}`);
@@ -983,12 +1053,7 @@ async function ensureWorkspaceBinding(
 
   const project = await promptForProjectBinding(workspacePath, projects);
   if (project) {
-    config.workspaceBindings[workspacePath] = {
-      projectId: project.id,
-      projectName: project.name,
-      boundAt: new Date().toISOString(),
-    };
-    await saveLocalAgentConfig(config);
+    await persistWorkspaceBinding(config, cwd, workspacePath, project.id, project.name);
     return;
   }
 
@@ -1026,8 +1091,11 @@ async function emitBindingHint(
   config: LocalAgentConfig,
   workspacePath: string,
   sessionId?: string,
+  cwd?: string,
 ): Promise<void> {
   if (config.workspaceBindings[workspacePath]) return;
+  // A worktree inherits its main checkout's binding/skip decision — never hint.
+  if (await inheritWorktreeBinding(config, cwd, workspacePath)) return;
 
   // Only hint once per session — use a temp marker file keyed by sessionId
   const markerKey = sessionId || `ppid-${process.ppid}`;
@@ -2407,10 +2475,10 @@ export async function reportAndSyncLocalAgent(context: LocalAgentContext): Promi
     if (workspacePath) {
       const sid = context.event?.sessionId;
       if (context.event?.type === 'session_start') {
-        await ensureWorkspaceBinding(config, workspacePath, sid);
+        await ensureWorkspaceBinding(config, workspacePath, sid, context.cwd);
       }
       if (context.event?.type === 'prompt_submit') {
-        await emitBindingHint(config, workspacePath, sid);
+        await emitBindingHint(config, workspacePath, sid, context.cwd);
       }
     }
   }
@@ -2739,8 +2807,9 @@ export async function bindCurrentProject(options?: { projectId?: number; skip?: 
     if (!config) {
       throw new Error('Local agent not initialized. Run `teamai init --http` first.');
     }
-    config.workspaceBindings[workspacePath] = { projectId: 0, projectName: '__skipped__', boundAt: new Date().toISOString() };
-    await saveLocalAgentConfig(config);
+    // Skip the whole project (main checkout + all its worktrees), not just this
+    // one checkout, so sibling worktrees are not re-prompted.
+    await persistWorkspaceBinding(config, options?.cwd ?? process.cwd(), workspacePath, 0, '__skipped__');
     log.info(`已跳过绑定，以后不再提示此工作区。`);
     return;
   }
