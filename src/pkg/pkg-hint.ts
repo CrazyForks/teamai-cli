@@ -10,16 +10,13 @@ import {
 
 export function buildPackageHintMessage(npmCount: number, claudeCount: number): string {
   const summary = [
-    npmCount > 0 ? `${npmCount} 个 npm 包` : '',
-    claudeCount > 0 ? `${claudeCount} 个 Claude 插件` : '',
-  ].filter(Boolean).join('、');
+    npmCount > 0 ? `${npmCount} npm package${npmCount === 1 ? '' : 's'}` : '',
+    claudeCount > 0 ? `${claudeCount} Claude plugin${claudeCount === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' and ');
   return [
-    `[teamai:pkg-hint] 团队开发环境声明有更新（${summary}）。`,
-    '请先查看 teamai.yaml 的 packages 段，确认后运行 `teamai install` 安装。',
-    '该命令会执行第三方包/插件代码，因此不会在 SessionStart 时静默安装。',
-    '',
     `[teamai:pkg-hint] Team package declarations changed (${summary}).`,
     'Review the packages section, then run `teamai install` to apply it.',
+    'TeamAI never installs third-party package or plugin code automatically at SessionStart.',
   ].join('\n');
 }
 

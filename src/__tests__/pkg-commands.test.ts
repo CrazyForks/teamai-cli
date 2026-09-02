@@ -48,8 +48,13 @@ vi.mock('../pkg/adapters/claude-plugin.js', () => ({
   },
 }));
 
-import { pkgInstall } from '../pkg/commands.js';
-import { loadPackageLock } from '../pkg/manifest.js';
+import { pkgDoctorReport, pkgInstall } from '../pkg/commands.js';
+import {
+  loadPackageLock,
+  loadPackageManifest,
+  packageDeclarationHash,
+} from '../pkg/manifest.js';
+import { LocalConfigSchema } from '../types.js';
 
 describe('pkgInstall npm target options', () => {
   let teamRepo: string;
@@ -128,7 +133,49 @@ describe('pkgInstall npm target options', () => {
       global: true,
       registry: 'https://mirrors.tencent.com/npm/',
     });
+    expect((await loadPackageLock(path.join(projectRoot, '.teamai')))
+      ?.declarationHash).toBeUndefined();
+    expect(fs.readFileSync(path.join(projectRoot, '.teamai', '.gitignore'), 'utf8'))
+      .toContain('teamai.lock');
     expect(mocks.assertNotReadOnly).toHaveBeenCalled();
+  });
+
+  it('preserves an existing version when the target omits one', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      team: 'platform',
+      repo: 'acme/team',
+      packages: {
+        npm: [{ name: 'typescript', version: '5.7.3' }],
+      },
+    }));
+
+    await pkgInstall('typescript', {});
+
+    expect(mocks.npmInstall).toHaveBeenCalledWith(
+      [{ name: 'typescript', version: '5.7.3' }],
+      expect.objectContaining({ scope: 'project' }),
+    );
+    const raw = YAML.parse(fs.readFileSync(path.join(teamRepo, 'teamai.yaml'), 'utf8'));
+    expect(raw.packages.npm).toEqual([{ name: 'typescript', version: '5.7.3' }]);
+  });
+
+  it('updates an existing version when the target specifies one', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      team: 'platform',
+      repo: 'acme/team',
+      packages: {
+        npm: [{ name: 'typescript', version: '5.7.3' }],
+      },
+    }));
+
+    await pkgInstall('typescript@latest', {});
+
+    expect(mocks.npmInstall).toHaveBeenCalledWith(
+      [{ name: 'typescript', version: 'latest' }],
+      expect.objectContaining({ scope: 'project' }),
+    );
+    const raw = YAML.parse(fs.readFileSync(path.join(teamRepo, 'teamai.yaml'), 'utf8'));
+    expect(raw.packages.npm).toEqual([{ name: 'typescript', version: 'latest' }]);
   });
 
   it('restores a declared global tool when teammates run install without a target', async () => {
@@ -156,11 +203,25 @@ describe('pkgInstall npm target options', () => {
       }],
       expect.objectContaining({ scope: 'project' }),
     );
+    const manifest = await loadPackageManifest(teamRepo);
+    expect((await loadPackageLock(path.join(projectRoot, '.teamai')))
+      ?.declarationHash).toBe(packageDeclarationHash(manifest));
   });
 
   it('rejects target-only npm flags when no target is provided', async () => {
     await expect(pkgInstall(undefined, { global: true }))
       .rejects.toThrow('--global and --registry require an npm package target');
     expect(mocks.npmInstall).not.toHaveBeenCalled();
+  });
+
+  it('does not add a package failure when teamai.yaml is absent', async () => {
+    fs.rmSync(path.join(teamRepo, 'teamai.yaml'));
+    const report = await pkgDoctorReport(LocalConfigSchema.parse({
+      repo: { localPath: teamRepo, remote: 'x', kind: 'git' },
+      username: 'alice',
+      scope: 'project',
+      projectRoot,
+    }), projectRoot);
+    expect(report).toBeNull();
   });
 });

@@ -222,7 +222,7 @@ describe('team package distribution flow', () => {
     const sessionStartHint = buildHandlerRegistry().find(
       (registration) =>
         registration.event === 'session-start'
-        && registration.handler.name === 'mr-hint',
+        && registration.handler.name === 'package-hint',
     );
     const hint = await sessionStartHint!.handler.execute(
       { cwd: teammateProject },

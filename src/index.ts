@@ -13,7 +13,6 @@ program
   .description('TeamAI — The team harness for AI agents')
   .version(version)
   .option('--dry-run', 'Preview mode, no changes made')
-  .option('-y, --yes', 'Accept non-interactive installation prompts')
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();

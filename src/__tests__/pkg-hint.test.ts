@@ -57,7 +57,7 @@ describe('package SessionStart hint', () => {
     expect(output).not.toBeNull();
     const parsed = JSON.parse(output!);
     expect(parsed.hookSpecificOutput.additionalContext).toContain('teamai install');
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('不会');
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('never installs');
   });
 
   it('stays silent after install records the current declaration hash', async () => {

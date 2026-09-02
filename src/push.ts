@@ -1,4 +1,5 @@
 import path from 'node:path';
+import YAML from 'yaml';
 import { autoDetectInit, loadStateForScope, saveStateForScope } from './config.js';
 import { assertNotReadOnly } from './read-only.js';
 import {
@@ -258,6 +259,23 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
   // Auto-detect scope: project scope if cwd has project config, else user scope
   const { localConfig, teamConfig } = await autoDetectInit();
   assertNotReadOnly(localConfig, 'teamai push');
+  try {
+    const configContent = await readFileSafe(path.join(localConfig.repo.localPath, 'teamai.yaml'));
+    const rawConfig = configContent === null ? null : YAML.parse(configContent);
+    if (
+      rawConfig
+      && typeof rawConfig === 'object'
+      && !Array.isArray(rawConfig)
+      && Object.prototype.hasOwnProperty.call(rawConfig, 'packages')
+    ) {
+      const { loadPackageManifest } = await import('./pkg/manifest.js');
+      await loadPackageManifest(localConfig.repo.localPath);
+    }
+  } catch (e) {
+    log.error(`Cannot push invalid package declarations: ${(e as Error).message}`);
+    process.exitCode = 1;
+    return;
+  }
 
   // Single-repo mode: knowledge PRs must run in an isolated worktree so the
   // branch/commit/reset never touch the user's active tree. withKnowledgeWorktree

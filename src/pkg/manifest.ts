@@ -21,6 +21,14 @@ export function packageLockPath(cwd: string): string {
   return path.join(cwd, PACKAGE_LOCK_FILENAME);
 }
 
+export async function ensurePackageLockIgnored(cwd: string): Promise<void> {
+  const gitignorePath = path.join(cwd, '.gitignore');
+  const content = await readFileSafe(gitignorePath);
+  if (content?.split('\n').some((line) => line.trim() === PACKAGE_LOCK_FILENAME)) return;
+  const prefix = content && !content.endsWith('\n') ? `${content}\n` : (content ?? '');
+  await writeFile(gitignorePath, `${prefix}${PACKAGE_LOCK_FILENAME}\n`);
+}
+
 function parseYamlObject(content: string, filePath: string): Record<string, unknown> {
   const raw = YAML.parse(content);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {

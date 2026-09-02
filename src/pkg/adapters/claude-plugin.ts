@@ -10,7 +10,6 @@ import type {
 import {
   PackageAdapter,
   type PackageInstallContext,
-  type ValidationResult,
 } from './base.js';
 
 export interface ClaudePluginListItem {
@@ -61,21 +60,6 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
     } catch {
       return false;
     }
-  }
-
-  async validate(declaration: ClaudeEcosystem): Promise<ValidationResult> {
-    const marketplaceNames = new Set(declaration.marketplaces.map((item) => item.name));
-    const errors: string[] = [];
-    for (const plugin of declaration.plugins) {
-      const separator = plugin.name.lastIndexOf('@');
-      const marketplace = separator > 0 ? plugin.name.slice(separator + 1) : '';
-      if (!marketplace) {
-        errors.push(`Claude plugin must use plugin@marketplace format: "${plugin.name}"`);
-      } else if (!marketplaceNames.has(marketplace)) {
-        errors.push(`Claude marketplace "${marketplace}" is not declared`);
-      }
-    }
-    return { valid: errors.length === 0, errors };
   }
 
   private async queryPlugins(): Promise<ClaudePluginListItem[]> {

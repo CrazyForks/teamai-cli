@@ -368,38 +368,17 @@ const todowriteHintHandler: HookHandler = {
 
 const mrHintHandler: HookHandler = {
   name: 'mr-hint',
-  async execute(stdin, _tool) {
-    const [{ computeMrHintOutput }, { computePackageHintOutput }] = await Promise.all([
-      import('./mr-hint.js'),
-      import('./pkg/pkg-hint.js'),
-    ]);
-    const [mrOutput, packageOutput] = await Promise.all([
-      computeMrHintOutput(),
-      computePackageHintOutput(resolveHookCwd(stdin) ?? process.cwd()),
-    ]);
-    if (!mrOutput) return packageOutput;
-    if (!packageOutput) return mrOutput;
+  async execute(_stdin, _tool) {
+    const { computeMrHintOutput } = await import('./mr-hint.js');
+    return computeMrHintOutput();
+  },
+};
 
-    try {
-      const mr = JSON.parse(mrOutput) as {
-        hookSpecificOutput?: { additionalContext?: string };
-      };
-      const pkg = JSON.parse(packageOutput) as {
-        hookSpecificOutput?: { additionalContext?: string };
-      };
-      const contexts = [
-        mr.hookSpecificOutput?.additionalContext,
-        pkg.hookSpecificOutput?.additionalContext,
-      ].filter((value): value is string => !!value);
-      return JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'SessionStart',
-          additionalContext: contexts.join('\n\n'),
-        },
-      });
-    } catch {
-      return packageOutput;
-    }
+const packageHintHandler: HookHandler = {
+  name: 'package-hint',
+  async execute(stdin, _tool) {
+    const { computePackageHintOutput } = await import('./pkg/pkg-hint.js');
+    return computePackageHintOutput(resolveHookCwd(stdin) ?? process.cwd());
   },
 };
 
@@ -427,6 +406,7 @@ export function buildHandlerRegistry(): HandlerRegistration[] {
     { event: 'session-start', matcher: '*', handler: pullHandler, timeoutMs: LOCAL_AGENT_TIMEOUT_MS, background: true },
     { event: 'session-start', matcher: '*', handler: dashboardReportHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
     { event: 'session-start', matcher: '*', handler: mrHintHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS, gitOnly: true },
+    { event: 'session-start', matcher: '*', handler: packageHintHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
     { event: 'session-start', matcher: '*', handler: localAgentHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
 
     // ─── Stop ─────────────────────────────────────────

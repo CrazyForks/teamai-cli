@@ -1,16 +1,19 @@
 import { getTeamaiHome, type GlobalOptions, type LocalConfig } from '../types.js';
 import { autoDetectInit } from '../config.js';
 import { assertNotReadOnly } from '../read-only.js';
+import { pathExists } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { ClaudePluginAdapter } from './adapters/claude-plugin.js';
 import { NpmAdapter } from './adapters/npm.js';
 import type { PackageInstallContext } from './adapters/base.js';
 import { detectPackageEnvironment } from './env-detect.js';
 import {
+  ensurePackageLockIgnored,
   hasPackageDeclarations,
   loadPackageLock,
   loadPackageManifest,
   packageDeclarationHash,
+  packageManifestPath,
   savePackageLock,
   savePackageManifest,
 } from './manifest.js';
@@ -20,24 +23,32 @@ import type {
   PackageLock,
   PackageManifest,
 } from './types.js';
+import { PackageManifestSchema } from './types.js';
 
 const OFFICIAL_MARKETPLACES: Record<string, string> = {
   'claude-plugins-official': 'anthropics/claude-plugins-official',
 };
 
-function parseNpmTarget(target: string): NpmSpec {
+interface ParsedNpmTarget {
+  name: string;
+  version?: string;
+}
+
+function parseNpmTarget(target: string): ParsedNpmTarget {
   if (target.startsWith('@')) {
     const slash = target.indexOf('/');
     const separator = target.lastIndexOf('@');
     if (slash < 0) throw new Error(`Invalid scoped npm package: "${target}"`);
+    const version = separator > slash ? target.slice(separator + 1) : '';
     return separator > slash
-      ? { name: target.slice(0, separator), version: target.slice(separator + 1) || '*' }
-      : { name: target, version: '*' };
+      ? { name: target.slice(0, separator), ...(version ? { version } : {}) }
+      : { name: target };
   }
   const separator = target.lastIndexOf('@');
+  const version = separator > 0 ? target.slice(separator + 1) : '';
   return separator > 0
-    ? { name: target.slice(0, separator), version: target.slice(separator + 1) || '*' }
-    : { name: target, version: '*' };
+    ? { name: target.slice(0, separator), ...(version ? { version } : {}) }
+    : { name: target };
 }
 
 function pluginMarketplace(target: string): string | null {
@@ -47,18 +58,21 @@ function pluginMarketplace(target: string): string | null {
   return target.slice(separator + 1);
 }
 
-function upsertNpm(manifest: PackageManifest, spec: NpmSpec): NpmSpec {
+function upsertNpm(
+  manifest: PackageManifest,
+  spec: ParsedNpmTarget & Pick<NpmSpec, 'global' | 'registry'>,
+): NpmSpec {
   const declarations = manifest.packages.npm ?? [];
   const existing = declarations.find((item) => item.name === spec.name);
   if (existing) {
-    existing.version = spec.version;
+    if (spec.version !== undefined) existing.version = spec.version;
     if (spec.global !== undefined) existing.global = spec.global;
     if (spec.registry !== undefined) existing.registry = spec.registry;
   } else {
-    declarations.push(spec);
+    declarations.push({ ...spec, version: spec.version ?? '*' });
   }
   manifest.packages.npm = declarations;
-  return existing ?? spec;
+  return existing ?? declarations[declarations.length - 1];
 }
 
 function ensureClaudeManifest(manifest: PackageManifest): NonNullable<PackageManifest['packages']['claude']> {
@@ -138,17 +152,10 @@ async function addTarget(
   };
 }
 
-async function validateOrThrow(
-  npm: NpmAdapter,
-  claude: ClaudePluginAdapter,
-  manifest: PackageManifest,
-): Promise<void> {
-  const results = await Promise.all([
-    npm.validate(manifest.packages.npm ?? []),
-    claude.validate(manifest.packages.claude ?? { marketplaces: [], plugins: [] }),
-  ]);
-  const errors = results.flatMap((result) => result.errors);
-  if (errors.length > 0) {
+function validateOrThrow(manifest: PackageManifest): void {
+  const result = PackageManifestSchema.safeParse(manifest);
+  if (!result.success) {
+    const errors = result.error.issues.map((issue) => issue.message);
     throw new Error(`Invalid package declarations:\n- ${errors.join('\n- ')}`);
   }
 }
@@ -173,7 +180,7 @@ export async function pkgInstall(
     log.info('No packages are declared in teamai.yaml');
     return;
   }
-  await validateOrThrow(npm, claude, manifest);
+  validateOrThrow(manifest);
 
   const context: PackageInstallContext = {
     cwd,
@@ -183,7 +190,11 @@ export async function pkgInstall(
   const previousLock = target ? await loadPackageLock(lockDir) : null;
   const lock: PackageLock = {
     version: 1,
-    declarationHash: packageDeclarationHash(manifest),
+    ...(!target
+      ? { declarationHash: packageDeclarationHash(manifest) }
+      : previousLock?.declarationHash
+        ? { declarationHash: previousLock.declarationHash }
+        : {}),
     packages: previousLock?.packages ?? {},
   };
 
@@ -215,6 +226,7 @@ export async function pkgInstall(
     await savePackageManifest(localConfig.repo.localPath, manifest);
     log.success(`Declared ${target} in teamai.yaml (${added?.ecosystem})`);
   }
+  if (localConfig.scope === 'project') await ensurePackageLockIgnored(lockDir);
   await savePackageLock(lockDir, lock);
   log.success('TeamAI packages installed; wrote teamai.lock');
 }
@@ -228,6 +240,7 @@ export async function pkgDoctorReport(
   localConfig: LocalConfig,
   cwd: string,
 ): Promise<PackageDoctorReport | null> {
+  if (!await pathExists(packageManifestPath(localConfig.repo.localPath))) return null;
   let manifest: PackageManifest;
   try {
     manifest = await loadPackageManifest(localConfig.repo.localPath);

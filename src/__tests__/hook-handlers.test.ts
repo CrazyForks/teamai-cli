@@ -442,6 +442,7 @@ describe('hook-handlers registry', () => {
     expect(names).not.toContain('votes-sync');
     // Non-git-only handlers survive
     expect(names).toContain('pull');
+    expect(names).toContain('package-hint');
     expect(names).toContain('local-agent-sync');
   });
 

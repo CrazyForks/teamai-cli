@@ -8,11 +8,6 @@ export interface PackageInstallContext {
   dryRun?: boolean;
 }
 
-export interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-}
-
 export abstract class PackageAdapter<TDeclaration, TLockSection> {
   abstract readonly ecosystem: 'npm' | 'claude';
 
@@ -23,7 +18,6 @@ export abstract class PackageAdapter<TDeclaration, TLockSection> {
   }
 
   abstract detect(cwd: string): Promise<boolean>;
-  abstract validate(declaration: TDeclaration): Promise<ValidationResult>;
   abstract install(
     declaration: TDeclaration,
     context: PackageInstallContext,

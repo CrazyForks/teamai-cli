@@ -394,6 +394,7 @@ export function buildSelfModeGitignore(): string {
     'config.yaml',
     'state.json',
     'token',
+    'teamai.lock',
     '.update-lock',
     '.reports-lock',
     '.bootstrap-lock',
@@ -425,13 +426,14 @@ export function buildSelfModeGitignore(): string {
 }
 
 /**
- * Migrate an existing single-repo `.teamai/.gitignore` written by an older teamai
- * (≤ beta.4), which ignored `env` — that hid `.teamai/env/env.yaml` from push and
- * kept it off main. Pure (no I/O) so it can be unit-tested.
+ * Migrate an existing single-repo `.teamai/.gitignore` written by an older teamai.
+ * Early versions ignored `env`, which hid `.teamai/env/env.yaml` from push and
+ * kept it off main; later versions also predate the machine-local package lock.
+ * Pure (no I/O) so it can be unit-tested.
  *
  * Removes a standalone `env` ignore line (NOT `env.sh` / `env.local` / `env/`, and
- * not commented lines), and ensures `env.local` is ignored (the machine-local
- * backup pull now writes). Returns whether anything changed plus the new content.
+ * not commented lines), and ensures `env.local` and `teamai.lock` are ignored.
+ * Returns whether anything changed plus the new content.
  */
 export function migrateSelfModeGitignoreContent(content: string): { changed: boolean; content: string } {
   const lines = content.split('\n');
@@ -461,6 +463,18 @@ export function migrateSelfModeGitignoreContent(content: string): { changed: boo
     changed = true;
   }
 
+  const hasPackageLock = filtered.some((l) => l.trim() === 'teamai.lock');
+  if (!hasPackageLock) {
+    const tokenIdx = filtered.findIndex((l) => l.trim() === 'token');
+    if (tokenIdx >= 0) {
+      filtered.splice(tokenIdx + 1, 0, 'teamai.lock');
+    } else {
+      const lastNonEmpty = filtered.reduce((acc, l, i) => (l.trim() ? i : acc), -1);
+      filtered.splice(lastNonEmpty + 1, 0, 'teamai.lock');
+    }
+    changed = true;
+  }
+
   return { changed, content: filtered.join('\n') };
 }
 
@@ -481,7 +495,7 @@ export async function migrateSelfModeGitignore(localConfig: LocalConfig): Promis
     if (!changed) return;
     await writeFile(gitignorePath, content);
     log.info(
-      'Updated .teamai/.gitignore so team env vars (.teamai/env/env.yaml) can be shared — '
+      'Updated .teamai/.gitignore for current machine-local files — '
       + 'please `git add .teamai/.gitignore` and commit it.',
     );
   } catch (e) {
@@ -1250,6 +1264,7 @@ export async function init(options: GlobalOptions & {
         'config.yaml',
         'state.json',
         'token',
+        'teamai.lock',
         '.update-lock',
         'env',
         'env.sh',

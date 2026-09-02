@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import path from 'node:path';
 import { getUserHome } from './utils/home.js';
-import { PackageSetSchema } from './pkg/types.js';
 
 // ─── Tool path config ───────────────────────────────────
 
@@ -190,8 +189,6 @@ export const TeamaiConfigSchema = z.object({
   team: z.string(),
   description: z.string().default(''),
   repo: z.string(),
-  /** Team-wide npm and Claude plugin declarations managed by `teamai install`. */
-  packages: PackageSetSchema.optional(),
   /** Git hosting provider. `git` is the transport-only fallback for arbitrary hosts. */
   provider: z.enum(['tgit', 'github', 'cnb', 'gitlab', 'gitcode', 'git']).default('tgit'),
   /**
@@ -517,7 +514,6 @@ export function managedMcpManifestPath(scope: Scope, projectRoot?: string): stri
 
 export interface GlobalOptions {
   dryRun?: boolean;
-  yes?: boolean;
   global?: boolean;
   registry?: string;
   verbose?: boolean;

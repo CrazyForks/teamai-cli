@@ -7,7 +7,6 @@ import type { NpmLockEntry, NpmSpec, PackageStatus } from '../types.js';
 import {
   PackageAdapter,
   type PackageInstallContext,
-  type ValidationResult,
 } from './base.js';
 
 interface LockPackage {
@@ -59,24 +58,6 @@ export class NpmAdapter extends PackageAdapter<NpmSpec[], NpmLockEntry[]> {
 
   async detect(cwd: string): Promise<boolean> {
     return pathExists(path.join(cwd, 'package.json'));
-  }
-
-  async validate(declaration: NpmSpec[]): Promise<ValidationResult> {
-    const errors = declaration
-      .filter((spec) => !spec.name || /\s/.test(spec.name))
-      .map((spec) => `Invalid npm package name: "${spec.name}"`);
-    for (const spec of declaration) {
-      if (!spec.registry) continue;
-      try {
-        const registry = new URL(spec.registry);
-        if (registry.username || registry.password || !['http:', 'https:'].includes(registry.protocol)) {
-          errors.push(`Invalid npm registry for "${spec.name}": credentials are not allowed`);
-        }
-      } catch {
-        errors.push(`Invalid npm registry for "${spec.name}": "${spec.registry}"`);
-      }
-    }
-    return { valid: errors.length === 0, errors };
   }
 
   private async snapshotLocal(cwd: string, declaration: NpmSpec[]): Promise<NpmLockEntry[]> {

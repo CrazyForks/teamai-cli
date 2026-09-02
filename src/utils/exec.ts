@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import spawn from 'cross-spawn';
 
 export interface ExecOptions {
   cwd?: string;
@@ -42,12 +42,12 @@ export const execCommand: CommandExecutor = (
     callback();
   };
 
-  child.stdout.on('data', (chunk: Buffer) => {
+  child.stdout?.on('data', (chunk: Buffer) => {
     const text = chunk.toString();
     stdout += text;
     if (options.stream) process.stdout.write(text);
   });
-  child.stderr.on('data', (chunk: Buffer) => {
+  child.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString();
     stderr += text;
     if (options.stream) process.stderr.write(text);

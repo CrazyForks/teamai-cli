@@ -4,6 +4,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { loadTeamConfig } from '../config.js';
 import {
   loadPackageLock,
   loadPackageManifest,
@@ -11,6 +12,7 @@ import {
   savePackageLock,
   savePackageManifest,
 } from '../pkg/manifest.js';
+import { NpmSpecSchema } from '../pkg/types.js';
 
 describe('package manifest and lockfile', () => {
   let dir: string;
@@ -81,6 +83,30 @@ describe('package manifest and lockfile', () => {
       },
     }));
     await expect(loadPackageManifest(dir)).rejects.toThrow('without embedded credentials');
+  });
+
+  it('reports malformed registry URLs without throwing from safeParse', () => {
+    expect(() => NpmSpecSchema.safeParse({
+      name: 'typescript',
+      registry: 'registry.npmjs.org',
+    })).not.toThrow();
+    expect(NpmSpecSchema.safeParse({
+      name: 'typescript',
+      registry: 'registry.npmjs.org',
+    }).success).toBe(false);
+  });
+
+  it('keeps package validation isolated from general team config loading', async () => {
+    fs.writeFileSync(path.join(dir, 'teamai.yaml'), YAML.stringify({
+      team: 'platform',
+      repo: 'acme/team',
+      packages: {
+        npm: [{ name: 'typescript', registry: 'not-a-url' }],
+      },
+    }));
+
+    expect(await loadTeamConfig(dir)).not.toBeNull();
+    await expect(loadPackageManifest(dir)).rejects.toThrow('valid http(s) URL');
   });
 
   it('updates only packages and preserves existing team config keys', async () => {

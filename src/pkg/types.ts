@@ -11,11 +11,17 @@ export const NpmSpecSchema = z.object({
   /** Install as a machine-wide CLI/tool instead of a project dependency. */
   global: z.boolean().optional(),
   /** Registry used for this package. Credentials must stay in npm config/env. */
-  registry: z.string().url().refine((value) => {
-    const url = new URL(value);
-    return !url.username && !url.password && ['http:', 'https:'].includes(url.protocol);
+  registry: z.string().refine((value) => {
+    try {
+      const url = new URL(value);
+      return !url.username
+        && !url.password
+        && ['http:', 'https:'].includes(url.protocol);
+    } catch {
+      return false;
+    }
   }, {
-    message: 'npm registry must be an http(s) URL without embedded credentials',
+    message: 'npm registry must be a valid http(s) URL without embedded credentials',
   }).optional(),
 });
 
