@@ -57,9 +57,9 @@ function renderBarChart(items: Array<{ label: string; value: number; badge: stri
     const barW = Math.max(2, Math.round((item.value / maxVal) * BAR_AREA));
     const textY = y + BAR_H / 2 + 5;
     const labelEl =
-      `<text x="${LABEL_W - 4}" y="${textY}" text-anchor="end"` +
+      `<text x="0" y="${textY}"` +
       ` style="${mono};font-size:12px;fill:var(--text2)">` +
-      `${escapeHtml(trunc(item.label, 32))}</text>`;
+      `${escapeHtml(trunc(item.label, 30))}</text>`;
     const barEl =
       `<rect x="${LABEL_W}" y="${y}" width="${barW}" height="${BAR_H}"` +
       ` style="fill:var(--accent);opacity:0.9" rx="4"/>`;
