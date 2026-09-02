@@ -14,6 +14,7 @@ import {
 } from './types.js';
 import { getDashboardHtml } from './dashboard-html.js';
 import { getUserHome } from './utils/home.js';
+import type { VizSummary } from './viz.js';
 
 // ─── Dashboard server architecture ──────────────────────
 //
@@ -29,6 +30,9 @@ import { getUserHome } from './utils/home.js';
 //
 
 type SSEClient = http.ServerResponse;
+
+const KB_SUMMARY_TTL_MS = 30_000;
+let kbSummaryCache: { ts: number; data: VizSummary } | null = null;
 
 /**
  * Start the dashboard HTTP server.
@@ -159,6 +163,38 @@ export async function startDashboard(port?: number): Promise<void> {
       req.on('close', () => {
         clients.delete(res);
       });
+      return;
+    }
+
+    if (url.pathname === '/kb-report') {
+      // Knowledge-base health report (reuses the viz aggregation + renderer)
+      try {
+        const { generateReportHtml } = await import('./viz.js');
+        const html = await generateReportHtml();
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Failed to generate KB health report: ' + (e instanceof Error ? e.message : String(e)));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/kb-summary') {
+      // Compact KB summary for the preview card, cached briefly so we don't
+      // re-aggregate the whole knowledge base on every dashboard page load
+      try {
+        const now = Date.now();
+        if (!kbSummaryCache || now - kbSummaryCache.ts > KB_SUMMARY_TTL_MS) {
+          const { getVizSummary } = await import('./viz.js');
+          kbSummaryCache = { ts: now, data: await getVizSummary() };
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(kbSummaryCache.data));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
       return;
     }
 

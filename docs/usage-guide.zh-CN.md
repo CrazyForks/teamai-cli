@@ -578,6 +578,108 @@ teamai recall status     # 查看当前生效状态（团队默认 + 用户覆�
 
 关闭后，`teamai pull` 将跳过部署 recall subagent、recall rules 注入块和 TodoWrite 提醒 hook。手动执行 `teamai recall <query>` 搜索不受此开关影响。
 
+### 知识库维护
+
+随着时间推移，部分 learnings 会积累低置信度（无人 upvote）或变得过时。`teamai recall maintenance` 可保持知识库健康：
+
+| 选项 | 说明 |
+|------|------|
+| `--prune` | 查找低于置信度阈值的 learnings 并删除 |
+| `--threshold <n>` | 剪枝用置信度阈值（默认 `0.15`） |
+| `--archive` | 将剪枝条目移至 `archive/` 而非直接删除 |
+| `--confidence-writeback` | 从投票历史重新计算置信度，并回写到 frontmatter |
+| `--update-quality` | 找出高召回但低认可的 docs/rules/skills，生成 AI 更新草稿（`.draft.md` 文件） |
+| `--dry-run` | 预览将要执行的操作，不做任何实际修改 |
+
+```bash
+# 预览过时条目，不做任何修改
+teamai recall maintenance --prune --dry-run
+
+# 归档低置信度 learnings（置信度 < 0.15）
+teamai recall maintenance --prune --archive
+
+# 按当前投票重新计算并回写置信度分数
+teamai recall maintenance --confidence-writeback
+
+# 查找过时条目并生成更新草稿
+teamai recall maintenance --update-quality
+```
+
+运行 `--update-quality` 后，审查生成的 `.draft.md` 文件，将满意的文件重命名为 `.md` 即可应用更新。
+
+### 晋升 Learnings
+
+当 learning 达到成熟标准时，可将其晋升为正式团队知识（skill、rule 或 doc）。晋升判据：置信度 ≥ 0.90、≥ 5 次 upvote、≥ 2 个不同贡献者、存在时长 ≥ 14 天。
+
+```bash
+# 列出所有可晋升候选
+teamai recall promote
+
+# 晋升指定 learning（AI 将其改写为目标格式）
+teamai recall promote <learningId>
+
+# 晋升到指定类别
+teamai recall promote <learningId> --category skills
+
+# 预览操作，不写入文件
+teamai recall promote <learningId> --dry-run
+```
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `--category <cat>` | 目标类别：`skills` \| `rules` \| `docs` |
+| `--dry-run` | 预览操作，不做任何实际修改 |
+
+---
+
+## 知识库健康报告
+
+看板内置了一个 **KB Health**（知识库健康）报告页面，展示团队知识库的使用情况与健康状态，涵盖 `teamai recall` 投票、learnings、docs、rules 和 skills 采集到的所有数据。
+
+```bash
+# 启动看板后，点击顶部的 "KB Health" 链接
+teamai dashboard
+
+# 报告也可直接访问：
+#   http://localhost:3721/kb-report
+```
+
+报告会聚合本地 `~/.teamai` 知识库（或已配置的团队仓库），打开页面即按需渲染，无需任何参数。
+
+### 报告内容
+
+| 区块 | 说明 |
+|------|------|
+| **概览卡片** | 总条目数、总召回次数、整体覆盖率%、贡献者数 |
+| **各类型覆盖率** | skills、rules、docs、learnings 的召回覆盖率分类 |
+| **高频召回排行** | 召回次数最多的条目排名列表 |
+| **沉默条目** | 从未被召回的条目——待剪枝或重写的候选 |
+| **召回趋势** | 召回活跃度随时间的变化 |
+| **作者贡献** | 每位贡献者的条目数与召回占比 |
+| **维护控制台** | 三个操作区：待晋升条目、建议归档条目、过时待更新条目，每条附可复制命令 |
+
+### 典型工作流
+
+```
+打开看板 → KB Health 页面
+   ↓
+查看维护控制台
+   ↓
+晋升成熟 learnings：
+   teamai recall promote <learningId>
+   ↓
+归档低价值条目：
+   teamai recall maintenance --prune --archive
+   ↓
+更新过时的 docs/rules/skills：
+   teamai recall maintenance --update-quality
+   （审查 .draft.md → 重命名为 .md）
+   ↓
+teamai push   # 将清理后的知识库分享给团队
+```
+
 ---
 
 ## 提交 Co-Author 署名（Commit Co-Author Attribution）

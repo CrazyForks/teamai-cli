@@ -580,6 +580,108 @@ teamai recall status     # View the current effective status (team default + use
 
 When disabled, `teamai pull` skips deploying the recall subagent, the recall rules injection block, and the TodoWrite reminder hook. Manually running `teamai recall <query>` to search is not affected by this switch.
 
+### Knowledge Base Maintenance
+
+Over time, some learnings accumulate low confidence scores (nobody upvoted them) or become stale. `teamai recall maintenance` keeps the knowledge base healthy:
+
+| Flag | Description |
+|------|-------------|
+| `--prune` | Find learnings below the confidence threshold and remove them |
+| `--threshold <n>` | Confidence threshold for pruning (default: `0.15`) |
+| `--archive` | Move pruned entries to `archive/` instead of deleting permanently |
+| `--confidence-writeback` | Recompute confidence scores from vote history and write them back to frontmatter |
+| `--update-quality` | Identify high-recall but low-approval docs/rules/skills and generate AI-powered update drafts (`.draft.md` files) |
+| `--dry-run` | Preview what would be done without making any changes |
+
+```bash
+# Preview stale entries without changing anything
+teamai recall maintenance --prune --dry-run
+
+# Archive low-confidence learnings (confidence < 0.15)
+teamai recall maintenance --prune --archive
+
+# Rewrite confidence scores to frontmatter based on current votes
+teamai recall maintenance --confidence-writeback
+
+# Find stale entries and generate update drafts
+teamai recall maintenance --update-quality
+```
+
+After `--update-quality`, review the generated `.draft.md` files and rename them to `.md` to apply the updates.
+
+### Promoting Learnings
+
+When a learning reaches maturity, promote it to formal team knowledge (a skill, rule, or doc). Promotion criteria: confidence ≥ 0.90, ≥ 5 upvotes, ≥ 2 distinct contributors, age ≥ 14 days.
+
+```bash
+# List all promotion candidates
+teamai recall promote
+
+# Promote a specific learning (AI rewrites it into the target format)
+teamai recall promote <learningId>
+
+# Promote to a specific category
+teamai recall promote <learningId> --category skills
+
+# Preview what would happen without writing files
+teamai recall promote <learningId> --dry-run
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--category <cat>` | Target category: `skills` \| `rules` \| `docs` |
+| `--dry-run` | Show what would be done without making changes |
+
+---
+
+## Knowledge Base Health Report
+
+The dashboard includes a built-in **KB Health** report page showing your team knowledge base's usage and health, covering everything captured by `teamai recall` votes, learnings, docs, rules, and skills.
+
+```bash
+# Start the dashboard, then click "KB Health" in the header
+teamai dashboard
+
+# The report is served directly at:
+#   http://localhost:3721/kb-report
+```
+
+The report aggregates your local `~/.teamai` knowledge base (or the configured team repo) and renders on demand — no flags to pass.
+
+### What the Report Shows
+
+| Section | Description |
+|---------|-------------|
+| **Overview cards** | Total entries, total recalls, overall coverage %, contributors |
+| **Coverage by type** | Breakdown of recall coverage across skills, rules, docs, learnings |
+| **Top recalled** | Ranked list of most frequently recalled entries |
+| **Silent entries** | Entries that have never been recalled — candidates for pruning or rewriting |
+| **Recall trend** | Recall activity over time |
+| **Author contributions** | Per-contributor entry counts and recall share |
+| **Maintenance console** | Three action zones: entries ready to promote, entries suggested for archiving, and stale entries needing updates — each with a copyable command |
+
+### Typical Workflow
+
+```
+Open the dashboard → KB Health page
+   ↓
+Review the Maintenance Console
+   ↓
+Promote mature learnings:
+   teamai recall promote <learningId>
+   ↓
+Archive low-value entries:
+   teamai recall maintenance --prune --archive
+   ↓
+Update stale docs/rules/skills:
+   teamai recall maintenance --update-quality
+   (review .draft.md → rename to .md)
+   ↓
+teamai push   # share the cleaned-up knowledge base with the team
+```
+
 ---
 
 ## Commit Co-Author Attribution
