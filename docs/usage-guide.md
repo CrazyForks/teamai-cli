@@ -34,12 +34,13 @@
 
 | Concept | Description |
 |------|------|
-| **Team Repo** | A Git repository that centrally stores a team's shared Skills / Rules / Docs / Env resources |
+| **Team Repo** | A Git repository that centrally stores a team's shared Skills / Rules / Docs / Env / Packages |
 | **Scope** | Where resources are installed: `project` (current project, default) or `user` (home directory) |
 | **Skills** | Custom skills the AI can invoke (a directory containing a `SKILL.md`) |
 | **Rules** | Markdown-formatted team conventions, automatically merged into AI tool configs |
 | **Docs** | Shared team documentation for the AI to reference |
 | **Env** | Shared team environment variables, automatically injected into the shell |
+| **Packages** | Team-wide npm packages and Claude Code plugins, installed explicitly with `teamai install` |
 
 ```
 ┌───────────────┐    teamai push (MR)    ┌───────────────────┐
@@ -303,6 +304,71 @@ teamai pull --dry-run    # Dry run, no actual changes
 > Project scope is isolated by default. When the current working directory contains a project-scope `.teamai/config.yaml`, `pull` processes that project and skips user scope unless the local config has `inheritUserScope: true`; in that case it first refreshes the safe user-resource channel. Without a project config in the current directory, `pull` processes user scope. User `env`, MCP definitions, sources, reporting, and writes remain isolated in project mode. Hooks are the one exception: a project scope's hooks are injected into your **HOME** tool settings (`~/.claude/settings.json`, …), not `<projectRoot>`, because the built-in hooks gate on the `cwd` handed to `hook-dispatch` and `~/.claude` always exists so the "installed tool" gate passes (see the Hooks section). Self single-repo mode keeps its hooks in the business repo so they travel on clone.
 
 With role-based skills enabled, `pull`'s skill sync source becomes the contents of `skills/<namespace>/`, expanded according to `primaryRole + additionalRoles` and flattened into each local AI tool's skills directory. `rules/`, `docs/`, and `learnings/` keep their original global sync behavior.
+
+### Team packages
+
+`teamai install` lets a team declare and restore npm packages and Claude Code plugins through the existing team repository. TeamAI invokes the native `npm` and `claude plugin` CLIs; it does not distribute package contents itself.
+
+**Admin operations:**
+
+Passing a target installs it and adds its declaration to the team repo's `teamai.yaml`:
+
+```bash
+# npm package (project dependency by default)
+teamai install typescript
+
+# Global npm CLI from a specific registry
+teamai install eslint@latest --global \
+  --registry https://registry.npmjs.org/
+
+# Claude plugin
+teamai install code-review@claude-plugins-official
+
+# Share the updated teamai.yaml through the normal review flow
+teamai push
+```
+
+An npm target accepts `name` or `name@version`. Local npm packages require a `package.json` in the current directory; use `--global` for machine-wide CLI tools. `--registry` is saved with that package declaration and must be an HTTP(S) URL without embedded credentials. Keep registry authentication in npm configuration or environment variables.
+
+A Claude plugin target uses `plugin@marketplace`. The official `claude-plugins-official` marketplace is resolved automatically; another marketplace must already be registered with Claude Code so TeamAI can record its source. `--global` and `--registry` apply only to npm targets.
+
+**Member operations:**
+
+The existing SessionStart hook runs `teamai pull`. When the `packages` declaration changes, it asks the member to review `teamai.yaml` and install explicitly; it never runs third-party package or plugin code automatically.
+
+```bash
+teamai install             # Install every team declaration
+teamai install --dry-run   # Preview native commands without installing or writing files
+teamai doctor              # Check runtimes and declared package/plugin status
+```
+
+After a successful install, TeamAI writes a local snapshot to `teamai.lock` under the active scope's `.teamai` directory. The lock records installed versions and the declaration hash used by the SessionStart hint; it is not stored in the team repository.
+
+**Declaration format:**
+
+`teamai install <target>` manages this section automatically:
+
+```yaml
+packages:
+  npm:
+    - name: typescript
+      version: "*"
+    - name: eslint
+      version: latest
+      global: true
+      registry: https://registry.npmjs.org/
+  claude:
+    marketplaces:
+      - name: claude-plugins-official
+        repo: anthropics/claude-plugins-official
+    plugins:
+      - name: code-review@claude-plugins-official
+```
+
+- `npm[].version` defaults to `*`; `global` defaults to `false`.
+- `claude.marketplaces` maps marketplace names to their repositories.
+- Each Claude plugin must use `plugin@marketplace`, and that marketplace must be declared.
+- Package declarations apply to the whole team; role and project filters do not change the package set.
 
 ### Excluding skills you don't need
 
@@ -1201,6 +1267,11 @@ provider: github
 
 reviewers:
   - reviewer1
+
+packages:
+  npm:
+    - name: typescript
+      version: "*"
 
 sharing:
   rules:

@@ -165,33 +165,16 @@ teamai source remove other-team
 
 ### 团队包
 
-TeamAI 可统一恢复团队声明的 npm 依赖和 Claude Code 插件，实际解析与安装仍由
-原生 `npm`、`claude plugin` CLI 完成。
+共享并一键恢复团队的 npm 包和 Claude Code 插件：
 
 ```bash
 teamai install typescript
-teamai install @tencent/tokenlint@latest --global \
-  --registry https://mirrors.tencent.com/npm/
 teamai install code-review@claude-plugins-official
-teamai push                       # 通过评审分享声明
-
-teamai install                    # 队友一键安装全部声明
-teamai install --dry-run          # 只预览，不安装、不写文件
+teamai push       # 分享团队声明
+teamai install    # 安装团队声明的全部包
 ```
 
-npm 包默认作为项目依赖安装；CLI 工具使用 `--global`。`--registry` 会随声明写入
-团队仓库的 `teamai.yaml`，但 registry 凭据必须存放在 npm 配置或环境变量中，
-不得写入 URL。安装快照存放在当前 scope 的本地 `.teamai/teamai.lock`。
-SessionStart 仅提示环境有更新，不会静默执行第三方代码。
-
-```yaml
-packages:
-  npm:
-    - name: "@tencent/tokenlint"
-      version: latest
-      global: true
-      registry: https://mirrors.tencent.com/npm/
-```
+完整工作流和配置见[使用指南](docs/usage-guide.zh-CN.md#团队包)。
 
 ## 知识库
 
