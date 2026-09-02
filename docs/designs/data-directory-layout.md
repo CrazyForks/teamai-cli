@@ -26,7 +26,7 @@ so the business workspace has **zero residue**, partitioned per project.
 A git worktree has two distinct "roots", and teamai needs both:
 
 ```
-projectAnchor  = parent of `git rev-parse --path-format=absolute --git-common-dir`
+projectAnchor  = first entry of `git worktree list --porcelain` (the main worktree)
                  → the MAIN checkout, SHARED by the repo and all its worktrees.
                  → the stable per-project identity; P1 keys machine data under
                    ~/.teamai/projects/<slug(projectAnchor)>/ by it.
@@ -46,14 +46,23 @@ from the launch directory to the *current* repository root. None of them follows
 a fresh worktree. So resources have to land in the worktree the user is actually
 working in.
 
-### Implementation trap (verified)
+### Why the main worktree, not `git-common-dir` (verified)
 
-`git rev-parse --git-common-dir` returns a **relative** path (`.git`) in the main
-repository and only an absolute path inside a worktree. `--path-format=absolute`
-(git ≥ 2.31) forces absolute in both cases. Omitting it resolves the anchor
-against the wrong base in the main-repo case. `resolveAnchors()` always passes
-the flag. Both anchors are `realpath`-normalized so a symlinked prefix (macOS
-`/tmp` → `/private/tmp`) does not make one checkout look like two.
+`projectAnchor` uses the first entry of `git worktree list --porcelain` rather than
+`dirname(git rev-parse --git-common-dir)`. Two traps make the git-common-dir route
+wrong:
+
+- With `git init --separate-git-dir`, the common dir lives outside the checkout
+  (e.g. `gitdirs/proj.git`), so its parent is a shared `gitdirs/` — **colliding**
+  across unrelated repos, and not the workspace either.
+- `--git-common-dir` alone returns a **relative** path (`.git`) in the main repo
+  (only absolute inside a worktree), so it needs `--path-format=absolute` (git
+  ≥ 2.31) just to be usable — and still hits the collision above.
+
+`git worktree list --porcelain` lists the main worktree first, and every linked
+worktree reports the same first entry, giving a shared-yet-distinct identity in all
+cases. Both anchors are `realpath`-normalized so a symlinked prefix (macOS `/tmp` →
+`/private/tmp`) does not make one checkout look like two.
 
 ## P0 (this PR) — atomic lock + anchor split
 
@@ -72,9 +81,13 @@ is a P1 concern. This keeps P0 independently reviewable (issue R7).
      = `O_CREAT|O_EXCL`); payload is JSON `{ pid, startedAt, owner }` with a random
      `owner` token.
    - On `EEXIST`, reclaim only a **stale** lock (dead pid via `process.kill(pid,0)`,
-     or unparseable content), with a single retry; a live holder returns "busy".
-   - `releaseLock()` deletes only when the on-disk `owner` matches the token this
-     process recorded — never another process's lock.
+     or unparseable content). The reclaim is **serialized behind an atomically-created
+     reclaim sentinel** and finished with an atomic rename-into-place, so concurrent
+     reclaimers cannot each end up believing they hold the lock; a live holder returns
+     "busy".
+   - `releaseLock()` returns early when this process holds no owner token for the
+     path, and otherwise deletes only when the on-disk `owner` still matches the token
+     this process recorded — never another process's lock.
    - Back-compatible with legacy plain-integer PID lock files.
    The three call sites (`update.ts`, `bootstrap.ts`, `utils/reports-branch.ts`)
    keep their signatures and all benefit.
