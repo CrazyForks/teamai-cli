@@ -669,7 +669,7 @@ export async function isDedicatedRepoRoot(repoPath: string): Promise<boolean> {
  *    scanning up from the launch directory to the current repository root — it
  *    does NOT follow `git-common-dir` back to the main checkout.
  *  - `projectAnchor` is the MAIN checkout, shared by the main repo and all of its
- *    worktrees. It is the parent of `git rev-parse --git-common-dir`. This is the
+ *    worktrees (the first entry of `git worktree list --porcelain`). This is the
  *    stable per-project identity that P1 will use to key machine-local data under
  *    `~/.teamai/projects/<slug>/`.
  *
@@ -687,11 +687,15 @@ export interface ProjectAnchors {
  * resolve the anchors — callers fall back to their existing cwd-based behavior.
  *
  * Implementation notes:
- *  - `--git-common-dir` alone returns a RELATIVE path (`.git`) when run in the
- *    main repository, and only an absolute path inside a worktree. `--path-format=absolute`
- *    (git ≥ 2.31) forces an absolute path in both cases; without it the main-repo
- *    case would resolve the anchor against the wrong base. This trap is the reason
- *    the flag is mandatory here.
+ *  - `workspaceRoot` is `--show-toplevel` (the current checkout).
+ *  - `projectAnchor` is the MAIN worktree, taken from the FIRST entry of
+ *    `git worktree list --porcelain` (git always lists the main worktree first).
+ *    Every linked worktree reports the same first entry, so all worktrees of a
+ *    repo share one anchor. This is deliberately NOT `dirname(--git-common-dir)`:
+ *    that breaks for `git init --separate-git-dir`, where the common dir lives
+ *    outside the checkout and its parent (e.g. a shared `gitdirs/`) would collide
+ *    across unrelated repos. The porcelain first entry stays a stable, distinct
+ *    identity in that case.
  *  - Both anchors are realpath-normalized so a symlinked prefix (macOS `/tmp` →
  *    `/private/tmp`) does not make the same checkout look like two different ones.
  *    Case-insensitive-filesystem normalization is intentionally NOT done here; it
@@ -700,20 +704,22 @@ export interface ProjectAnchors {
 export async function resolveAnchors(cwd?: string): Promise<ProjectAnchors | null> {
   const git = createGit(cwd);
   let toplevel: string;
-  let commonDir: string;
+  let mainWorktree: string;
   try {
     toplevel = (await git.revparse(['--show-toplevel'])).trim();
-    commonDir = (await git.revparse(['--path-format=absolute', '--git-common-dir'])).trim();
+    const list = await git.raw(['worktree', 'list', '--porcelain']);
+    // The first `worktree <path>` line is the main worktree, shared by all
+    // linked worktrees of this repository.
+    const first = list.split('\n').find((l) => l.startsWith('worktree '));
+    mainWorktree = first ? first.slice('worktree '.length).trim() : '';
   } catch {
     return null;
   }
-  if (!toplevel || !commonDir) return null;
-  // `<mainCheckout>/.git` → `<mainCheckout>`.
-  const anchorRaw = path.dirname(commonDir);
+  if (!toplevel || !mainWorktree) return null;
   try {
     const [workspaceRoot, projectAnchor] = await Promise.all([
       realpath(toplevel),
-      realpath(anchorRaw),
+      realpath(mainWorktree),
     ]);
     return { workspaceRoot, projectAnchor };
   } catch {

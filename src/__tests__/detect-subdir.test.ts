@@ -85,6 +85,18 @@ describe('detectProjectConfig — subdirectory / worktree', () => {
     expect(cfg!.projectRoot).not.toBe(repoRoot);
   });
 
+  it('overrides a STALE projectRoot copied from the main checkout into a worktree', async () => {
+    // Simulate a .teamai/ copied from main into the worktree: its config still
+    // names the MAIN checkout. detectProjectConfig must correct projectRoot to
+    // the worktree it was actually found in, or resources would go to main.
+    writeProjectConfig(worktreeRoot, repoRoot); // stale: projectRoot = main
+    const cfg = await detectProjectConfig(path.join(worktreeRoot, 'src'));
+    expect(cfg).not.toBeNull();
+    expect(cfg!.projectRoot).toBe(worktreeRoot);
+    expect(cfg!.projectRoot).not.toBe(repoRoot);
+    writeProjectConfig(worktreeRoot, worktreeRoot); // restore for other tests
+  });
+
   it('returns null for a non-git directory with no config (unchanged behavior)', async () => {
     const plain = path.join(base, 'plain');
     fs.mkdirSync(plain);

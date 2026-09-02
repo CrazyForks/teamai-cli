@@ -77,6 +77,24 @@ describe('acquireLock (real fs)', () => {
     expect(await acquireLock(lockPath)).toBe(true);
     await releaseLock(lockPath);
   });
+
+  it('grants the lock to exactly one of many concurrent reclaimers of a STALE lock', async () => {
+    // The reviewer's repro: a dead-PID lock already on disk, many processes race
+    // to reclaim it at once. The reclaim is serialized behind a sentinel, so the
+    // stale lock is taken over exactly once — never two winners.
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: 999999, owner: 'dead', startedAt: 'x' }));
+    const results = await Promise.all(
+      Array.from({ length: 32 }, () => acquireLock(lockPath)),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    // The surviving lock belongs to this process (the single winner).
+    expect(JSON.parse(fs.readFileSync(lockPath, 'utf-8')).pid).toBe(process.pid);
+    await releaseLock(lockPath);
+    // After release the winner is gone and the path is re-acquirable.
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(await acquireLock(lockPath)).toBe(true);
+    await releaseLock(lockPath);
+  });
 });
 
 describe('releaseLock (real fs)', () => {
@@ -84,6 +102,14 @@ describe('releaseLock (real fs)', () => {
     await acquireLock(lockPath);
     await releaseLock(lockPath);
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('does NOT delete a lock this process never acquired (owner-verified release)', async () => {
+    // A lock on disk that we never acquired through acquireLock (no owner token).
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, owner: 'other', startedAt: 'x' }));
+    await releaseLock(lockPath);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(lockPath, 'utf-8')).owner).toBe('other');
   });
 
   it('does NOT delete a lock that was reclaimed by another owner', async () => {

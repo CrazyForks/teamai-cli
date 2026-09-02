@@ -20,6 +20,7 @@ vi.mock('fs-extra', () => ({
     writeFile: vi.fn(),
     remove: vi.fn(),
     ensureDir: vi.fn(),
+    rename: vi.fn(),
   },
 }));
 
@@ -93,6 +94,7 @@ const mockedFse = fse as unknown as {
   writeFile: Mock;
   remove: Mock;
   ensureDir: Mock;
+  rename: Mock;
 };
 const mockedLog = log as unknown as {
   info: Mock;
@@ -130,6 +132,7 @@ beforeEach(() => {
   mockedFse.readFile.mockResolvedValue('');
   mockedFse.writeFile.mockResolvedValue(undefined);
   mockedFse.remove.mockResolvedValue(undefined);
+  mockedFse.rename.mockResolvedValue(undefined);
 });
 
 // ─── Unit tests: compareVersions ────────────────────────
@@ -662,15 +665,22 @@ describe('acquireLock', () => {
     expect(parsed.owner.length).toBeGreaterThan(0);
   });
 
-  it('reclaims a stale lock from a dead process (legacy plain-PID content)', async () => {
-    // First write hits EEXIST; the on-disk content is a dead PID → reclaim + retry.
-    mockedFse.writeFile.mockRejectedValueOnce(eexist()).mockResolvedValueOnce(undefined);
-    mockedFse.readFile.mockResolvedValue('99999999');
+  it('reclaims a stale lock via an atomic rename-into-place', async () => {
+    // The main lock's exclusive create always finds it present (a stale lock);
+    // the sentinel and temp writes succeed. Reclaim completes by renaming the
+    // fresh payload over the stale file. (Concurrency/atomicity is proven for
+    // real in lock-atomic.test.ts.)
+    mockedFse.writeFile.mockImplementation((p: string, _data: string, opts?: { flag?: string }) => {
+      if (p === '/tmp/test-lock' && opts?.flag === 'wx') return Promise.reject(eexist());
+      return Promise.resolve(undefined);
+    });
+    mockedFse.readFile.mockResolvedValue('99999999'); // dead pid → stale
+    mockedFse.rename.mockResolvedValue(undefined);
 
     const result = await acquireLock('/tmp/test-lock');
 
-    expect(mockedFse.remove).toHaveBeenCalledWith('/tmp/test-lock');
     expect(result).toBe(true);
+    expect(mockedFse.rename).toHaveBeenCalled(); // reclaimed by atomic replace
   });
 
   it('returns false when a live process holds the lock', async () => {
@@ -681,7 +691,7 @@ describe('acquireLock', () => {
     const result = await acquireLock('/tmp/test-lock');
 
     expect(result).toBe(false);
-    expect(mockedFse.remove).not.toHaveBeenCalled();
+    expect(mockedFse.rename).not.toHaveBeenCalled();
   });
 });
 
@@ -706,6 +716,16 @@ describe('releaseLock', () => {
     mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: 12345, owner: 'someone-else' }));
 
     await releaseLock('/tmp/taken-lock');
+
+    expect(mockedFse.remove).not.toHaveBeenCalled();
+  });
+
+  it('does NOT delete a lock this process never acquired (no owner token)', async () => {
+    // Owner-verified release: with no recorded owner for this path, releaseLock
+    // must not touch the file even if one exists on disk.
+    mockedFse.readFile.mockResolvedValue(JSON.stringify({ pid: process.pid, owner: 'other' }));
+
+    await releaseLock('/tmp/never-acquired-by-us');
 
     expect(mockedFse.remove).not.toHaveBeenCalled();
   });

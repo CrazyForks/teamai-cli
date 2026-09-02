@@ -237,10 +237,13 @@ async function loadProjectConfigAt(dir: string): Promise<LocalConfig | null> {
     const raw = YAML.parse(content);
     const config = LocalConfigSchema.parse(raw);
     if (config.scope !== 'project') return null;
-    // Backfill projectRoot from the directory we actually found the config
-    // in, so callers never see scope === 'project' with projectRoot missing
-    // (see loadLocalConfigForScope for the same backfill) (#85).
-    return config.projectRoot ? config : { ...config, projectRoot: dir };
+    // Always anchor projectRoot to the directory the config was actually found
+    // in (the current checkout's workspace root). A persisted projectRoot can be
+    // wrong — e.g. a `.teamai/` copied from the main checkout into a worktree
+    // still names the main checkout, which would send project resources to the
+    // wrong tree. Overriding here keeps resource landing tied to the real
+    // workspace (and also backfills when projectRoot was simply absent, #85).
+    return { ...config, projectRoot: dir };
   } catch {
     return null;
   }

@@ -20,13 +20,14 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
 }
 
+let base: string;
 let repoRoot: string;
 let worktreeRoot: string;
 let nonGitDir: string;
 
 beforeAll(() => {
   // realpath so macOS /tmp -> /private/tmp matches resolveAnchors' own realpath.
-  const base = realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-anchors-')));
+  base = realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-anchors-')));
   repoRoot = path.join(base, 'main-repo');
   fs.mkdirSync(repoRoot);
   git(repoRoot, 'init', '-q');
@@ -87,5 +88,35 @@ describe('resolveAnchors', () => {
 
   it('returns null for a directory that is not inside any git repository', async () => {
     expect(await resolveAnchors(nonGitDir)).toBeNull();
+  });
+
+  it('handles --separate-git-dir without colliding on a shared gitdir parent', async () => {
+    // Reviewer #374: dirname(--git-common-dir) would return the shared `gitdirs`
+    // parent for BOTH repos → identical anchors → P1 partition collision. Using
+    // the main-worktree path keeps them distinct, and workspaceRoot stays correct.
+    const gitdirs = path.join(base, 'gitdirs');
+    fs.mkdirSync(gitdirs, { recursive: true });
+    const mk = (name: string) => {
+      const ws = path.join(base, name);
+      fs.mkdirSync(ws);
+      git(ws, 'init', '-q', '--separate-git-dir', path.join(gitdirs, `${name}.git`));
+      git(ws, 'config', 'user.email', 'test@example.com');
+      git(ws, 'config', 'user.name', 'Test');
+      git(ws, 'commit', '--allow-empty', '-q', '-m', 'init');
+      return ws;
+    };
+    const wsA = mk('sepA');
+    const wsB = mk('sepB');
+    const a = await resolveAnchors(wsA);
+    const b = await resolveAnchors(wsB);
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a!.workspaceRoot).toBe(wsA);
+    expect(b!.workspaceRoot).toBe(wsB);
+    // The two repos must NOT share an anchor (no partition collision).
+    expect(a!.projectAnchor).not.toBe(b!.projectAnchor);
+    // And neither anchor is the shared parent directory.
+    expect(a!.projectAnchor).not.toBe(gitdirs);
+    expect(b!.projectAnchor).not.toBe(gitdirs);
   });
 });
