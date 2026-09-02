@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import fse from 'fs-extra';
 import { loadState, saveState, loadLocalConfig, loadTeamConfig } from './config.js';
 import { resolveEffectiveUpdatePolicy } from './update-policy.js';
 import { log } from './utils/logger.js';
-import { expandHome } from './utils/fs.js';
+import { expandHome, ensureDir } from './utils/fs.js';
 import { TEAMAI_UPDATE_LOCK_PATH } from './types.js';
 import { askConfirmation } from './utils/prompt.js';
 
@@ -116,44 +118,134 @@ export function isCacheValid(lastCheck: string | null, ttlMs: number = CACHE_TTL
 // ─── Lock file management ───────────────────────────────
 
 /**
- * Try to acquire update lock. Returns false if another update is in progress.
+ * Owner tokens for locks this process currently holds, keyed by resolved lock
+ * path. `releaseLock` consults this map + the on-disk owner so it only ever
+ * deletes a lock this process actually acquired — never one another process
+ * later took over after ours went stale.
  */
-export async function acquireLock(lockPath?: string): Promise<boolean> {
-  const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+const heldLockOwners = new Map<string, string>();
+
+interface LockPayload {
+  pid: number;
+  startedAt: string;
+  owner: string;
+}
+
+/**
+ * Parse a lock file's contents. Understands both the current JSON payload and
+ * the legacy plain-integer PID format written by older teamai versions, so an
+ * on-disk lock from a previous install is still evaluated for staleness rather
+ * than treated as un-owned garbage.
+ */
+function parseLockContent(content: string): { pid: number; owner?: string } | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
   try {
-    if (await fse.pathExists(resolved)) {
-      const content = await fse.readFile(resolved, 'utf-8');
-      const pid = parseInt(content.trim(), 10);
-      if (!isNaN(pid)) {
-        try {
-          process.kill(pid, 0);
-          // Process is alive — lock is held
-          return false;
-        } catch {
-          // Process is dead — stale lock, remove it
-          await fse.remove(resolved);
-        }
-      } else {
-        // Invalid PID content — remove stale lock
-        await fse.remove(resolved);
-      }
+    const parsed = JSON.parse(trimmed) as Partial<LockPayload>;
+    if (typeof parsed.pid === 'number' && !isNaN(parsed.pid)) {
+      return { pid: parsed.pid, owner: typeof parsed.owner === 'string' ? parsed.owner : undefined };
     }
-    await fse.writeFile(resolved, String(process.pid));
-    return true;
+    return null;
   } catch {
-    return false;
+    // Legacy format: the file held only the bare PID as a string.
+    const pid = parseInt(trimmed, 10);
+    return isNaN(pid) ? null : { pid };
   }
 }
 
 /**
- * Release the update lock
+ * True when the lock at `resolved` is stale — its owning process is gone, or its
+ * contents are unparseable (so no live owner can be confirmed). A missing file is
+ * also "stale" (nothing holds it). Callers hold no lock of their own here; this is
+ * a pure inspection used to decide whether a stale lock may be reclaimed.
+ */
+async function isLockStale(resolved: string): Promise<boolean> {
+  let content: string;
+  try {
+    content = await fse.readFile(resolved, 'utf-8');
+  } catch {
+    // File vanished between EEXIST and read — treat as reclaimable.
+    return true;
+  }
+  const parsed = parseLockContent(content);
+  if (!parsed) return true; // unparseable → no confirmable live owner
+  try {
+    process.kill(parsed.pid, 0);
+    return false; // process alive → lock genuinely held
+  } catch {
+    return true; // ESRCH → owning process is gone
+  }
+}
+
+/**
+ * Try to acquire a lock. Returns false if another live process holds it.
+ *
+ * Acquisition is atomic: `writeFile(..., { flag: 'wx' })` maps to O_CREAT|O_EXCL,
+ * so exactly one racing process can create the file. This replaces the previous
+ * check-then-write (`pathExists` → `writeFile`), where two processes could both
+ * observe "no lock" and both succeed. A stale lock (dead owner / unparseable) is
+ * reclaimed with a single retry.
+ */
+export async function acquireLock(lockPath?: string): Promise<boolean> {
+  const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const owner = randomUUID();
+  const payload = JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    owner,
+  } satisfies LockPayload);
+
+  try {
+    await ensureDir(path.dirname(resolved));
+  } catch {
+    return false;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await fse.writeFile(resolved, payload, { flag: 'wx' });
+      heldLockOwners.set(resolved, owner);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return false;
+      // Someone holds it. Reclaim only if it is stale, and only try that once.
+      if (attempt === 0 && (await isLockStale(resolved))) {
+        try {
+          await fse.remove(resolved);
+        } catch {
+          return false;
+        }
+        continue;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Release a lock — but only if this process is the recorded owner. Reads the
+ * on-disk owner token and compares it to the one `acquireLock` stored in memory;
+ * a mismatch means the lock was reclaimed by another process after ours went
+ * stale, so we leave it alone rather than deleting the new holder's lock.
  */
 export async function releaseLock(lockPath?: string): Promise<void> {
   const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const ourOwner = heldLockOwners.get(resolved);
   try {
+    if (ourOwner) {
+      const content = await fse.readFile(resolved, 'utf-8').catch(() => null);
+      if (content !== null) {
+        const parsed = parseLockContent(content);
+        // A recorded owner mismatch means someone else now holds this lock.
+        if (parsed?.owner && parsed.owner !== ourOwner) return;
+      }
+    }
     await fse.remove(resolved);
   } catch {
     // Ignore errors on cleanup
+  } finally {
+    heldLockOwners.delete(resolved);
   }
 }
 

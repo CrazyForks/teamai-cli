@@ -15,6 +15,7 @@ import {
   getStatePath,
 } from './types.js';
 import { readFileSafe, readJson, writeFile, writeJson, expandHome, pathExists } from './utils/fs.js';
+import { resolveAnchors } from './utils/git.js';
 import { log } from './utils/logger.js';
 import { loadRolesManifest } from './roles.js';
 
@@ -185,9 +186,35 @@ export async function saveStateForScope(state: State, scope: Scope, projectRoot?
 /**
  * Detect whether the given directory (default: cwd) has a project-scope teamai config.
  * Returns the parsed LocalConfig if scope === 'project', null otherwise.
+ *
+ * Subdirectory / worktree aware (issue #374): if `dir` itself has no
+ * `.teamai/config.yaml` but sits inside a git repository, the lookup retries at
+ * the repository's workspace root (`git rev-parse --show-toplevel`). This lets
+ * `teamai` run from any subdirectory of a project, and resolves the config's
+ * `projectRoot` to the CURRENT checkout — so in a git worktree, project-scope
+ * resources land in that worktree rather than the main checkout.
  */
 export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | null> {
   const dir = cwd ?? process.cwd();
+  const direct = await loadProjectConfigAt(dir);
+  if (direct) return direct;
+
+  // Not found at `dir`. If we are inside a git repo whose workspace root differs
+  // from `dir` (i.e. `dir` is a subdirectory), retry there. resolveAnchors returns
+  // null outside a git repo, so non-git dirs simply fall through to null.
+  const anchors = await resolveAnchors(dir);
+  if (anchors && anchors.workspaceRoot !== dir) {
+    return loadProjectConfigAt(anchors.workspaceRoot);
+  }
+  return null;
+}
+
+/**
+ * Load a project-scope config from `<dir>/.teamai/config.yaml`, with the
+ * single-repo self-heal fallback. Returns null when there is no project-scope
+ * config at `dir`.
+ */
+async function loadProjectConfigAt(dir: string): Promise<LocalConfig | null> {
   const configPath = path.join(dir, '.teamai', 'config.yaml');
   if (!(await pathExists(configPath))) {
     // Single-repo mode self-heal (issue #198): a teammate who cloned a repo

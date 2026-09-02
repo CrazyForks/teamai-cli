@@ -1111,9 +1111,22 @@ export type CultureFrontmatter = z.infer<typeof CultureFrontmatterSchema>;
 // ─── Scope helpers ─────────────────────────────────────
 
 /**
- * Resolve the base directory for resource installation based on scope.
- * - user scope  → the platform user home directory (e.g. /Users/xxx)
- * - project scope → localConfig.projectRoot (e.g. /Users/xxx/my-project)
+ * Resolve the base directory into which teamai installs AI-tool resources
+ * (skills/rules/agents, tool config files, CLAUDE.md, ...).
+ * - user scope    → the platform user home directory (e.g. /Users/xxx)
+ * - project scope → the project **workspace root** (localConfig.projectRoot)
+ *
+ * "workspace root" is the CURRENT git checkout (issue #374): for a git worktree,
+ * this is the worktree's own top level, NOT the main checkout, because every AI
+ * tool discovers project resources by scanning up from the launch directory to
+ * the current repository root. `detectProjectConfig` resolves projectRoot to that
+ * workspace root (subdirectory/worktree aware via `resolveAnchors`).
+ *
+ * This is deliberately separate from the per-project machine-data home: a later
+ * phase (P1) keys machine-local data by the shared `projectAnchor` (the main
+ * checkout) under `~/.teamai/projects/<slug>/`, while resources continue to land
+ * at the workspace root returned here. This function only ever governs resource
+ * landing, never machine-data location.
  */
 export function resolveBaseDir(localConfig: LocalConfig): string {
   if (localConfig.scope === 'project') {
