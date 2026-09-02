@@ -47,6 +47,40 @@ export function getDashboardHtml(port: number): string {
       align-items: center;
       gap: 8px;
     }
+    .kb-health-card {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 20px;
+      margin-bottom: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    }
+    .kb-health-card:hover {
+      border-color: var(--blue);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      transform: translateY(-1px);
+    }
+    .kb-health-card svg { flex: none; }
+    .kb-health-card .kbc-body { flex: 1; min-width: 0; }
+    .kb-health-card .kbc-title { font-size: 15px; font-weight: 600; }
+    .kb-health-card .kbc-desc { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+    .kb-health-card .kbc-cta { font-size: 13px; font-weight: 600; color: var(--blue); white-space: nowrap; }
+    .kb-health-card .kbc-stat {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .kb-health-card .kbc-source {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
     .connection-status {
       display: flex;
       align-items: center;
@@ -393,6 +427,78 @@ export function getDashboardHtml(port: number): string {
       <span id="conn-text">Connecting...</span>
     </div>
   </header>
+  <a class="kb-health-card" href="/kb-report" target="_blank" rel="noopener">
+    <svg viewBox="0 0 148 76" width="132" height="68" aria-hidden="true">
+      <circle cx="30" cy="38" r="21" fill="none" stroke="#30363d" stroke-width="7"/>
+      <circle id="kbcRing" cx="30" cy="38" r="21" fill="none"
+              stroke="#58a6ff" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="0 132" transform="rotate(-90 30 38)"/>
+      <text id="kbcRingLabel" x="30" y="38" text-anchor="middle"
+            dominant-baseline="central" fill="#e6edf3"
+            font-size="12" font-weight="600">…</text>
+      <g id="kbcBars"></g>
+    </svg>
+    <div class="kbc-body">
+      <div class="kbc-title">📊 Knowledge Base Health</div>
+      <div class="kbc-desc">Coverage by type, top-recalled &amp; silent entries,
+        recall trend, and a maintenance console.</div>
+      <div class="kbc-stat" id="kbcStat"></div>
+      <div class="kbc-source" id="kbcSource"></div>
+    </div>
+    <span class="kbc-cta">View report →</span>
+  </a>
+  <script>
+    (function loadKbSummary() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function () { controller.abort(); }, 8000);
+      fetch('/api/kb-summary', { signal: controller.signal })
+        .then(function (resp) {
+          return resp.ok ? resp.json() : Promise.reject(new Error('kb-summary ' + resp.status));
+        })
+        .then(function (summary) {
+          var radius = 21;
+          var circumference = 2 * Math.PI * radius;
+          var pct = Math.max(0, Math.min(100, Math.round(summary.overallCoveragePct || 0)));
+          var filled = circumference * pct / 100;
+          var ring = document.getElementById('kbcRing');
+          if (ring) {
+            ring.setAttribute('stroke-dasharray', filled.toFixed(1) + ' ' + (circumference - filled).toFixed(1));
+          }
+          var label = document.getElementById('kbcRingLabel');
+          if (label) label.textContent = pct + '%';
+          var stat = document.getElementById('kbcStat');
+          if (stat) stat.textContent = (summary.totalEntries || 0) + ' entries · ' + pct + '% coverage';
+          var source = document.getElementById('kbcSource');
+          if (source && summary.source && summary.source.label) source.textContent = summary.source.label;
+          var bars = document.getElementById('kbcBars');
+          var coverage = Array.isArray(summary.coverage) ? summary.coverage.slice(0, 6) : [];
+          if (bars && coverage.length) {
+            var x0 = 70, x1 = 142;
+            var slot = (x1 - x0) / coverage.length;
+            var barWidth = Math.min(12, slot - 4);
+            var svgNs = 'http://www.w3.org/2000/svg';
+            while (bars.firstChild) bars.removeChild(bars.firstChild);
+            coverage.forEach(function (covItem, index) {
+              var pctVal = Math.max(0, Math.min(100, covItem.coveragePct || 0));
+              var barHeight = Math.max(3, Math.round(52 * pctVal / 100));
+              var rect = document.createElementNS(svgNs, 'rect');
+              rect.setAttribute('x', (x0 + index * slot + (slot - barWidth) / 2).toFixed(1));
+              rect.setAttribute('y', String(68 - barHeight));
+              rect.setAttribute('width', barWidth.toFixed(1));
+              rect.setAttribute('height', String(barHeight));
+              rect.setAttribute('rx', '2');
+              rect.setAttribute('fill', index % 2 ? '#3fb950' : '#58a6ff');
+              bars.appendChild(rect);
+            });
+          }
+        })
+        .catch(function () {
+          var label = document.getElementById('kbcRingLabel');
+          if (label) label.textContent = '';
+        })
+        .then(function () { clearTimeout(timeout); });
+    })();
+  </script>
   <div id="stats"></div>
   <div id="app"></div>
 
