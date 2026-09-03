@@ -16,7 +16,7 @@ import {
   truncate,
   type AgentSkillsView,
 } from './agent-skills.js';
-import { RESOURCE_TYPES, type GlobalOptions, type ResourceType } from './types.js';
+import { RESOURCE_TYPES, getDataHome, type GlobalOptions, type ResourceType } from './types.js';
 import { maskEnvValue } from './resources/env.js';
 import { parseTeamMcpServers } from './resources/mcp.js';
 import { parseHooksYaml } from './resources/hooks.js';
@@ -39,6 +39,9 @@ export async function status(options: GlobalOptions): Promise<void> {
   // Scope info
   console.log('');
   log.info(`Scope: ${scopeLabel}${scopeLabel === 'project' && localConfig.projectRoot ? ` (${localConfig.projectRoot})` : ''}`);
+  // Machine-data partition: where this project's teamai data actually lives
+  // (~/.teamai/projects/<slug>/ for a partitioned install, else legacy .teamai).
+  log.info(`  data: ${getDataHome(localConfig)}`);
 
   // Git status
   console.log('');

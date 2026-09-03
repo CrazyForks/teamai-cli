@@ -1,7 +1,7 @@
 import YAML from 'yaml';
 import fs from 'node:fs';
 import path from 'node:path';
-import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConfigForScope, loadStateForScope, saveStateForScope } from './config.js';
+import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConfigForScope, loadStateForScope, saveStateForScope, resolveProjectDataHome } from './config.js';
 import { reconcileTeamHooksForConfig } from './hooks.js';
 import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
@@ -274,7 +274,9 @@ export async function initHttp(
   if (fallbackReason) {
     log.warn(fallbackReason);
   }
-  const teamaiHome = getTeamaiHome(scope, projectRoot);
+  const teamaiHome = scope === 'project' && projectRoot
+    ? await resolveProjectDataHome(projectRoot)
+    : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 
   if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
@@ -282,7 +284,7 @@ export async function initHttp(
   }
 
   // Re-init guard
-  const existingConfigPath = getConfigPath(scope, projectRoot);
+  const existingConfigPath = path.join(teamaiHome, 'config.yaml');
   if (await pathExists(existingConfigPath) && !options.force) {
     const confirmed = await askConfirmation(`teamai already initialized at ${existingConfigPath}. Overwrite? [y/N] `);
     if (!confirmed) {
@@ -325,6 +327,7 @@ export async function initHttp(
     scope,
     projectRoot,
     additionalRoles: [],
+    ...(scope === 'project' ? { dataHome: teamaiHome } : {}),
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
   try {
@@ -933,7 +936,9 @@ export async function init(options: GlobalOptions & {
   if (fallbackReason) {
     log.warn(fallbackReason);
   }
-  const teamaiHome = getTeamaiHome(scope, projectRoot);
+  const teamaiHome = scope === 'project' && projectRoot
+    ? await resolveProjectDataHome(projectRoot)
+    : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 
   if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
@@ -941,7 +946,7 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 0.5: Re-init guard — warn if config already exists
-  const existingConfigPath = getConfigPath(scope, projectRoot);
+  const existingConfigPath = path.join(teamaiHome, 'config.yaml');
   if (await pathExists(existingConfigPath)) {
     log.warn(`teamai is already initialized for ${scope} scope at ${existingConfigPath}`);
     if (options.force) {
@@ -1226,6 +1231,7 @@ export async function init(options: GlobalOptions & {
     scope,
     projectRoot,
     additionalRoles: [],
+    ...(scope === 'project' ? { dataHome: teamaiHome } : {}),
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
 

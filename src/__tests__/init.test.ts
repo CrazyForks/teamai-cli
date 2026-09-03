@@ -87,6 +87,7 @@ vi.mock('../config.js', () => ({
   loadTeamConfig: vi.fn().mockResolvedValue(null),
   loadStateForScope: vi.fn().mockRejectedValue(new Error('no state')),
   saveStateForScope: vi.fn(),
+  resolveProjectDataHome: vi.fn(async (projectRoot: string) => `${projectRoot}/.teamai`),
 }));
 
 vi.mock('../hooks.js', () => ({

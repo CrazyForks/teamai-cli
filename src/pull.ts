@@ -28,10 +28,12 @@ import {
   isRecallEnabled,
   isAgentDisabled,
   scopedToolPaths,
+  SYNC_LOCK_FILENAME,
 } from './types.js';
 import type { CultureFrontmatter } from './types.js';
 import { loadRolesManifest, resolveRoleResourceNamespaces, type ResourceNamespaces } from './roles.js';
 import { getUserHome } from './utils/home.js';
+import { acquireLock, releaseLock } from './update.js';
 
 interface RolePullContext {
   activeNamespaces: ResourceNamespaces;
@@ -89,7 +91,23 @@ async function refreshTeamRepo(
     return { label: 'single-repo (knowledge on main)', version, reportingOnly: false };
   }
 
-  const result = await pullRepo(localConfig.repo.localPath);
+  // Guard the shared team clone with the partition sync-lock: the main checkout
+  // and a worktree can both run `teamai pull` and race `git pull` on one clone.
+  // pull is idempotent, so on contention we skip the fetch and proceed with the
+  // clone's current state (the winner's pull already advanced it).
+  const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
+  let result: string;
+  const locked = await acquireLock(syncLock);
+  if (!locked) {
+    log.debug('[pull] another pull/push holds the sync lock; using the current clone state');
+    result = 'sync in progress elsewhere — skipped fetch';
+  } else {
+    try {
+      result = await pullRepo(localConfig.repo.localPath);
+    } finally {
+      await releaseLock(syncLock);
+    }
+  }
 
   // Retry any learnings whose push previously failed (see savePendingLearning).
   // Best-effort: never let a flush error block the pull.
