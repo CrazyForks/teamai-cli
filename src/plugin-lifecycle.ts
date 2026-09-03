@@ -232,13 +232,24 @@ export async function teardownAllPlugins(deps: ReconcileDeps): Promise<void> {
   }
 }
 
+const PLUGIN_CMD_FIELDS = new Set([
+  'install_cmd',
+  'update_cmd',
+  'uninstall_cmd',
+  'run_cmd',
+  'version',
+]);
+const PLUGIN_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Parse a raw get-config response into structured plugin descriptors and substitution vars.
  *
  * New contract: iterate over each top-level key; if the value is an object that contains
  * non-empty `install_cmd`, `run_cmd`, and `uninstall_cmd` strings, it is a plugin whose
- * slug equals that key. Substitution vars (endpoint, topic_id, etc.) are extracted from
- * the same section.
+ * slug equals that key. Substitution vars are every finite number or non-empty
+ * string field in the same section whose name is a valid `${placeholder}`
+ * identifier (`[A-Za-z_][A-Za-z0-9_]*`). Command/version fields are excluded.
+ * If two plugin sections share a field name, the later section wins.
  */
 export function parseGetConfig(resp: unknown): { vars: Record<string, string>; plugins: PluginDescriptor[] } {
   const vars: Record<string, string> = {};
@@ -249,12 +260,11 @@ export function parseGetConfig(resp: unknown): { vars: Record<string, string>; p
     const s = section as Record<string, unknown>;
     const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
     if (!isStr(s['install_cmd']) || !isStr(s['run_cmd']) || !isStr(s['uninstall_cmd'])) continue;
-    // substitution vars: scalar fields referenced by ${...} in run_cmd
-    for (const f of ['endpoint', 'topic_id', 'secret_id', 'secret_key', 'user_name'] as const) {
-      if (isStr(s[f])) vars[f] = s[f] as string;
+    for (const [field, value] of Object.entries(s)) {
+      if (PLUGIN_CMD_FIELDS.has(field) || !PLUGIN_VAR_NAME.test(field)) continue;
+      if (typeof value === 'number' && Number.isFinite(value)) vars[field] = String(value);
+      else if (isStr(value)) vars[field] = value;
     }
-    if (typeof s['user_id'] === 'number') vars['user_id'] = String(s['user_id']);
-    else if (isStr(s['user_id'])) vars['user_id'] = s['user_id'] as string;
     plugins.push({
       slug: key,
       version: isStr(s['version']) ? (s['version'] as string) : undefined,
