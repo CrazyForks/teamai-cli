@@ -180,8 +180,8 @@ export async function syncVotesToTeam(
  * Record manual feedback for a recalled document.
  */
 export async function recallFeedback(opts: { positive?: string; negative?: string }): Promise<void> {
-  const { requireInit } = await import('./config.js');
-  const { localConfig } = await requireInit();
+  const { autoDetectInit } = await import('./config.js');
+  const { localConfig } = await autoDetectInit();
   const { username } = localConfig;
   const { VOTES_LOCAL_DIR } = await import('./types.js');
   const votePath = path.join(VOTES_LOCAL_DIR, `${username}.yaml`);

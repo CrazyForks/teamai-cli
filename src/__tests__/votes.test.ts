@@ -240,7 +240,7 @@ describe('syncVotesToTeam', () => {
 describe('recallFeedback', () => {
   beforeEach(() => {
     vi.doMock('../config.js', () => ({
-      requireInit: () => Promise.resolve({
+      autoDetectInit: () => Promise.resolve({
         localConfig: { username: 'testuser', repo: { localPath: tmpDir } },
       }),
     }));

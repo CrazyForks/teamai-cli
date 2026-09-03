@@ -946,8 +946,8 @@ recallCmd
   .option('--update-quality', 'Find stale docs/rules/skills and suggest updates')
   .option('--dry-run', 'Show what would be done without making changes')
   .action(async (cmdOpts) => {
-    const { requireInit } = await import('./config.js');
-    const { localConfig } = await requireInit();
+    const { autoDetectInit } = await import('./config.js');
+    const { localConfig } = await autoDetectInit();
     const repoPath = localConfig.repo.localPath;
     const votesDir = `${repoPath}/votes`;
     const learningsDir = `${repoPath}/learnings`;
@@ -1018,8 +1018,8 @@ recallCmd
   .option('--category <cat>', 'Target category: skills | rules | docs')
   .option('--dry-run', 'Show what would be done without making changes')
   .action(async (learningId, cmdOpts) => {
-    const { requireInit } = await import('./config.js');
-    const { localConfig } = await requireInit();
+    const { autoDetectInit } = await import('./config.js');
+    const { localConfig } = await autoDetectInit();
     const repoPath = localConfig.repo.localPath;
     const votesDir = `${repoPath}/votes`;
     const learningsDir = `${repoPath}/learnings`;
