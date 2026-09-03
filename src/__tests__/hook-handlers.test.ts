@@ -19,6 +19,10 @@ const mockIncrementUpvoted = vi.fn().mockResolvedValue(undefined);
 const mockSyncVotesToTeam = vi.fn().mockResolvedValue(false);
 const mockDoUpdate = vi.fn().mockResolvedValue(undefined);
 const mockReportAndSyncFromHook = vi.fn().mockResolvedValue(null);
+const mockPackageManifestHash = vi.fn().mockResolvedValue('before-hash');
+const mockStashPackageHint = vi.fn().mockResolvedValue(undefined);
+const mockClaimPackageHint = vi.fn().mockResolvedValue(null);
+const mockTakePendingPackageHint = vi.fn().mockResolvedValue(null);
 
 vi.mock('../pull.js', () => ({
   pull: mockPull,
@@ -69,6 +73,13 @@ vi.mock('../local-agent.js', () => ({
   reportAndSyncFromHook: mockReportAndSyncFromHook,
 }));
 
+vi.mock('../pkg/pkg-hint.js', () => ({
+  packageManifestHashForCwd: mockPackageManifestHash,
+  stashPackageHintAfterPull: mockStashPackageHint,
+  claimPackageHintOutput: mockClaimPackageHint,
+  takePendingPackageHint: mockTakePendingPackageHint,
+}));
+
 vi.mock('../transcript-parser.js', () => ({
   parseTranscriptForVotes: mockParseTranscriptForVotes,
 }));
@@ -93,6 +104,8 @@ describe('hook-handlers registry', () => {
     vi.clearAllMocks();
     mockParseTranscriptForVotes.mockResolvedValue({ referencedDocIds: [], recalledDocIds: [] });
     mockClaimVotesNudge.mockResolvedValue(true);
+    mockPackageManifestHash.mockResolvedValue('before-hash');
+    mockTakePendingPackageHint.mockResolvedValue(null);
   });
 
   it('returns registrations for all expected events', () => {
@@ -119,10 +132,15 @@ describe('hook-handlers registry', () => {
       (r) => r.event === 'session-start' && r.handler.name === 'pull',
     )!.handler;
 
-    await handler.execute({ cwd: '/tmp/some-project' }, 'claude');
+    await handler.execute({ session_id: 's-pull', cwd: '/tmp/some-project' }, 'claude');
 
     expect(mockSeedProjectAgentRoot).toHaveBeenCalledWith('claude', '/tmp/some-project');
     expect(mockPull).toHaveBeenCalledWith({ silent: true });
+    expect(mockStashPackageHint).toHaveBeenCalledWith(
+      '/tmp/some-project',
+      's-pull',
+      'before-hash',
+    );
     expect(mockSeedProjectAgentRoot.mock.invocationCallOrder[0]).toBeLessThan(
       mockPull.mock.invocationCallOrder[0],
     );
@@ -278,15 +296,16 @@ describe('hook-handlers registry', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('[teamai] stashed');
   });
 
-  it('pending-hint handler is a no-op for claude', async () => {
+  it('package-pending-hint checks package hints for claude', async () => {
     const registry = buildHandlerRegistry();
     const handler = registry.find(
-      (r) => r.event === 'prompt-submit' && r.handler.name === 'pending-hint',
+      (r) => r.event === 'prompt-submit' && r.handler.name === 'package-pending-hint',
     )!.handler;
 
     const result = await handler.execute({ session_id: 's4', cwd: '/x' }, 'claude');
     expect(result).toBeNull();
     expect(mockTakePendingHint).not.toHaveBeenCalled();
+    expect(mockTakePendingPackageHint).toHaveBeenCalledWith('s4');
   });
 
   it('pending-hint handler returns null when no pending hint', async () => {
@@ -299,6 +318,18 @@ describe('hook-handlers registry', () => {
 
     const result = await handler.execute({ session_id: 's5', cwd: '/x' }, 'codebuddy');
     expect(result).toBeNull();
+  });
+
+  it('delivers a post-pull package hint on prompt-submit for Claude', async () => {
+    mockTakePendingPackageHint.mockResolvedValue('Run `teamai install`');
+    const handler = buildHandlerRegistry().find(
+      (r) => r.event === 'prompt-submit' && r.handler.name === 'package-pending-hint',
+    )!.handler;
+
+    const output = await handler.execute({ session_id: 's6', cwd: '/x' }, 'claude');
+
+    expect(JSON.parse(output!).hookSpecificOutput.additionalContext)
+      .toBe('Run `teamai install`');
   });
 
   it('post-tool-use wildcard has dashboard-report', () => {
@@ -442,6 +473,8 @@ describe('hook-handlers registry', () => {
     expect(names).not.toContain('votes-sync');
     // Non-git-only handlers survive
     expect(names).toContain('pull');
+    expect(names).toContain('package-hint');
+    expect(names).toContain('package-pending-hint');
     expect(names).toContain('local-agent-sync');
   });
 

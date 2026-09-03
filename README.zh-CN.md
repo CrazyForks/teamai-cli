@@ -163,6 +163,20 @@ teamai source remove other-team
 添加/移除会立即在本机生效，订阅的 skills 会在下一次 `teamai pull` 时同步。需要将
 `teamai.yaml` 的改动分享给团队成员时，再运行 `teamai push`。
 
+### 团队包
+
+共享并一键恢复团队的 npm 包和 Claude Code 插件：
+
+```bash
+teamai install typescript
+teamai install typescript@5.9.2 --npm
+teamai install code-review@claude-plugins-official
+teamai push       # 分享团队声明
+teamai install    # 安装团队声明的全部包
+```
+
+完整工作流和配置见[使用指南](docs/usage-guide.zh-CN.md#团队包)。
+
 ## 知识库
 
 除了分发 Harness，TeamAI 还把团队沉淀的经验和代码结构组织成可检索的知识库，让 AI 在需要时自动召回。
@@ -230,6 +244,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | `teamai init` | 初始化：OAuth 登录、关联仓库、注册成员、注入 hooks |
 | `teamai pull` | 拉取团队资源并注入到本地 AI 工具 |
 | `teamai push` | 推送本地资源到分支并创建合并请求 |
+| `teamai install [target]` | 安装团队 npm 包和 Claude 插件；带 target 时同步更新声明 |
 | `teamai status` | 显示本地与团队仓库的差异 |
 | `teamai contribute` | 将 session 经验分享到团队仓库 |
 | `teamai recall <query>` | 搜索团队知识库（BM25 + 图谱增强） |

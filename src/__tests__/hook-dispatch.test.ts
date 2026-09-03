@@ -189,6 +189,31 @@ describe('hook-dispatch', () => {
       const result = await dispatcher.dispatch('stop', '*', {}, 'cursor');
       expect(JSON.parse(result.output!).followup_message).toBe('VOTES\nCONTRIBUTE');
     });
+
+    it('merges additional context from independent handlers', async () => {
+      const mrHint = createHandler('mr-hint', JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: 'MR context',
+        },
+      }));
+      const packageHint = createHandler('package-hint', JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: 'Package context',
+        },
+      }));
+      const dispatcher = createDispatcher({
+        handlers: [
+          { event: 'session-start', matcher: '*', handler: mrHint },
+          { event: 'session-start', matcher: '*', handler: packageHint },
+        ],
+      });
+
+      const result = await dispatcher.dispatch('session-start', '*', {}, 'claude');
+      const output = JSON.parse(result.output!);
+      expect(output.hookSpecificOutput.additionalContext).toBe('MR context\nPackage context');
+    });
   });
 
   describe('stdin sharing', () => {

@@ -104,7 +104,7 @@ describe('buildSelfModeGitignore', () => {
   const gi = buildSelfModeGitignore();
 
   it('ignores machine-local state and worktrees', () => {
-    for (const entry of ['config.yaml', 'state.json', 'token', 'reports-wt/', 'knowledge-wt/', '.reports-lock', '.bootstrap-lock']) {
+    for (const entry of ['config.yaml', 'state.json', 'token', 'teamai.lock', 'reports-wt/', 'knowledge-wt/', '.reports-lock', '.bootstrap-lock']) {
       expect(gi).toContain(entry);
     }
   });
@@ -135,19 +135,20 @@ describe('buildSelfModeGitignore', () => {
 });
 
 describe('migrateSelfModeGitignoreContent (self-heal old gitignore)', () => {
-  it('removes a standalone `env` line and adds env.local', () => {
+  it('removes a standalone `env` line and adds machine-local entries', () => {
     const old = ['config.yaml', 'env', 'env.sh', 'members/'].join('\n');
     const { changed, content } = migrateSelfModeGitignoreContent(old);
     expect(changed).toBe(true);
     const lines = content.split('\n').map((l) => l.trim());
     expect(lines).not.toContain('env');
     expect(lines).toContain('env.local');
+    expect(lines).toContain('teamai.lock');
     // env.local inserted right after env.sh
     expect(content).toContain('env.sh\nenv.local');
   });
 
   it('does not touch env.sh, env.local, or env/', () => {
-    const old = ['env.sh', 'env.local', 'env/'].join('\n');
+    const old = ['env.sh', 'env.local', 'teamai.lock', 'env/'].join('\n');
     const { changed, content } = migrateSelfModeGitignoreContent(old);
     expect(changed).toBe(false); // nothing to remove, env.local already present
     const lines = content.split('\n').map((l) => l.trim());
@@ -170,13 +171,21 @@ describe('migrateSelfModeGitignoreContent (self-heal old gitignore)', () => {
     const lines = content.split('\n').map((l) => l.trim());
     expect(lines).not.toContain('env');
     expect(lines).toContain('env.local');
+    expect(lines).toContain('teamai.lock');
   });
 
   it('ignores commented lines containing env', () => {
-    const old = ['# env is machine-local', 'config.yaml', 'env.local'].join('\n');
+    const old = ['# env is machine-local', 'config.yaml', 'env.local', 'teamai.lock'].join('\n');
     const { changed, content } = migrateSelfModeGitignoreContent(old);
     // No bare `env` line, env.local already present → unchanged.
     expect(changed).toBe(false);
     expect(content).toContain('# env is machine-local');
+  });
+
+  it('adds teamai.lock next to token in older gitignore files', () => {
+    const old = ['config.yaml', 'token', 'env.local'].join('\n');
+    const { changed, content } = migrateSelfModeGitignoreContent(old);
+    expect(changed).toBe(true);
+    expect(content).toContain('token\nteamai.lock');
   });
 });

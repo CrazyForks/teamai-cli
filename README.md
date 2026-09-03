@@ -163,6 +163,20 @@ teamai source remove other-team
 The add/remove change takes effect locally right away, and subscribed skills sync on the next
 `teamai pull`. Run `teamai push` when you want to share the `teamai.yaml` change with teammates.
 
+### Team Packages
+
+Share and restore the team's npm packages and Claude Code plugins:
+
+```bash
+teamai install typescript
+teamai install typescript@5.9.2 --npm
+teamai install code-review@claude-plugins-official
+teamai push       # Share the declarations
+teamai install    # Install everything declared by the team
+```
+
+See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
+
 ## Knowledge Base
 
 Beyond distributing the Harness, TeamAI organizes accumulated team experience and code structure into a searchable knowledge base that the AI recalls automatically when needed.
@@ -230,6 +244,7 @@ The WASM parser is a pure-JavaScript dependency — no native toolchain is requi
 | `teamai init` | Initialize: OAuth login, link repo, register member, inject hooks |
 | `teamai pull` | Pull team resources and inject into local AI tools |
 | `teamai push` | Push local resources to a branch and open a Merge Request |
+| `teamai install [target]` | Install declared npm packages and Claude plugins; with a target, also update `teamai.yaml` |
 | `teamai status` | Show local vs team repo diff |
 | `teamai contribute` | Share session experience to team repo |
 | `teamai recall <query>` | Search the team knowledge base (BM25 + graph-boost) |

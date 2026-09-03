@@ -33,12 +33,13 @@
 
 | 概念 | 说明 |
 |------|------|
-| **Team Repo** | 一个 Git 仓库，集中存放团队共享的 Skills / Rules / Docs / Env 资源 |
+| **Team Repo** | 一个 Git 仓库，集中存放团队共享的 Skills / Rules / Docs / Env / Packages |
 | **Scope** | 资源安装位置：`project`（当前项目，默认）或 `user`（用户主目录）|
 | **Skills** | AI 可调用的自定义技能（目录形式，含 `SKILL.md`） |
 | **Rules** | Markdown 格式的团队规范，自动合并到 AI 工具配置中 |
 | **Docs** | 团队共享文档，供 AI 参考 |
 | **Env** | 团队共享环境变量，自动注入 shell |
+| **Packages** | 全团队统一的 npm 包和 Claude Code 插件，通过 `teamai install` 主动安装 |
 
 ```
 ┌───────────────┐    teamai push (MR)    ┌───────────────────┐
@@ -301,6 +302,75 @@ teamai pull --dry-run    # 试运行，不实际修改
 > Project scope 默认与 user scope 隔离。当前工作目录包含 project scope 的 `.teamai/config.yaml` 时，`pull` 会处理该项目并跳过 user scope；仅当本地配置包含 `inheritUserScope: true` 时，才会先刷新安全的 user 资源通道。当前目录没有 project 配置时，`pull` 处理 user scope。project 模式下，user 的 `env`、MCP 定义、sources、reporting 和写入行为仍保持隔离。hooks 是唯一例外：project scope 的 hooks 会注入到你的 **HOME** 工具设置（`~/.claude/settings.json` 等），而非 `<projectRoot>`——因为内置 hooks 依据传给 `hook-dispatch` 的 `cwd` 门控，且 `~/.claude` 恒存在、能通过「已安装工具」门槛（详见 Hooks 章节）。self 单仓模式则把 hooks 保留在业务仓库里，随 clone 传播。
 
 启用角色化 skills 后，`pull` 的 skills 同步来源会变成 `skills/<namespace>/` 中的内容，按 `primaryRole + additionalRoles` 展开对应的 namespace，拍平安装到本地各 AI 工具 skills 目录。`rules/`、`docs/`、`learnings/` 仍然保持原有全局同步逻辑。
+
+### 团队包
+
+`teamai install` 通过现有团队仓库统一声明和恢复 npm 包与 Claude Code 插件。TeamAI 调用原生 `npm` 和 `claude plugin` CLI，不自行分发包内容。
+
+**管理员操作：**
+
+传入 target 时，命令会完成安装，并将声明写入团队仓库的 `teamai.yaml`：
+
+```bash
+# npm 包（默认安装为项目依赖）
+teamai install typescript
+
+# 未带 scope 的 name@version 与 plugin@marketplace 有歧义，需显式指定 npm
+teamai install typescript@5.9.2 --npm
+
+# 从指定 registry 安装全局 npm CLI
+teamai install eslint@latest --global \
+  --registry https://registry.npmjs.org/
+
+# Claude 插件
+teamai install code-review@claude-plugins-official
+
+# 通过现有评审流程分享更新后的 teamai.yaml
+teamai push
+```
+
+npm target 支持 `name` 或 `name@version`。由于未带 scope 的 `name@value` 也可能表示 `plugin@marketplace`，当后缀不是已声明或已注册的 Claude marketplace 时需使用 `--npm`。带 scope 的 npm 名称（`@scope/name`）、无版本名称、`--global` 和 `--registry` 已能明确表示 npm，不会探测 Claude CLI。安装项目依赖时，当前目录必须包含 `package.json`；机器级 CLI 工具使用 `--global`。`--registry` 会随该包的声明保存，且必须是不包含凭据的 HTTP(S) URL。registry 认证信息应保存在 npm 配置或环境变量中。
+
+Claude 插件 target 使用 `plugin@marketplace` 格式。`claude-plugins-official` 官方 marketplace 会自动解析；使用其他 marketplace 前，需先在 Claude Code 中注册，以便 TeamAI 获取并记录其来源。可使用 `--claude` 明确指定生态，并在 marketplace 不可用时获得针对性的错误。存在歧义的 target 会直接失败，不会运行任一包管理器。`--global` 和 `--registry` 仅适用于 npm target。
+
+**成员操作：**
+
+现有 SessionStart hook 会执行 `teamai pull`。当 `packages` 声明发生变化时，它只会提示成员检查 `teamai.yaml` 并主动安装，不会自动执行第三方包或插件代码。pull 继续在后台运行，避免网络延迟阻塞 IDE；如果声明在 SessionStart 输出窗口结束后才拉取完成，TeamAI 会把同一条提示安全地排队，并在本会话下一次 UserPromptSubmit 时投递。
+
+```bash
+teamai install             # 安装团队声明的全部包和插件
+teamai install --dry-run   # 预览底层命令，不安装也不写文件
+teamai doctor              # 检查运行环境及声明的包、marketplace、插件状态
+```
+
+安装成功后，TeamAI 会在当前 scope 的 `.teamai` 目录下写入本地快照 `teamai.lock`。该文件记录已安装版本，以及供 SessionStart 提示比对的声明哈希，不会写入团队仓库。在 user scope 下，全局 npm 工具和 Claude 插件只需确认一次；项目 npm 依赖会按工作目录分别确认，避免在一个仓库安装后错误关闭另一个仓库的提示。
+
+**声明格式：**
+
+以下内容由 `teamai install <target>` 自动维护：
+
+```yaml
+packages:
+  npm:
+    - name: typescript
+      version: "*"
+    - name: eslint
+      version: latest
+      global: true
+      registry: https://registry.npmjs.org/
+  claude:
+    marketplaces:
+      - name: claude-plugins-official
+        repo: anthropics/claude-plugins-official
+    plugins:
+      - name: code-review@claude-plugins-official
+```
+
+- `npm[].version` 默认为 `*`，`global` 默认为 `false`。
+- `claude.marketplaces` 记录 marketplace 名称与仓库来源。
+- Claude 插件必须使用 `plugin@marketplace` 格式，且对应 marketplace 必须已声明。
+- `packages` 内未知或拼错的键会在 install 或 push 前被拒绝。
+- 包声明对全团队生效，不受角色或项目筛选影响。
 
 ### 排除个人不需要的 Skill
 
@@ -1196,6 +1266,11 @@ provider: tgit
 
 reviewers:
   - reviewer1
+
+packages:
+  npm:
+    - name: typescript
+      version: "*"
 
 sharing:
   rules:

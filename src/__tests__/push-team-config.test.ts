@@ -133,6 +133,44 @@ describe('push carries teamai.yaml (source add regression)', () => {
     expect(pushed).toContain('https://git.example/dev');
   });
 
+  it('rejects invalid package declarations before creating a PR', async () => {
+    const teamRepo = await initTeamRepos(tmpDir);
+    const yamlPath = path.join(teamRepo, 'teamai.yaml');
+    fs.writeFileSync(yamlPath, [
+      'version: 1',
+      'publicSkills: []',
+      'packages:',
+      '  claude:',
+      '    marketplaces: []',
+      '    plugins:',
+      '      - name: review@missing',
+      '',
+    ].join('\n'));
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: {
+        repo: { localPath: teamRepo, remote: path.join(tmpDir, 'remote.git'), kind: undefined },
+        username: 'alice',
+        scope: 'project',
+        projectRoot: teamRepo,
+      },
+      teamConfig: { repo: 'acme/team', toolPaths: {} },
+    });
+    const originalExitCode = process.exitCode;
+
+    try {
+      const { push } = await import('../push.js');
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await push({ all: true });
+      errorSpy.mockRestore();
+
+      expect(process.exitCode).toBe(1);
+      expect(mockCreatePullRequest).not.toHaveBeenCalled();
+      expect(fs.readFileSync(yamlPath, 'utf8')).toContain('review@missing');
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
   it('config-only: returns a non-zero exit code when PR creation fails', async () => {
     const teamRepo = await initTeamRepos(tmpDir);
     const yamlPath = path.join(teamRepo, 'teamai.yaml');

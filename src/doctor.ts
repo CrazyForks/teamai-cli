@@ -212,6 +212,15 @@ export async function doctor(options: GlobalOptions): Promise<void> {
     }
   }
 
+  if (localConfig) {
+    const { pkgDoctorReport } = await import('./pkg/commands.js');
+    const packageReport = await pkgDoctorReport(localConfig, process.cwd());
+    if (packageReport) {
+      for (const line of packageReport.lines) console.log(line);
+      if (!packageReport.allPassed) allPassed = false;
+    }
+  }
+
   // Codex trust-gate reminder: even when hooks are installed, Codex may not run
   // them until the user reviews/trusts them. Note only — teamai never writes
   // [hooks.state] to auto-trust.
