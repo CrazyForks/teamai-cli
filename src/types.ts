@@ -1274,7 +1274,13 @@ export function getTeamaiHome(scope: Scope, projectRoot?: string): string {
  * through this helper so they never disagree on the path.
  */
 export function getEnvBackupPath(localConfig: LocalConfig): string {
-  const home = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+  // Route through getDataHome (not getTeamaiHome directly) so the plaintext
+  // env backup follows the machine-data home together with env.sh. Otherwise
+  // P1-2's partition redirect would move env.sh into ~/.teamai/projects/<slug>/
+  // while leaving the KEY=value backup (which carries plaintext values) behind
+  // in <projectRoot>/.teamai — breaking "zero workspace residue" and leaking
+  // sensitive values into the business repo directory.
+  const home = getDataHome(localConfig);
   return path.join(home, isSelfMode(localConfig) ? 'env.local' : 'env');
 }
 

@@ -19,6 +19,7 @@ import {
   getKnowledgeDir,
   getReportsDir,
   getDataHome,
+  getTeamaiHome,
 } from './types.js';
 import type { SearchIndexEntry } from './types.js';
 import { findPromotionCandidates, type PromotionCandidate } from './maintenance/promote.js';
@@ -157,7 +158,11 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
     const knowledgeRoot = getKnowledgeDir(config);
     const reportsRoot = getReportsDir(config);
     const useProjectScope = config.scope === 'project' && Boolean(config.projectRoot);
-    const teamaiHome = getDataHome(config);
+    // Project branch routes through getDataHome (P1-2 partition-aware); the
+    // else branch preserves the original fallback to ~/.teamai for historical
+    // configs that are project-scoped but lack projectRoot (getDataHome would
+    // otherwise throw via getTeamaiHome and fail the dashboard report).
+    const teamaiHome = useProjectScope ? getDataHome(config) : getTeamaiHome('user');
     const learningsDir = useProjectScope
       ? path.join(knowledgeRoot, 'learnings')
       : LEARNINGS_LOCAL_DIR;

@@ -5,7 +5,7 @@ import type { SearchResult } from './utils/search-index.js';
 import { readFileSafe, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions, SearchIndex, LocalConfig } from './types.js';
-import { getDataHome } from './types.js';
+import { getDataHome, getTeamaiHome } from './types.js';
 import { queryCodeKnowledge } from './code-knowledge-recall.js';
 import type { CodeKnowledgeResult, SourceAnchor } from './code-knowledge-recall.js';
 import { recordRecallQuality } from './recall-quality.js';
@@ -264,7 +264,15 @@ async function loadOrBuildScopeIndex(
   localConfig: LocalConfig,
   scopeLabel: 'user' | 'project',
 ): Promise<{ index: SearchIndex; learningsBase: string } | null> {
-  const teamaiHome = getDataHome(localConfig);
+  // Route the project branch through getDataHome (so P1-2's partition redirect
+  // applies), but preserve the historical fallback to ~/.teamai when a project
+  // scope config lacks projectRoot: getDataHome → getTeamaiHome throws in that
+  // case, and here the exception surfaces as a misleading "No learnings
+  // available". A ~/.teamai/config.yaml with scope:project but no projectRoot is
+  // permitted by LocalConfigSchema and not backfilled by loadLocalConfig.
+  const teamaiHome = localConfig.scope === 'project' && localConfig.projectRoot
+    ? getDataHome(localConfig)
+    : getTeamaiHome('user');
   const indexPath = path.join(teamaiHome, 'search-index.json');
 
   // user scope: learnings 已被 pull 同步到 ~/.teamai/learnings/

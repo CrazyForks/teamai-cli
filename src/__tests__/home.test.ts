@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getUserHome } from '../utils/home.js';
-import { getTeamaiHome, getDataHome, resolveBaseDir, type LocalConfig } from '../types.js';
+import { getTeamaiHome, getDataHome, getEnvBackupPath, resolveBaseDir, type LocalConfig } from '../types.js';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
@@ -133,6 +133,36 @@ describe('getDataHome (machine-data home resolver)', () => {
       repo: { localPath: '/work/self-repo/.teamai', remote: '', kind: 'self' },
     });
     expect(getDataHome(cfg)).toBe(path.join('/work/self-repo', '.teamai'));
+  });
+
+  it('co-locates the env backup with the data home (git + self)', () => {
+    // Regression guard for the P1-2 partition flip: getEnvBackupPath must route
+    // through getDataHome, so env and env.sh never diverge across a redirect.
+    // (Reviewer: plaintext env backup must not stay behind in the workspace.)
+    process.env.HOME = '/home/alice';
+    const git = makeConfig({ scope: 'project', projectRoot: '/work/proj' });
+    expect(path.dirname(getEnvBackupPath(git))).toBe(getDataHome(git));
+    expect(getEnvBackupPath(git)).toBe(path.join(getDataHome(git), 'env'));
+
+    const self = makeConfig({
+      scope: 'project',
+      projectRoot: '/work/self-repo',
+      repo: { localPath: '/work/self-repo/.teamai', remote: '', kind: 'self' },
+    });
+    expect(path.dirname(getEnvBackupPath(self))).toBe(getDataHome(self));
+    expect(getEnvBackupPath(self)).toBe(path.join(getDataHome(self), 'env.local'));
+  });
+
+  it('throws for a project-scope config missing projectRoot (the hazard callers must guard)', () => {
+    // LocalConfigSchema permits scope:project without projectRoot, and
+    // loadLocalConfig() does not backfill it. getDataHome inherits
+    // getTeamaiHome's refusal to silently fall back to the user home. Consumers
+    // whose config source can yield such a config (recall.ts, viz.ts) MUST guard
+    // before calling getDataHome and fall back to ~/.teamai themselves — this
+    // test documents why that guard exists so it is not "simplified" away.
+    process.env.HOME = '/home/alice';
+    const cfg = makeConfig({ scope: 'project', projectRoot: undefined });
+    expect(() => getDataHome(cfg)).toThrow(/projectRoot is missing/);
   });
 });
 
