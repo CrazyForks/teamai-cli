@@ -8,8 +8,11 @@ const mocks = vi.hoisted(() => ({
   autoDetectInit: vi.fn(),
   npmInstall: vi.fn(),
   npmSnapshot: vi.fn(),
+  npmStatus: vi.fn(),
   claudeInstall: vi.fn(),
   claudeSnapshot: vi.fn(),
+  claudeStatus: vi.fn(),
+  registeredMarketplaces: vi.fn(),
   assertNotReadOnly: vi.fn(),
 }));
 
@@ -36,18 +39,28 @@ vi.mock('../pkg/adapters/npm.js', () => ({
     validate = vi.fn().mockResolvedValue({ valid: true, errors: [] });
     install = mocks.npmInstall;
     snapshot = mocks.npmSnapshot;
-    status = vi.fn().mockResolvedValue([]);
+    status = mocks.npmStatus;
   },
 }));
 
 vi.mock('../pkg/adapters/claude-plugin.js', () => ({
+  marketplaceSourceLocation: (item: { repo?: string; url?: string; path?: string }) =>
+    item.repo ?? item.url ?? item.path,
   ClaudePluginAdapter: class {
     validate = vi.fn().mockResolvedValue({ valid: true, errors: [] });
-    registeredMarketplaces = vi.fn().mockResolvedValue([]);
+    registeredMarketplaces = mocks.registeredMarketplaces;
     install = mocks.claudeInstall;
     snapshot = mocks.claudeSnapshot;
-    status = vi.fn().mockResolvedValue([]);
+    status = mocks.claudeStatus;
   },
+}));
+
+vi.mock('../pkg/env-detect.js', () => ({
+  detectPackageEnvironment: vi.fn().mockResolvedValue([
+    { name: 'Node', version: '22.0.0', available: true },
+    { name: 'npm', version: '10.0.0', available: true },
+    { name: 'Claude Code', version: '2.1.0', available: true },
+  ]),
 }));
 
 import { pkgDoctorReport, pkgInstall } from '../pkg/commands.js';
@@ -55,18 +68,26 @@ import {
   loadPackageLock,
   loadPackageManifest,
   packageDeclarationHash,
+  packageProjectKey,
+  projectNpmDeclarationHash,
+  sharedPackageDeclarationHash,
 } from '../pkg/manifest.js';
 import { LocalConfigSchema } from '../types.js';
 
 describe('pkgInstall npm target options', () => {
   let teamRepo: string;
   let projectRoot: string;
+  let userHome: string;
   let previousCwd: string;
+  let previousHome: string | undefined;
 
   beforeEach(() => {
     teamRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-pkg-command-repo-'));
     projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-pkg-command-project-'));
+    userHome = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-pkg-command-home-'));
     previousCwd = process.cwd();
+    previousHome = process.env.HOME;
+    process.env.HOME = userHome;
     process.chdir(projectRoot);
     fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
       team: 'platform',
@@ -97,13 +118,19 @@ describe('pkgInstall npm target options', () => {
     }]);
     mocks.claudeInstall.mockResolvedValue({ marketplaces: [], plugins: [] });
     mocks.claudeSnapshot.mockResolvedValue({ marketplaces: [], plugins: [] });
+    mocks.npmStatus.mockResolvedValue([]);
+    mocks.claudeStatus.mockResolvedValue([]);
+    mocks.registeredMarketplaces.mockResolvedValue([]);
   });
 
   afterEach(() => {
     process.chdir(previousCwd);
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     vi.clearAllMocks();
     fs.rmSync(teamRepo, { recursive: true, force: true });
     fs.rmSync(projectRoot, { recursive: true, force: true });
+    fs.rmSync(userHome, { recursive: true, force: true });
   });
 
   it('installs a global target and persists global/registry in teamai.yaml', async () => {
@@ -172,7 +199,7 @@ describe('pkgInstall npm target options', () => {
       },
     }));
 
-    await pkgInstall('typescript@latest', {});
+    await pkgInstall('typescript@latest', { npm: true });
 
     expect(mocks.npmInstall).toHaveBeenCalledWith(
       [{ name: 'typescript', version: 'latest' }],
@@ -214,8 +241,78 @@ describe('pkgInstall npm target options', () => {
 
   it('rejects target-only npm flags when no target is provided', async () => {
     await expect(pkgInstall(undefined, { global: true }))
-      .rejects.toThrow('--global and --registry require an npm package target');
+      .rejects.toThrow('require a package target');
     expect(mocks.npmInstall).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for an ambiguous unregistered plugin-or-npm target', async () => {
+    await expect(pkgInstall('deploy-tools@acme-tools', {}))
+      .rejects.toThrow('Ambiguous target');
+    expect(mocks.npmInstall).not.toHaveBeenCalled();
+    expect(mocks.claudeInstall).not.toHaveBeenCalled();
+  });
+
+  it('uses --npm to resolve a versioned npm target without querying Claude', async () => {
+    await pkgInstall('typescript@latest', { npm: true, dryRun: true });
+
+    expect(mocks.registeredMarketplaces).not.toHaveBeenCalled();
+    expect(mocks.npmInstall).toHaveBeenCalledWith(
+      [{ name: 'typescript', version: 'latest' }],
+      expect.objectContaining({ dryRun: true }),
+    );
+  });
+
+  it('requires plugin@marketplace syntax when --claude is explicit', async () => {
+    await expect(pkgInstall('deploy-tools', { claude: true }))
+      .rejects.toThrow('plugin@marketplace');
+    expect(mocks.npmInstall).not.toHaveBeenCalled();
+    expect(mocks.claudeInstall).not.toHaveBeenCalled();
+  });
+
+  it('records git marketplace URLs rather than their source kind', async () => {
+    mocks.registeredMarketplaces.mockResolvedValue([{
+      name: 'acme-tools',
+      source: 'git',
+      url: 'https://github.com/acme/plugins.git',
+    }]);
+
+    await pkgInstall('deploy-tools@acme-tools', { claude: true });
+
+    const raw = YAML.parse(fs.readFileSync(path.join(teamRepo, 'teamai.yaml'), 'utf8'));
+    expect(raw.packages.claude.marketplaces).toEqual([{
+      name: 'acme-tools',
+      repo: 'https://github.com/acme/plugins.git',
+    }]);
+  });
+
+  it('tracks user-scope local npm acknowledgement per project', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      team: 'platform',
+      repo: 'acme/team',
+      packages: {
+        npm: [
+          { name: 'typescript', version: '^5.9.0' },
+          { name: 'eslint', version: 'latest', global: true },
+        ],
+      },
+    }));
+    mocks.autoDetectInit.mockResolvedValue({
+      localConfig: {
+        repo: { localPath: teamRepo, remote: 'x', kind: 'git' },
+        username: 'alice',
+        scope: 'user',
+      },
+      teamConfig: {},
+    });
+
+    await pkgInstall(undefined, {});
+
+    const manifest = await loadPackageManifest(teamRepo);
+    const lock = await loadPackageLock(path.join(process.env.HOME!, '.teamai'));
+    expect(lock?.declarationHash).toBe(sharedPackageDeclarationHash(manifest));
+    expect(lock?.projectDeclarationHashes?.[packageProjectKey(projectRoot)])
+      .toBe(projectNpmDeclarationHash(manifest));
+    expect(lock?.declarationHash).not.toBe(packageDeclarationHash(manifest));
   });
 
   it('does not snapshot or write files for a global npm target in dry-run mode', async () => {
@@ -259,5 +356,27 @@ describe('pkgInstall npm target options', () => {
       projectRoot,
     }), projectRoot);
     expect(report).toBeNull();
+  });
+
+  it('shows the declared and installed npm versions when doctor finds a mismatch', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      packages: { npm: [{ name: 'typescript', version: '^5.9.0' }] },
+    }));
+    mocks.npmStatus.mockResolvedValue([{
+      name: 'typescript',
+      installed: false,
+      version: '4.9.5',
+      detail: 'declared ^5.9.0, installed 4.9.5',
+    }]);
+
+    const report = await pkgDoctorReport(LocalConfigSchema.parse({
+      repo: { localPath: teamRepo, remote: 'x', kind: 'git' },
+      username: 'alice',
+      scope: 'project',
+      projectRoot,
+    }), projectRoot);
+
+    expect(report?.allPassed).toBe(false);
+    expect(report?.lines.join('\n')).toContain('declared ^5.9.0, installed 4.9.5');
   });
 });

@@ -184,6 +184,8 @@ program
   .description('Install team npm packages and Claude plugins declared in teamai.yaml')
   .option('-g, --global', 'Install an npm target globally (for CLI tools)')
   .option('--registry <url>', 'Use a specific npm registry for this target')
+  .option('--npm', 'Treat an ambiguous target as an npm package')
+  .option('--claude', 'Treat the target as a Claude plugin')
   .action(async (target: string | undefined, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { pkgInstall } = await import('./pkg/commands.js');

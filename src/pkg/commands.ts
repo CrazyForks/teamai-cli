@@ -3,7 +3,10 @@ import { autoDetectInit } from '../config.js';
 import { assertNotReadOnly } from '../read-only.js';
 import { pathExists } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
-import { ClaudePluginAdapter } from './adapters/claude-plugin.js';
+import {
+  ClaudePluginAdapter,
+  marketplaceSourceLocation,
+} from './adapters/claude-plugin.js';
 import { NpmAdapter } from './adapters/npm.js';
 import type { PackageInstallContext } from './adapters/base.js';
 import { detectPackageEnvironment } from './env-detect.js';
@@ -14,8 +17,11 @@ import {
   loadPackageManifest,
   packageDeclarationHash,
   packageManifestPath,
+  packageProjectKey,
+  projectNpmDeclarationHash,
   savePackageLock,
   savePackageManifest,
+  sharedPackageDeclarationHash,
 } from './manifest.js';
 import type {
   ClaudeMarketplace,
@@ -102,8 +108,7 @@ async function resolveClaudeTarget(
     (item) => item.name === marketplace,
   );
   if (!registered) return null;
-  const repo = registered.repo
-    ?? (registered.source && registered.source !== 'github' ? registered.source : undefined);
+  const repo = marketplaceSourceLocation(registered);
   if (!repo) {
     throw new Error(
       `Claude marketplace "${marketplace}" is registered but its repository could not be determined`,
@@ -123,19 +128,35 @@ async function addTarget(
   target: string,
   manifest: PackageManifest,
   claude: ClaudePluginAdapter,
-  options: Pick<GlobalOptions, 'global' | 'registry'>,
+  options: Pick<GlobalOptions, 'global' | 'registry' | 'npm' | 'claude'>,
 ): Promise<AddedTarget> {
-  const claudeTarget = await resolveClaudeTarget(target, manifest, claude);
-  if (!claudeTarget) {
+  const addNpm = (): AddedTarget => {
     const spec = upsertNpm(manifest, {
       ...parseNpmTarget(target),
       ...(options.global ? { global: true } : {}),
       ...(options.registry ? { registry: options.registry } : {}),
     });
     return { ecosystem: 'npm', npm: spec };
+  };
+
+  const marketplace = pluginMarketplace(target);
+  if (options.claude && !marketplace) {
+    throw new Error('Claude plugin targets must use the plugin@marketplace format');
   }
-  if (options.global || options.registry) {
-    throw new Error('--global and --registry only apply to npm package targets');
+  if (options.npm || options.global || options.registry || !marketplace) return addNpm();
+
+  const claudeTarget = await resolveClaudeTarget(target, manifest, claude);
+  if (!claudeTarget) {
+    if (options.claude) {
+      throw new Error(
+        `Claude marketplace "${marketplace}" is not declared or registered. `
+        + 'Register it with Claude Code first, then retry.',
+      );
+    }
+    throw new Error(
+      `Ambiguous target "${target}": "${marketplace}" is not a known Claude marketplace. `
+      + 'Use --npm for an npm version/tag, or --claude after registering the marketplace.',
+    );
   }
 
   const ecosystem = ensureClaudeManifest(manifest);
@@ -171,8 +192,14 @@ export async function pkgInstall(
   const npm = new NpmAdapter();
   const claude = new ClaudePluginAdapter();
 
-  if (!target && (options.global || options.registry)) {
-    throw new Error('--global and --registry require an npm package target');
+  if (options.npm && options.claude) {
+    throw new Error('--npm and --claude are mutually exclusive');
+  }
+  if (options.claude && (options.global || options.registry)) {
+    throw new Error('--global and --registry only apply to npm package targets');
+  }
+  if (!target && (options.global || options.registry || options.npm || options.claude)) {
+    throw new Error('--global, --registry, --npm, and --claude require a package target');
   }
   if (target) assertNotReadOnly(localConfig, 'teamai install <target>');
   const added = target ? await addTarget(target, manifest, claude, options) : undefined;
@@ -182,21 +209,37 @@ export async function pkgInstall(
   }
   validateOrThrow(manifest);
 
+  const previousLock = await loadPackageLock(lockDir);
   const context: PackageInstallContext = {
     cwd,
     scope: localConfig.scope,
     dryRun: options.dryRun,
+    previousPackages: previousLock?.packages,
   };
-  const previousLock = target ? await loadPackageLock(lockDir) : null;
   const lock: PackageLock = {
     version: 1,
-    ...(!target
-      ? { declarationHash: packageDeclarationHash(manifest) }
-      : previousLock?.declarationHash
-        ? { declarationHash: previousLock.declarationHash }
-        : {}),
+    ...(previousLock?.declarationHash
+      ? { declarationHash: previousLock.declarationHash }
+      : {}),
+    ...(previousLock?.projectDeclarationHashes
+      ? { projectDeclarationHashes: previousLock.projectDeclarationHashes }
+      : {}),
     packages: previousLock?.packages ?? {},
   };
+  if (!target) {
+    if (localConfig.scope === 'user') {
+      lock.declarationHash = sharedPackageDeclarationHash(manifest);
+      const projectHash = projectNpmDeclarationHash(manifest);
+      if (projectHash) {
+        lock.projectDeclarationHashes = {
+          ...lock.projectDeclarationHashes,
+          [packageProjectKey(cwd)]: projectHash,
+        };
+      }
+    } else {
+      lock.declarationHash = packageDeclarationHash(manifest);
+    }
+  }
 
   if ((manifest.packages.npm?.length ?? 0) > 0 && (!added || added.ecosystem === 'npm')) {
     if (added?.npm) {
@@ -280,7 +323,7 @@ export async function pkgDoctorReport(
   if (needsNpm) {
     lines.push('', '  Packages (npm)');
     for (const status of await npm.status(manifest.packages.npm ?? [], context)) {
-      lines.push(`  ${status.installed ? '✔' : '✖'} ${status.name.padEnd(28)} ${status.version ?? status.detail ?? ''}`.trimEnd());
+      lines.push(`  ${status.installed ? '✔' : '✖'} ${status.name.padEnd(28)} ${status.detail ?? status.version ?? ''}`.trimEnd());
       if (!status.installed) allPassed = false;
     }
   }

@@ -109,6 +109,22 @@ describe('package manifest and lockfile', () => {
     await expect(loadPackageManifest(dir)).rejects.toThrow('valid http(s) URL');
   });
 
+  it('rejects misspelled package keys instead of silently stripping them', async () => {
+    fs.writeFileSync(path.join(dir, 'teamai.yaml'), YAML.stringify({
+      packages: {
+        npm: [{ name: 'eslint', version: 'latest', globla: true }],
+      },
+    }));
+    await expect(loadPackageManifest(dir)).rejects.toThrow('Unrecognized key');
+
+    fs.writeFileSync(path.join(dir, 'teamai.yaml'), YAML.stringify({
+      packages: {
+        npn: [{ name: 'eslint', version: 'latest' }],
+      },
+    }));
+    await expect(loadPackageManifest(dir)).rejects.toThrow('Unrecognized key');
+  });
+
   it('updates only packages and preserves existing team config keys', async () => {
     fs.writeFileSync(path.join(dir, 'teamai.yaml'), YAML.stringify({
       team: 'platform',

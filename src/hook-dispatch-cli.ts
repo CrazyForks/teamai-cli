@@ -20,6 +20,7 @@ import { createDispatcher, type Dispatcher } from './hook-dispatch.js';
 import { buildHandlerRegistry, filterHandlersForConfig } from './hook-handlers.js';
 import { resolveHookCwd } from './utils/hook-cwd.js';
 import { log, setStderrOnly } from './utils/logger.js';
+import { deriveSessionId } from './utils/session-id.js';
 
 /**
  * Max time to wait for STDIN EOF before proceeding with whatever was received.
@@ -195,7 +196,13 @@ export async function hookDispatchCli(
     // Parent: kick off background handlers in a detached process first so they
     // start working while we run the inline (foreground) pass.
     if (dispatcher.hasBackground(event, matcher)) {
-      spawnBackground(event, tool, matcher, raw, cwd);
+      // Preserve one fallback ID across the parent and detached child. Without
+      // this, hosts that omit session_id produce different PID-based IDs and
+      // the foreground and post-pull paths can claim the same hint twice.
+      if (typeof stdin.session_id !== 'string' || !stdin.session_id) {
+        stdin.session_id = deriveSessionId(stdin, { includeCwd: true });
+      }
+      spawnBackground(event, tool, matcher, JSON.stringify(stdin), cwd);
     }
 
     const output = await runDispatch(dispatcher, event, matcher, stdin, tool, 'foreground');

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import semver from 'semver';
 
 import { pathExists, readJson } from '../../utils/fs.js';
 import { formatCommand, type CommandExecutor } from '../../utils/exec.js';
@@ -23,6 +24,14 @@ interface NpmPackageLock {
 
 interface NpmListOutput {
   dependencies?: Record<string, LockPackage>;
+}
+
+function satisfiesDeclaredVersion(declared: string, actual: string): boolean {
+  // npm dist-tags such as latest/next cannot be checked without a registry
+  // lookup. Exact versions and ranges can be verified entirely from the lock.
+  const range = semver.validRange(declared);
+  if (!range || !semver.valid(actual)) return true;
+  return semver.satisfies(actual, range, { includePrerelease: true });
 }
 
 function packageArgument(spec: NpmSpec): string {
@@ -165,14 +174,18 @@ export class NpmAdapter extends PackageAdapter<NpmSpec[], NpmLockEntry[]> {
     );
     return declaration.map((spec) => {
       const entry = installed.get(spec.name);
+      const versionMatches = !entry?.version
+        || satisfiesDeclaredVersion(spec.version, entry.version);
       return {
         name: spec.name,
-        installed: !!entry,
+        installed: !!entry && versionMatches,
         ...(entry?.version ? { version: entry.version } : {}),
         ...(!entry ? {
           detail: spec.global
             ? 'declared but not installed globally'
             : 'declared but not present in package-lock.json',
+        } : !versionMatches ? {
+          detail: `declared ${spec.version}, installed ${entry.version}`,
         } : {}),
       };
     });

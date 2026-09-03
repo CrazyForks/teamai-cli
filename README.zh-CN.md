@@ -169,6 +169,7 @@ teamai source remove other-team
 
 ```bash
 teamai install typescript
+teamai install typescript@5.9.2 --npm
 teamai install code-review@claude-plugins-official
 teamai push       # 分享团队声明
 teamai install    # 安装团队声明的全部包

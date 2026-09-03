@@ -1,11 +1,12 @@
 import type { Scope } from '../../types.js';
 import { execCommand, type CommandExecutor } from '../../utils/exec.js';
-import type { PackageStatus } from '../types.js';
+import type { PackageLock, PackageStatus } from '../types.js';
 
 export interface PackageInstallContext {
   cwd: string;
   scope: Scope;
   dryRun?: boolean;
+  previousPackages?: PackageLock['packages'];
 }
 
 export abstract class PackageAdapter<TDeclaration, TLockSection> {

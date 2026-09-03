@@ -173,6 +173,38 @@ describe('NpmAdapter', () => {
     }], { cwd: dir, scope: 'user', dryRun: true });
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it('reports an installed package whose version does not satisfy the declaration', async () => {
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 3,
+      packages: { 'node_modules/typescript': { version: '4.9.5' } },
+    }));
+
+    const [status] = await new NpmAdapter().status(
+      [{ name: 'typescript', version: '^5.9.0' }],
+      { cwd: dir, scope: 'project' },
+    );
+
+    expect(status).toEqual({
+      name: 'typescript',
+      installed: false,
+      version: '4.9.5',
+      detail: 'declared ^5.9.0, installed 4.9.5',
+    });
+  });
+
+  it('accepts an installed package that satisfies a declared range', async () => {
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 3,
+      packages: { 'node_modules/typescript': { version: '5.9.2' } },
+    }));
+
+    const [status] = await new NpmAdapter().status(
+      [{ name: 'typescript', version: '^5.9.0' }],
+      { cwd: dir, scope: 'project' },
+    );
+    expect(status.installed).toBe(true);
+  });
 });
 
 describe('ClaudePluginAdapter', () => {
@@ -258,5 +290,129 @@ describe('ClaudePluginAdapter', () => {
       { cwd: '/tmp/project', scope: 'project', dryRun: true },
     );
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('treats a resolved local marketplace path as the same declared source', async () => {
+    const execute = vi.fn<CommandExecutor>().mockImplementation(async (_command, args) => {
+      if (args.join(' ') === 'plugin --help') {
+        return { code: 0, stdout: 'plugin help', stderr: '' };
+      }
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return {
+          code: 0,
+          stdout: JSON.stringify([{
+            name: 'local-tools',
+            source: 'directory',
+            path: '/tmp/project/marketplace',
+          }]),
+          stderr: '',
+        };
+      }
+      if (args.join(' ') === 'plugin list --json') {
+        return { code: 0, stdout: '[]', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    await new ClaudePluginAdapter(execute).install(
+      {
+        marketplaces: [{ name: 'local-tools', repo: './marketplace' }],
+        plugins: [],
+      },
+      { cwd: '/tmp/project', scope: 'project' },
+    );
+
+    expect(execute).not.toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['marketplace', 'remove']),
+      expect.any(Object),
+    );
+    expect(execute).not.toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['marketplace', 'add']),
+      expect.any(Object),
+    );
+  });
+
+  it('replaces an installed marketplace when its declared ref changes', async () => {
+    const execute = vi.fn<CommandExecutor>().mockImplementation(async (_command, args) => {
+      if (args.join(' ') === 'plugin --help') {
+        return { code: 0, stdout: 'plugin help', stderr: '' };
+      }
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return {
+          code: 0,
+          stdout: JSON.stringify([{
+            name: 'claude-plugins-official',
+            source: 'github',
+            repo: 'anthropics/claude-plugins-official',
+          }]),
+          stderr: '',
+        };
+      }
+      if (args.join(' ') === 'plugin list --json') {
+        return { code: 0, stdout: '[]', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    await new ClaudePluginAdapter(execute).install(
+      declaration,
+      {
+        cwd: '/tmp/project',
+        scope: 'project',
+        previousPackages: {
+          claude: {
+            marketplaces: [{
+              name: 'claude-plugins-official',
+              repo: 'anthropics/claude-plugins-official',
+              ref: 'v0.9.0',
+            }],
+            plugins: [],
+          },
+        },
+      },
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      'claude',
+      ['plugin', 'marketplace', 'remove', 'claude-plugins-official', '--scope', 'project'],
+      expect.any(Object),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      'claude',
+      [
+        'plugin', 'marketplace', 'add',
+        'anthropics/claude-plugins-official@v1.0.0',
+        '--scope', 'project',
+      ],
+      expect.any(Object),
+    );
+  });
+
+  it('records the URL emitted for git marketplaces', async () => {
+    const execute = vi.fn<CommandExecutor>().mockImplementation(async (_command, args) => {
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return {
+          code: 0,
+          stdout: JSON.stringify([{
+            name: 'acme',
+            source: 'git',
+            url: 'https://github.com/acme/plugins.git',
+          }]),
+          stderr: '',
+        };
+      }
+      if (args.join(' ') === 'plugin list --json') {
+        return { code: 0, stdout: '[]', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const lock = await new ClaudePluginAdapter(execute).snapshot({
+      marketplaces: [{ name: 'acme', repo: 'https://github.com/acme/plugins.git' }],
+      plugins: [],
+    });
+    expect(lock.marketplaces[0]?.repo).toBe('https://github.com/acme/plugins.git');
   });
 });

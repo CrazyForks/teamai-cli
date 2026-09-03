@@ -110,6 +110,7 @@ describe('team package distribution flow', () => {
   let adminProject: string;
   let teammateProject: string;
   let previousCwd: string;
+  let previousHome: string | undefined;
   let previousExitCode: typeof process.exitCode;
 
   beforeEach(async () => {
@@ -121,6 +122,8 @@ describe('team package distribution flow', () => {
     adminProject = path.join(root, 'admin-project');
     teammateProject = path.join(root, 'teammate-project');
     previousCwd = process.cwd();
+    previousHome = process.env.HOME;
+    process.env.HOME = root;
     previousExitCode = process.exitCode;
     fs.mkdirSync(seed, { recursive: true });
     fs.mkdirSync(adminProject, { recursive: true });
@@ -164,6 +167,8 @@ describe('team package distribution flow', () => {
 
   afterEach(() => {
     process.chdir(previousCwd);
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     process.exitCode = previousExitCode;
     vi.clearAllMocks();
     fs.rmSync(root, { recursive: true, force: true });

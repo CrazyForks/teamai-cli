@@ -317,6 +317,9 @@ Passing a target installs it and adds its declaration to the team repo's `teamai
 # npm package (project dependency by default)
 teamai install typescript
 
+# Unscoped name@version is ambiguous with plugin@marketplace; identify npm explicitly
+teamai install typescript@5.9.2 --npm
+
 # Global npm CLI from a specific registry
 teamai install eslint@latest --global \
   --registry https://registry.npmjs.org/
@@ -328,13 +331,13 @@ teamai install code-review@claude-plugins-official
 teamai push
 ```
 
-An npm target accepts `name` or `name@version`. Local npm packages require a `package.json` in the current directory; use `--global` for machine-wide CLI tools. `--registry` is saved with that package declaration and must be an HTTP(S) URL without embedded credentials. Keep registry authentication in npm configuration or environment variables.
+An npm target accepts `name` or `name@version`. Because an unscoped `name@value` can also mean `plugin@marketplace`, use `--npm` when the suffix is not a declared or registered Claude marketplace. Scoped npm names (`@scope/name`), bare names, `--global`, and `--registry` already identify npm unambiguously and do not probe the Claude CLI. Local npm packages require a `package.json` in the current directory; use `--global` for machine-wide CLI tools. `--registry` is saved with that package declaration and must be an HTTP(S) URL without embedded credentials. Keep registry authentication in npm configuration or environment variables.
 
-A Claude plugin target uses `plugin@marketplace`. The official `claude-plugins-official` marketplace is resolved automatically; another marketplace must already be registered with Claude Code so TeamAI can record its source. `--global` and `--registry` apply only to npm targets.
+A Claude plugin target uses `plugin@marketplace`. The official `claude-plugins-official` marketplace is resolved automatically; another marketplace must already be registered with Claude Code so TeamAI can record its source. Use `--claude` to make the intended ecosystem explicit and get a marketplace-specific error when it is unavailable. Ambiguous targets fail without running either package manager. `--global` and `--registry` apply only to npm targets.
 
 **Member operations:**
 
-The existing SessionStart hook runs `teamai pull`. When the `packages` declaration changes, it asks the member to review `teamai.yaml` and install explicitly; it never runs third-party package or plugin code automatically.
+The existing SessionStart hook runs `teamai pull`. When the `packages` declaration changes, it asks the member to review `teamai.yaml` and install explicitly; it never runs third-party package or plugin code automatically. Pull remains detached so network latency cannot block the IDE. If a declaration arrives after the SessionStart output window, TeamAI safely queues the same notice for the next UserPromptSubmit in that session.
 
 ```bash
 teamai install             # Install every team declaration
@@ -342,7 +345,7 @@ teamai install --dry-run   # Preview native commands without installing or writi
 teamai doctor              # Check runtimes and declared package/plugin status
 ```
 
-After a successful install, TeamAI writes a local snapshot to `teamai.lock` under the active scope's `.teamai` directory. The lock records installed versions and the declaration hash used by the SessionStart hint; it is not stored in the team repository.
+After a successful install, TeamAI writes a local snapshot to `teamai.lock` under the active scope's `.teamai` directory. The lock records installed versions and the declaration hash used by the SessionStart hint; it is not stored in the team repository. In user scope, machine-wide npm tools and Claude plugins are acknowledged once, while project npm dependencies are acknowledged separately for each working directory so installing in one repository cannot silence another repository's hint.
 
 **Declaration format:**
 
@@ -368,6 +371,7 @@ packages:
 - `npm[].version` defaults to `*`; `global` defaults to `false`.
 - `claude.marketplaces` maps marketplace names to their repositories.
 - Each Claude plugin must use `plugin@marketplace`, and that marketplace must be declared.
+- Unknown or misspelled keys inside `packages` are rejected before install or push.
 - Package declarations apply to the whole team; role and project filters do not change the package set.
 
 ### Excluding skills you don't need

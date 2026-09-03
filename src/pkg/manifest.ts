@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 
@@ -98,10 +99,41 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function packageDeclarationHash(manifest: PackageManifest): string {
+  return packageSetHash(manifest.packages);
+}
+
+function packageSetHash(packages: PackageManifest['packages']): string {
   return crypto
     .createHash('sha256')
-    .update(JSON.stringify(canonicalize(manifest.packages)))
+    .update(JSON.stringify(canonicalize(packages)))
     .digest('hex');
+}
+
+/** Hash declarations whose installation is shared across user-scope projects. */
+export function sharedPackageDeclarationHash(manifest: PackageManifest): string {
+  const npm = manifest.packages.npm?.filter((spec) => spec.global);
+  return packageSetHash({
+    ...(npm && npm.length > 0 ? { npm } : {}),
+    ...(manifest.packages.claude ? { claude: manifest.packages.claude } : {}),
+  });
+}
+
+/** Hash npm dependencies installed into the current project rather than the machine. */
+export function projectNpmDeclarationHash(manifest: PackageManifest): string | null {
+  const npm = manifest.packages.npm?.filter((spec) => !spec.global) ?? [];
+  return npm.length > 0 ? packageSetHash({ npm }) : null;
+}
+
+/** Do not persist absolute project paths in the local lockfile. */
+export function packageProjectKey(cwd: string): string {
+  let normalized = path.resolve(cwd);
+  try {
+    normalized = fs.realpathSync.native(normalized);
+  } catch {
+    // The install path check will report a missing cwd/package.json separately.
+  }
+  if (process.platform === 'win32') normalized = normalized.toLowerCase();
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 24);
 }
 
 export function hasPackageDeclarations(manifest: PackageManifest): boolean {

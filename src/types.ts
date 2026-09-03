@@ -516,6 +516,8 @@ export interface GlobalOptions {
   dryRun?: boolean;
   global?: boolean;
   registry?: string;
+  npm?: boolean;
+  claude?: boolean;
   verbose?: boolean;
   silent?: boolean;
   /** Force full sync even when repo HEAD matches lastPullRev. */

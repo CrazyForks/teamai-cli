@@ -169,6 +169,7 @@ Share and restore the team's npm packages and Claude Code plugins:
 
 ```bash
 teamai install typescript
+teamai install typescript@5.9.2 --npm
 teamai install code-review@claude-plugins-official
 teamai push       # Share the declarations
 teamai install    # Install everything declared by the team

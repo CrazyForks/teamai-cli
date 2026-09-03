@@ -315,6 +315,9 @@ teamai pull --dry-run    # 试运行，不实际修改
 # npm 包（默认安装为项目依赖）
 teamai install typescript
 
+# 未带 scope 的 name@version 与 plugin@marketplace 有歧义，需显式指定 npm
+teamai install typescript@5.9.2 --npm
+
 # 从指定 registry 安装全局 npm CLI
 teamai install eslint@latest --global \
   --registry https://registry.npmjs.org/
@@ -326,13 +329,13 @@ teamai install code-review@claude-plugins-official
 teamai push
 ```
 
-npm target 支持 `name` 或 `name@version`。安装项目依赖时，当前目录必须包含 `package.json`；机器级 CLI 工具使用 `--global`。`--registry` 会随该包的声明保存，且必须是不包含凭据的 HTTP(S) URL。registry 认证信息应保存在 npm 配置或环境变量中。
+npm target 支持 `name` 或 `name@version`。由于未带 scope 的 `name@value` 也可能表示 `plugin@marketplace`，当后缀不是已声明或已注册的 Claude marketplace 时需使用 `--npm`。带 scope 的 npm 名称（`@scope/name`）、无版本名称、`--global` 和 `--registry` 已能明确表示 npm，不会探测 Claude CLI。安装项目依赖时，当前目录必须包含 `package.json`；机器级 CLI 工具使用 `--global`。`--registry` 会随该包的声明保存，且必须是不包含凭据的 HTTP(S) URL。registry 认证信息应保存在 npm 配置或环境变量中。
 
-Claude 插件 target 使用 `plugin@marketplace` 格式。`claude-plugins-official` 官方 marketplace 会自动解析；使用其他 marketplace 前，需先在 Claude Code 中注册，以便 TeamAI 获取并记录其来源。`--global` 和 `--registry` 仅适用于 npm target。
+Claude 插件 target 使用 `plugin@marketplace` 格式。`claude-plugins-official` 官方 marketplace 会自动解析；使用其他 marketplace 前，需先在 Claude Code 中注册，以便 TeamAI 获取并记录其来源。可使用 `--claude` 明确指定生态，并在 marketplace 不可用时获得针对性的错误。存在歧义的 target 会直接失败，不会运行任一包管理器。`--global` 和 `--registry` 仅适用于 npm target。
 
 **成员操作：**
 
-现有 SessionStart hook 会执行 `teamai pull`。当 `packages` 声明发生变化时，它只会提示成员检查 `teamai.yaml` 并主动安装，不会自动执行第三方包或插件代码。
+现有 SessionStart hook 会执行 `teamai pull`。当 `packages` 声明发生变化时，它只会提示成员检查 `teamai.yaml` 并主动安装，不会自动执行第三方包或插件代码。pull 继续在后台运行，避免网络延迟阻塞 IDE；如果声明在 SessionStart 输出窗口结束后才拉取完成，TeamAI 会把同一条提示安全地排队，并在本会话下一次 UserPromptSubmit 时投递。
 
 ```bash
 teamai install             # 安装团队声明的全部包和插件
@@ -340,7 +343,7 @@ teamai install --dry-run   # 预览底层命令，不安装也不写文件
 teamai doctor              # 检查运行环境及声明项的安装状态
 ```
 
-安装成功后，TeamAI 会在当前 scope 的 `.teamai` 目录下写入本地快照 `teamai.lock`。该文件记录已安装版本，以及供 SessionStart 提示比对的声明哈希，不会写入团队仓库。
+安装成功后，TeamAI 会在当前 scope 的 `.teamai` 目录下写入本地快照 `teamai.lock`。该文件记录已安装版本，以及供 SessionStart 提示比对的声明哈希，不会写入团队仓库。在 user scope 下，全局 npm 工具和 Claude 插件只需确认一次；项目 npm 依赖会按工作目录分别确认，避免在一个仓库安装后错误关闭另一个仓库的提示。
 
 **声明格式：**
 
@@ -366,6 +369,7 @@ packages:
 - `npm[].version` 默认为 `*`，`global` 默认为 `false`。
 - `claude.marketplaces` 记录 marketplace 名称与仓库来源。
 - Claude 插件必须使用 `plugin@marketplace` 格式，且对应 marketplace 必须已声明。
+- `packages` 内未知或拼错的键会在 install 或 push 前被拒绝。
 - 包声明对全团队生效，不受角色或项目筛选影响。
 
 ### 排除个人不需要的 Skill

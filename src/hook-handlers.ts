@@ -85,6 +85,9 @@ const pullHandler: HookHandler = {
   name: 'pull',
   async execute(stdin, tool) {
     const cwd = resolveHookCwd(stdin);
+    const hintCwd = cwd ?? process.cwd();
+    const packageHints = await import('./pkg/pkg-hint.js');
+    const packageHashBeforePull = await packageHints.packageManifestHashForCwd(hintCwd);
     try {
       const { seedProjectAgentRoot } = await import('./project-agent-root.js');
       await seedProjectAgentRoot(tool, cwd);
@@ -93,6 +96,11 @@ const pullHandler: HookHandler = {
     }
     const { pull } = await import('./pull.js');
     await pull({ silent: true });
+    await packageHints.stashPackageHintAfterPull(
+      hintCwd,
+      deriveSessionId(stdin, { includeCwd: true }),
+      packageHashBeforePull,
+    );
     return null;
   },
 };
@@ -204,14 +212,13 @@ const contributeCheckHandler: HookHandler = {
   },
 };
 
-/** UserPromptSubmit: deliver a hint stashed at Stop for stdout-less tools. */
+/** UserPromptSubmit: deliver contribution hints stashed by stdout-less tools. */
 const pendingHintHandler: HookHandler = {
   name: 'pending-hint',
   async execute(stdin, tool) {
     const { STOP_STDOUT_UNSUPPORTED_TOOLS } = await import('./utils/tool-names.js');
     if (!STOP_STDOUT_UNSUPPORTED_TOOLS.has(tool)) return null;
 
-    const { takePendingHint, takePendingVotesHint } = await import('./contribute-check.js');
     // Must match contributeCheckHandler's derivation so Stop and UserPromptSubmit
     // resolve to the same session file. This cross-process handoff relies on
     // codebuddy/workbuddy sending a stable, consistent session_id on BOTH the
@@ -220,10 +227,10 @@ const pendingHintHandler: HookHandler = {
     // tool omits session_id, deriveSessionId falls back to pid+cwd, which can
     // differ across the two hook processes and orphan the stash (best-effort).
     const sessionId = deriveSessionId(stdin, { includeCwd: true });
-    const hint = await takePendingHint(sessionId);
-    const votesHint = await takePendingVotesHint(sessionId);
+    const pending = await import('./contribute-check.js');
+    const hint = await pending.takePendingHint(sessionId);
+    const votesHint = await pending.takePendingVotesHint(sessionId);
 
-    // Merge: combine both pending hints if present, newline-separated.
     const combined = [hint, votesHint].filter(Boolean).join('\n');
     if (!combined) return null;
 
@@ -231,6 +238,24 @@ const pendingHintHandler: HookHandler = {
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
         additionalContext: combined,
+      },
+    });
+  },
+};
+
+/** UserPromptSubmit: deliver a package notice created by the detached pull. */
+const packagePendingHintHandler: HookHandler = {
+  name: 'package-pending-hint',
+  async execute(stdin, _tool) {
+    const { takePendingPackageHint } = await import('./pkg/pkg-hint.js');
+    const hint = await takePendingPackageHint(
+      deriveSessionId(stdin, { includeCwd: true }),
+    );
+    if (!hint) return null;
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: hint,
       },
     });
   },
@@ -377,8 +402,11 @@ const mrHintHandler: HookHandler = {
 const packageHintHandler: HookHandler = {
   name: 'package-hint',
   async execute(stdin, _tool) {
-    const { computePackageHintOutput } = await import('./pkg/pkg-hint.js');
-    return computePackageHintOutput(resolveHookCwd(stdin) ?? process.cwd());
+    const { claimPackageHintOutput } = await import('./pkg/pkg-hint.js');
+    return claimPackageHintOutput(
+      resolveHookCwd(stdin) ?? process.cwd(),
+      deriveSessionId(stdin, { includeCwd: true }),
+    );
   },
 };
 
@@ -430,6 +458,7 @@ export function buildHandlerRegistry(): HandlerRegistration[] {
 
     // ─── UserPromptSubmit ─────────────────────────────
     { event: 'prompt-submit', matcher: '*', handler: pendingHintHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS, gitOnly: true },
+    { event: 'prompt-submit', matcher: '*', handler: packagePendingHintHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
     { event: 'prompt-submit', matcher: '*', handler: trackSlashHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
     { event: 'prompt-submit', matcher: '*', handler: dashboardReportHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },
     { event: 'prompt-submit', matcher: '*', handler: localAgentHandler, timeoutMs: FOREGROUND_HOOK_TIMEOUT_MS },

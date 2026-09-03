@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { formatCommand, type CommandExecutor } from '../../utils/exec.js';
 import { log } from '../../utils/logger.js';
 import type {
@@ -24,6 +26,9 @@ export interface ClaudeMarketplaceListItem {
   name?: string;
   source?: string;
   repo?: string;
+  url?: string;
+  path?: string;
+  ref?: string;
   installLocation?: string;
 }
 
@@ -38,6 +43,29 @@ function marketplaceSource(marketplace: ClaudeMarketplace): string {
     ? '#'
     : '@';
   return `${marketplace.repo}${separator}${marketplace.ref}`;
+}
+
+/** Resolve the location fields emitted by the different native marketplace source kinds. */
+export function marketplaceSourceLocation(
+  marketplace: ClaudeMarketplaceListItem,
+): string | undefined {
+  if (marketplace.repo) return marketplace.repo;
+  if (marketplace.url) return marketplace.url;
+  if (marketplace.path) return marketplace.path;
+  // Older Claude releases sometimes emitted the location directly in source;
+  // current releases use source as a kind (github/git/directory).
+  if (marketplace.source && /[/:\\]/.test(marketplace.source)) return marketplace.source;
+  return undefined;
+}
+
+function marketplaceLocationsEqual(declared: string, actual: string, cwd: string): boolean {
+  const looksLocal = (value: string) => path.isAbsolute(value)
+    || /^\.{1,2}[\\/]/.test(value)
+    || /^[a-zA-Z]:[\\/]/.test(value);
+  if (looksLocal(declared) || looksLocal(actual)) {
+    return path.resolve(cwd, declared) === path.resolve(cwd, actual);
+  }
+  return declared.replace(/[\\/]+$/, '') === actual.replace(/[\\/]+$/, '');
 }
 
 function parseJsonArray<T>(stdout: string): T[] {
@@ -100,17 +128,25 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
       this.queryPlugins(),
     ]);
     const declaredMarketplaces = new Set(declaration.marketplaces.map((item) => item.name));
+    const marketplaceDeclarations = new Map(
+      declaration.marketplaces.map((item) => [item.name, item]),
+    );
     const declaredPlugins = new Set(declaration.plugins.map((item) => item.name));
 
     return {
       marketplaces: marketplaces
         .filter((item) => item.name && declaredMarketplaces.has(item.name))
-        .map((item) => ({
-          name: item.name!,
-          ...(item.source ? { source: item.source } : {}),
-          ...(item.repo ? { repo: item.repo } : {}),
-          ...(item.installLocation ? { installLocation: item.installLocation } : {}),
-        })),
+        .map((item) => {
+          const declared = marketplaceDeclarations.get(item.name!);
+          const repo = marketplaceSourceLocation(item) ?? declared?.repo;
+          return {
+            name: item.name!,
+            ...(item.source ? { source: item.source } : {}),
+            ...(repo ? { repo } : {}),
+            ...(declared?.ref ? { ref: declared.ref } : {}),
+            ...(item.installLocation ? { installLocation: item.installLocation } : {}),
+          };
+        }),
       plugins: plugins
         .filter((item) => item.id && declaredPlugins.has(item.id))
         .map((item) => ({
@@ -156,11 +192,41 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
       );
     }
 
-    const installedMarketplaces = new Set(
-      (await this.queryMarketplaces()).flatMap((item) => item.name ? [item.name] : []),
+    const installedMarketplaces = new Map(
+      (await this.queryMarketplaces()).flatMap(
+        (item) => item.name ? [[item.name, item] as const] : [],
+      ),
+    );
+    const previousMarketplaces = new Map(
+      (context.previousPackages?.claude?.marketplaces ?? []).map((item) => [item.name, item]),
     );
     for (const marketplace of declaration.marketplaces) {
-      if (installedMarketplaces.has(marketplace.name)) continue;
+      const installed = installedMarketplaces.get(marketplace.name);
+      const previous = previousMarketplaces.get(marketplace.name);
+      const installedRepo = installed ? marketplaceSourceLocation(installed) : undefined;
+      const sourceChanged = !!installedRepo
+        && !marketplaceLocationsEqual(marketplace.repo, installedRepo, context.cwd);
+      const declarationChanged = !!previous
+        && (previous.repo !== marketplace.repo || previous.ref !== marketplace.ref);
+      // Native list JSON does not expose a Git ref. Without a TeamAI snapshot,
+      // re-add a pinned marketplace once so the requested ref is actually applied.
+      const pinnedButUnverified = !!installed && !!marketplace.ref && !previous?.ref;
+      const replace = !!installed && (sourceChanged || declarationChanged || pinnedButUnverified);
+
+      if (replace) {
+        const remove = await this.execute(
+          'claude',
+          ['plugin', 'marketplace', 'remove', marketplace.name, '--scope', context.scope],
+          { cwd: context.cwd, timeoutMs: 120_000, stream: true },
+        );
+        if (remove.code !== 0) {
+          throw new Error(
+            `Claude marketplace replacement failed for "${marketplace.name}" (exit ${remove.code}): `
+            + remove.stderr.trim(),
+          );
+        }
+      }
+      if (installed && !replace) continue;
       const args = [
         'plugin', 'marketplace', 'add', marketplaceSource(marketplace),
         '--scope', context.scope,
@@ -171,8 +237,9 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
         stream: true,
       });
       if (result.code !== 0) {
-        log.warn(
-          `Could not add Claude marketplace "${marketplace.name}": ${result.stderr.trim()}`,
+        throw new Error(
+          `Claude marketplace add failed for "${marketplace.name}" (exit ${result.code}): `
+          + result.stderr.trim(),
         );
       }
     }

@@ -23,29 +23,29 @@ export const NpmSpecSchema = z.object({
   }, {
     message: 'npm registry must be a valid http(s) URL without embedded credentials',
   }).optional(),
-});
+}).strict();
 
 export const ClaudeMarketplaceSchema = z.object({
   name: z.string().min(1),
   repo: z.string().min(1),
   ref: z.string().min(1).optional(),
-});
+}).strict();
 
 export const ClaudePluginSpecSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1).optional(),
   scope: PackageScopeSchema.optional(),
-});
+}).strict();
 
 export const ClaudeEcosystemSchema = z.object({
   marketplaces: z.array(ClaudeMarketplaceSchema).default([]),
   plugins: z.array(ClaudePluginSpecSchema).default([]),
-});
+}).strict();
 
 export const PackageSetSchema = z.object({
   npm: z.array(NpmSpecSchema).optional(),
   claude: ClaudeEcosystemSchema.optional(),
-});
+}).strict();
 
 export const PackageManifestSchema = z.object({
   name: z.string().default(''),
@@ -104,6 +104,7 @@ export const ClaudeMarketplaceLockSchema = z.object({
   name: z.string(),
   source: z.string().optional(),
   repo: z.string().optional(),
+  ref: z.string().optional(),
   installLocation: z.string().optional(),
 });
 
@@ -117,7 +118,10 @@ export const ClaudePluginLockSchema = z.object({
 
 export const PackageLockSchema = z.object({
   version: z.literal(1).default(1),
+  /** Machine-wide declarations, or the complete declaration in project scope. */
   declarationHash: z.string().optional(),
+  /** User-scope local npm declarations must be acknowledged once per cwd. */
+  projectDeclarationHashes: z.record(z.string()).optional(),
   packages: z.object({
     npm: z.array(NpmLockEntrySchema).optional(),
     claude: z.object({
