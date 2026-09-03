@@ -415,4 +415,69 @@ describe('ClaudePluginAdapter', () => {
     });
     expect(lock.marketplaces[0]?.repo).toBe('https://github.com/acme/plugins.git');
   });
+
+  it('marks a Claude plugin version mismatch as unhealthy', async () => {
+    const execute = vi.fn<CommandExecutor>().mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify([{
+        id: 'code-review@claude-plugins-official',
+        version: '1.0.0',
+        scope: 'project',
+        enabled: true,
+      }]),
+      stderr: '',
+    });
+
+    const [status] = await new ClaudePluginAdapter(execute).status(
+      {
+        marketplaces: [],
+        plugins: [{
+          name: 'code-review@claude-plugins-official',
+          version: '2.0.0',
+        }],
+      },
+      { cwd: '/tmp/project', scope: 'project' },
+    );
+
+    expect(status).toEqual({
+      name: 'code-review@claude-plugins-official',
+      installed: false,
+      version: '1.0.0',
+      enabled: true,
+      detail: 'declared 2.0.0, installed 1.0.0',
+    });
+  });
+
+  it('checks marketplace registration and declared source', async () => {
+    const execute = vi.fn<CommandExecutor>().mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify([
+        { name: 'good', source: 'github', repo: 'acme/good' },
+        { name: 'wrong', source: 'git', url: 'https://github.com/acme/other.git' },
+      ]),
+      stderr: '',
+    });
+
+    const statuses = await new ClaudePluginAdapter(execute).marketplaceStatus(
+      {
+        marketplaces: [
+          { name: 'good', repo: 'acme/good' },
+          { name: 'wrong', repo: 'https://github.com/acme/wrong.git' },
+          { name: 'missing', repo: 'acme/missing' },
+        ],
+        plugins: [],
+      },
+      { cwd: '/tmp/project', scope: 'project' },
+    );
+
+    expect(statuses).toEqual([
+      { name: 'good', installed: true, detail: 'acme/good' },
+      {
+        name: 'wrong',
+        installed: false,
+        detail: 'declared https://github.com/acme/wrong.git, registered https://github.com/acme/other.git',
+      },
+      { name: 'missing', installed: false, detail: 'declared but not registered' },
+    ]);
+  });
 });

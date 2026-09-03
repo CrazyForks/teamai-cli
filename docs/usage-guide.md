@@ -342,7 +342,7 @@ The existing SessionStart hook runs `teamai pull`. When the `packages` declarati
 ```bash
 teamai install             # Install every team declaration
 teamai install --dry-run   # Preview native commands without installing or writing files
-teamai doctor              # Check runtimes and declared package/plugin status
+teamai doctor              # Check runtimes and declared package/marketplace/plugin status
 ```
 
 After a successful install, TeamAI writes a local snapshot to `teamai.lock` under the active scope's `.teamai` directory. The lock records installed versions and the declaration hash used by the SessionStart hint; it is not stored in the team repository. In user scope, machine-wide npm tools and Claude plugins are acknowledged once, while project npm dependencies are acknowledged separately for each working directory so installing in one repository cannot silence another repository's hint.

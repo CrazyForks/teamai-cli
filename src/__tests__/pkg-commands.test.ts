@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   claudeInstall: vi.fn(),
   claudeSnapshot: vi.fn(),
   claudeStatus: vi.fn(),
+  claudeMarketplaceStatus: vi.fn(),
+  detectPackageEnvironment: vi.fn(),
   registeredMarketplaces: vi.fn(),
   assertNotReadOnly: vi.fn(),
 }));
@@ -52,15 +54,12 @@ vi.mock('../pkg/adapters/claude-plugin.js', () => ({
     install = mocks.claudeInstall;
     snapshot = mocks.claudeSnapshot;
     status = mocks.claudeStatus;
+    marketplaceStatus = mocks.claudeMarketplaceStatus;
   },
 }));
 
 vi.mock('../pkg/env-detect.js', () => ({
-  detectPackageEnvironment: vi.fn().mockResolvedValue([
-    { name: 'Node', version: '22.0.0', available: true },
-    { name: 'npm', version: '10.0.0', available: true },
-    { name: 'Claude Code', version: '2.1.0', available: true },
-  ]),
+  detectPackageEnvironment: mocks.detectPackageEnvironment,
 }));
 
 import { pkgDoctorReport, pkgInstall } from '../pkg/commands.js';
@@ -120,6 +119,12 @@ describe('pkgInstall npm target options', () => {
     mocks.claudeSnapshot.mockResolvedValue({ marketplaces: [], plugins: [] });
     mocks.npmStatus.mockResolvedValue([]);
     mocks.claudeStatus.mockResolvedValue([]);
+    mocks.claudeMarketplaceStatus.mockResolvedValue([]);
+    mocks.detectPackageEnvironment.mockResolvedValue([
+      { name: 'Node', version: '22.0.0', available: true },
+      { name: 'npm', version: '10.0.0', available: true },
+      { name: 'Claude Code', version: '2.1.0', available: true },
+    ]);
     mocks.registeredMarketplaces.mockResolvedValue([]);
   });
 
@@ -378,5 +383,72 @@ describe('pkgInstall npm target options', () => {
 
     expect(report?.allPassed).toBe(false);
     expect(report?.lines.join('\n')).toContain('declared ^5.9.0, installed 4.9.5');
+  });
+
+  it('fails doctor when a marketplace-only declaration is not registered', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      packages: {
+        claude: {
+          marketplaces: [{ name: 'acme', repo: 'acme/plugins' }],
+          plugins: [],
+        },
+      },
+    }));
+    mocks.detectPackageEnvironment.mockResolvedValue([
+      { name: 'Node', version: '22.0.0', available: true },
+      { name: 'npm', version: '10.0.0', available: true },
+      { name: 'Claude Code', version: '', available: false },
+    ]);
+    mocks.claudeMarketplaceStatus.mockResolvedValue([{
+      name: 'acme',
+      installed: false,
+      detail: 'declared but not registered',
+    }]);
+
+    const report = await pkgDoctorReport(LocalConfigSchema.parse({
+      repo: { localPath: teamRepo, remote: 'x', kind: 'git' },
+      username: 'alice',
+      scope: 'project',
+      projectRoot,
+    }), projectRoot);
+
+    expect(report?.allPassed).toBe(false);
+    expect(report?.lines.join('\n')).toContain('Claude Code');
+    expect(report?.lines.join('\n')).toContain('Claude marketplaces');
+    expect(report?.lines.join('\n')).toContain('declared but not registered');
+  });
+
+  it('fails doctor when an installed Claude plugin has the wrong version', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({
+      packages: {
+        claude: {
+          marketplaces: [{ name: 'acme', repo: 'acme/plugins' }],
+          plugins: [{ name: 'lint@acme', version: '2.0.0' }],
+        },
+      },
+    }));
+    mocks.claudeMarketplaceStatus.mockResolvedValue([{
+      name: 'acme',
+      installed: true,
+      detail: 'acme/plugins',
+    }]);
+    mocks.claudeStatus.mockResolvedValue([{
+      name: 'lint@acme',
+      installed: false,
+      version: '1.0.0',
+      enabled: true,
+      detail: 'declared 2.0.0, installed 1.0.0',
+    }]);
+
+    const report = await pkgDoctorReport(LocalConfigSchema.parse({
+      repo: { localPath: teamRepo, remote: 'x', kind: 'git' },
+      username: 'alice',
+      scope: 'project',
+      projectRoot,
+    }), projectRoot);
+
+    expect(report?.allPassed).toBe(false);
+    expect(report?.lines.join('\n')).toContain('✖ lint@acme');
+    expect(report?.lines.join('\n')).toContain('declared 2.0.0, installed 1.0.0');
   });
 });

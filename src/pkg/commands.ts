@@ -305,10 +305,19 @@ export async function pkgDoctorReport(
 
   const npm = new NpmAdapter();
   const claude = new ClaudePluginAdapter();
-  const context: PackageInstallContext = { cwd, scope: localConfig.scope };
+  const previousLock = await loadPackageLock(
+    getTeamaiHome(localConfig.scope, localConfig.projectRoot),
+  );
+  const context: PackageInstallContext = {
+    cwd,
+    scope: localConfig.scope,
+    previousPackages: previousLock?.packages,
+  };
   const environment = await detectPackageEnvironment();
   const needsNpm = (manifest.packages.npm?.length ?? 0) > 0;
-  const needsClaude = (manifest.packages.claude?.plugins.length ?? 0) > 0;
+  const needsClaudeMarketplaces = (manifest.packages.claude?.marketplaces.length ?? 0) > 0;
+  const needsClaudePlugins = (manifest.packages.claude?.plugins.length ?? 0) > 0;
+  const needsClaude = needsClaudeMarketplaces || needsClaudePlugins;
   const requiredEnvironment = environment.filter((item) =>
     (needsNpm && (item.name === 'Node' || item.name === 'npm'))
     || (needsClaude && item.name === 'Claude Code'));
@@ -327,7 +336,14 @@ export async function pkgDoctorReport(
       if (!status.installed) allPassed = false;
     }
   }
-  if (needsClaude) {
+  if (needsClaudeMarketplaces) {
+    lines.push('', '  Claude marketplaces');
+    for (const status of await claude.marketplaceStatus(manifest.packages.claude!, context)) {
+      lines.push(`  ${status.installed ? '✔' : '✖'} ${status.name.padEnd(42)} ${status.detail ?? ''}`.trimEnd());
+      if (!status.installed) allPassed = false;
+    }
+  }
+  if (needsClaudePlugins) {
     lines.push('', '  Packages (claude plugins)');
     for (const status of await claude.status(manifest.packages.claude!, context)) {
       const ok = status.installed && status.enabled !== false;

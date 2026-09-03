@@ -281,7 +281,7 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
         && plugin.version !== actual.version;
       return {
         name: plugin.name,
-        installed: !!actual,
+        installed: !!actual && !versionMismatch,
         ...(actual?.version ? { version: actual.version } : {}),
         ...(actual ? { enabled: actual.enabled ?? true } : {}),
         ...(!actual
@@ -289,6 +289,72 @@ export class ClaudePluginAdapter extends PackageAdapter<ClaudeEcosystem, ClaudeL
           : versionMismatch
             ? { detail: `declared ${plugin.version}, installed ${actual.version}` }
             : {}),
+      };
+    });
+  }
+
+  async marketplaceStatus(
+    declaration: ClaudeEcosystem,
+    context: PackageInstallContext,
+  ): Promise<PackageStatus[]> {
+    const registered = new Map(
+      (await this.queryMarketplaces()).flatMap(
+        (item) => item.name ? [[item.name, item] as const] : [],
+      ),
+    );
+    const snapshots = new Map(
+      (context.previousPackages?.claude?.marketplaces ?? []).map((item) => [item.name, item]),
+    );
+
+    return declaration.marketplaces.map((marketplace) => {
+      const actual = registered.get(marketplace.name);
+      if (!actual) {
+        return {
+          name: marketplace.name,
+          installed: false,
+          detail: 'declared but not registered',
+        };
+      }
+
+      const actualLocation = marketplaceSourceLocation(actual);
+      if (!actualLocation) {
+        return {
+          name: marketplace.name,
+          installed: false,
+          detail: 'registered but source could not be determined',
+        };
+      }
+      if (!marketplaceLocationsEqual(marketplace.repo, actualLocation, context.cwd)) {
+        return {
+          name: marketplace.name,
+          installed: false,
+          detail: `declared ${marketplace.repo}, registered ${actualLocation}`,
+        };
+      }
+
+      if (marketplace.ref) {
+        const snapshot = snapshots.get(marketplace.name);
+        const actualRef = actual.ref ?? (
+          snapshot?.repo
+          && marketplaceLocationsEqual(marketplace.repo, snapshot.repo, context.cwd)
+            ? snapshot.ref
+            : undefined
+        );
+        if (actualRef !== marketplace.ref) {
+          return {
+            name: marketplace.name,
+            installed: false,
+            detail: `registered source matches, but ref ${marketplace.ref} is not verified`,
+          };
+        }
+      }
+
+      return {
+        name: marketplace.name,
+        installed: true,
+        detail: marketplace.ref
+          ? `${actualLocation}@${marketplace.ref}`
+          : actualLocation,
       };
     });
   }

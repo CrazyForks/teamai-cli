@@ -340,7 +340,7 @@ Claude 插件 target 使用 `plugin@marketplace` 格式。`claude-plugins-offici
 ```bash
 teamai install             # 安装团队声明的全部包和插件
 teamai install --dry-run   # 预览底层命令，不安装也不写文件
-teamai doctor              # 检查运行环境及声明项的安装状态
+teamai doctor              # 检查运行环境及声明的包、marketplace、插件状态
 ```
 
 安装成功后，TeamAI 会在当前 scope 的 `.teamai` 目录下写入本地快照 `teamai.lock`。该文件记录已安装版本，以及供 SessionStart 提示比对的声明哈希，不会写入团队仓库。在 user scope 下，全局 npm 工具和 Claude 插件只需确认一次；项目 npm 依赖会按工作目录分别确认，避免在一个仓库安装后错误关闭另一个仓库的提示。
