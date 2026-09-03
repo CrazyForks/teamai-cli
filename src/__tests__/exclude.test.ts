@@ -64,8 +64,7 @@ describe('skill exclude commands', () => {
     }));
     expect(saveStateForScope).toHaveBeenCalledWith(
       expect.objectContaining({ lastPullRev: null }),
-      'user',
-      undefined,
+      expect.objectContaining({ scope: 'user' }),
     );
   });
 
@@ -87,8 +86,7 @@ describe('skill exclude commands', () => {
     );
     expect(saveStateForScope).toHaveBeenCalledWith(
       expect.objectContaining({ lastPullRev: null }),
-      'project',
-      '/tmp/project',
+      expect.objectContaining({ scope: 'project', projectRoot: '/tmp/project' }),
     );
     expect(saveLocalConfig).not.toHaveBeenCalled();
   });

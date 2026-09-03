@@ -10,6 +10,7 @@ import {
   getTeamaiHome,
   getConfigPath,
   getStatePath,
+  getDataHome,
   type LocalConfig,
 } from '../types.js';
 import {
@@ -157,13 +158,17 @@ describe('getConfigPath', () => {
 });
 
 describe('getStatePath', () => {
+  const cfg = (over: Partial<LocalConfig>): LocalConfig => ({
+    repo: { localPath: '/x/.teamai/team-repo', remote: 'r' },
+    username: 'u', scope: 'user', additionalRoles: [], ...over,
+  } as LocalConfig);
   it('should return correct path for user scope', () => {
-    const result = getStatePath('user');
+    const result = getStatePath(cfg({ scope: 'user' }));
     expect(result).toContain('.teamai/state.json');
   });
 
   it('should return correct path for project scope', () => {
-    const result = getStatePath('project', '/my/project');
+    const result = getStatePath(cfg({ scope: 'project', projectRoot: '/my/project' }));
     expect(result).toBe('/my/project/.teamai/state.json');
   });
 });
@@ -403,23 +408,25 @@ describe('loadStateForScope / saveStateForScope', () => {
     const emptyHome = path.join(tmpDir, 'empty-home');
     await fse.ensureDir(emptyHome);
     process.env.HOME = emptyHome;
-    const state = await loadStateForScope('user');
+    const state = await loadStateForScope({ repo: { localPath: 'x', remote: 'r' }, username: 'u', scope: 'user', additionalRoles: [] });
     expect(state.lastPull).toBeNull();
     expect(state.lastPush).toBeNull();
   });
 
   it('should save and load state for user scope', async () => {
     await fse.ensureDir(path.join(tmpDir, '.teamai'));
-    await saveStateForScope({ lastPull: '2025-01-01', lastPullRev: null, lastPush: null, pushedRules: [], pushedSkills: [], pushedEnvVars: [], pendingPushes: [], lastUpdateCheck: null, availableUpdate: null }, 'user');
-    const state = await loadStateForScope('user');
+    const userCfg: LocalConfig = { repo: { localPath: 'x', remote: 'r' }, username: 'u', scope: 'user', additionalRoles: [] };
+    await saveStateForScope({ lastPull: '2025-01-01', lastPullRev: null, lastPush: null, pushedRules: [], pushedSkills: [], pushedEnvVars: [], pendingPushes: [], lastUpdateCheck: null, availableUpdate: null }, userCfg);
+    const state = await loadStateForScope(userCfg);
     expect(state.lastPull).toBe('2025-01-01');
   });
 
   it('should save and load state for project scope', async () => {
     const projectRoot = path.join(tmpDir, 'proj');
     await fse.ensureDir(path.join(projectRoot, '.teamai'));
-    await saveStateForScope({ lastPull: '2025-06-01', lastPullRev: null, lastPush: null, pushedRules: [], pushedSkills: [], pushedEnvVars: [], pendingPushes: [], lastUpdateCheck: null, availableUpdate: null }, 'project', projectRoot);
-    const state = await loadStateForScope('project', projectRoot);
+    const projCfg: LocalConfig = { repo: { localPath: path.join(projectRoot, '.teamai', 'team-repo'), remote: 'r' }, username: 'u', scope: 'project', projectRoot, additionalRoles: [] };
+    await saveStateForScope({ lastPull: '2025-06-01', lastPullRev: null, lastPush: null, pushedRules: [], pushedSkills: [], pushedEnvVars: [], pendingPushes: [], lastUpdateCheck: null, availableUpdate: null }, projCfg);
+    const state = await loadStateForScope(projCfg);
     expect(state.lastPull).toBe('2025-06-01');
   });
 });
@@ -741,5 +748,35 @@ describe('recall layered-scope index primitives', () => {
     expect(userFilePath).toBe(`${userLearningsBase}/user-doc.md`);
     expect(projFilePath).toBe(`${projectLearningsBase}/proj-doc.md`);
     expect(userFilePath).not.toEqual(projFilePath);
+  });
+});
+
+describe('dataHome is runtime-only (security: disk config cannot inject it)', () => {
+  const base = {
+    repo: { localPath: '/work/proj/.teamai/team-repo', remote: 'r' },
+    username: 'u',
+    scope: 'project' as const,
+    projectRoot: '/work/proj',
+    additionalRoles: [],
+  };
+
+  it('LocalConfigSchema.parse drops a persisted dataHome (Zod strips unknown keys)', () => {
+    // A malicious/hand-edited config.yaml must NOT be able to set dataHome:
+    // getDataHome would trust it and uninstall would recursively remove it.
+    const parsed = LocalConfigSchema.parse({ ...base, dataHome: '/tmp/evil-target' });
+    expect((parsed as { dataHome?: string }).dataHome).toBeUndefined();
+  });
+
+  it('getDataHome ignores a would-be persisted dataHome and uses the legacy path', () => {
+    process.env.HOME = '/home/alice';
+    const parsed = LocalConfigSchema.parse({ ...base, dataHome: '/tmp/evil-target' });
+    // No runtime attacher set it, so getDataHome falls back to <projectRoot>/.teamai.
+    expect(getDataHome(parsed)).toBe(path.join('/work/proj', '.teamai'));
+    expect(getDataHome(parsed)).not.toBe('/tmp/evil-target');
+  });
+
+  it('getDataHome honors a runtime-attached dataHome', () => {
+    const cfg: LocalConfig = { ...base, dataHome: '/home/alice/.teamai/projects/proj-abc' };
+    expect(getDataHome(cfg)).toBe('/home/alice/.teamai/projects/proj-abc');
   });
 });

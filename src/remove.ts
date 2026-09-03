@@ -185,7 +185,7 @@ async function removeCore(
   }
 
   // Clean up state tracking
-  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+  const state = await loadStateForScope(localConfig);
   if (type === 'skills') {
     state.pushedSkills = state.pushedSkills.filter((s) => !found.includes(s));
   }
@@ -193,5 +193,5 @@ async function removeCore(
     state.pushedRules = state.pushedRules.filter((r) => !found.includes(r));
   }
   // `wiki` is not tracked in pushedX state; nothing to clean here.
-  await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+  await saveStateForScope(state, localConfig);
 }

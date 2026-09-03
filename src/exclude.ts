@@ -24,9 +24,9 @@ async function saveExcludeScopeConfig(localConfig: LocalConfig): Promise<void> {
   // A changed exclude list must bypass pull's unchanged-revision fast path so
   // excluded skills are removed, or newly included skills are restored.
   try {
-    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+    const state = await loadStateForScope(localConfig);
     state.lastPullRev = null;
-    await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+    await saveStateForScope(state, localConfig);
   } catch {
     // Missing/corrupt state is non-critical: the next pull performs a full sync.
   }

@@ -356,9 +356,9 @@ export async function initHttp(
 
   // Invalidate cache so the next pull does a full sync.
   try {
-    const state = await loadStateForScope(scope, projectRoot);
+    const state = await loadStateForScope(localConfig);
     state.lastPullRev = null;
-    await saveStateForScope(state, scope, projectRoot);
+    await saveStateForScope(state, localConfig);
   } catch {
     // state may not exist yet
   }
@@ -854,9 +854,9 @@ export async function initSelfRepo(options: GlobalOptions & {
 
   // Step 6.5: invalidate pull cache so next pull does a full sync.
   try {
-    const state = await loadStateForScope('project', businessRepoRoot);
+    const state = await loadStateForScope(localConfig);
     state.lastPullRev = null;
-    await saveStateForScope(state, 'project', businessRepoRoot);
+    await saveStateForScope(state, localConfig);
   } catch {
     // state may not exist yet
   }
@@ -1289,9 +1289,9 @@ export async function init(options: GlobalOptions & {
   // Step 6.5: Invalidate pull cache so next pull does full sync with cleanup
   // This handles re-init scenarios where the user changes their role
   try {
-    const state = await loadStateForScope(scope, projectRoot);
+    const state = await loadStateForScope(localConfig);
     state.lastPullRev = null;
-    await saveStateForScope(state, scope, projectRoot);
+    await saveStateForScope(state, localConfig);
   } catch {
     // Non-critical: state file may not exist yet on first init
   }

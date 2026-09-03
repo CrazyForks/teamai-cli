@@ -378,7 +378,7 @@ async function pullForScope(
   let currentTargets: string[] | null = null;
   if (!options.force && !options.dryRun) {
     try {
-      const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+      const state = await loadStateForScope(localConfig);
       if (currentRev && state[revisionField] && state[revisionField] === currentRev) {
         currentTargets = await getInstalledResourceTargets(teamConfig, localConfig);
         const previousTargets = state[targetsField];
@@ -869,7 +869,7 @@ async function pullForScope(
   // a chance to run. Inherited pulls use an independent marker so a partial,
   // safe sync can never suppress a later full user-scope pull.
   if (!options.dryRun) {
-    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+    const state = await loadStateForScope(localConfig);
     if (revisionField === 'lastPullRev') {
       state.lastPull = new Date().toISOString();
     }
@@ -884,7 +884,7 @@ async function pullForScope(
     }
     state[targetsField] = currentTargets
       ?? await getInstalledResourceTargets(freshConfig, localConfig);
-    await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+    await saveStateForScope(state, localConfig);
   }
 
   // Step 5: Auto-report usage data — handled centrally in pull() to avoid
@@ -1457,7 +1457,7 @@ async function reconcileCoAuthorAllScopes(
       const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
       if (!teamConfig) continue;
       const { reconcileCoAuthorForConfig } = await import('./coauthor-reconcile.js');
-      const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+      const state = await loadStateForScope(localConfig);
       const { changes, managed } = await reconcileCoAuthorForConfig(teamConfig, localConfig, state);
 
       const applied = changes.filter((c) => c.action !== 'skipped');
@@ -1466,7 +1466,7 @@ async function reconcileCoAuthorAllScopes(
       }
       if (applied.length > 0) {
         state.coAuthorManaged = managed;
-        await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+        await saveStateForScope(state, localConfig);
         if (!options.silent) {
           const verb = applied[0].enabled ? 'enabled' : 'disabled';
           const tools = [...new Set(applied.map((c) => c.tool))];

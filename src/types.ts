@@ -322,7 +322,22 @@ export const LocalConfigSchema = z.object({
   disabledAgents: z.array(z.string()).optional(),
 });
 
-export type LocalConfig = z.infer<typeof LocalConfigSchema>;
+/**
+ * In-memory config: the persisted schema plus a runtime-only `dataHome`.
+ *
+ * `dataHome` is the resolved machine-data home (`~/.teamai/projects/<slug>/` in
+ * the P1 partition layout), attached in memory by `detectProjectConfig`/init
+ * when the git anchor is resolvable, and consumed by `getDataHome`. It is
+ * deliberately NOT part of `LocalConfigSchema`, so:
+ *  - on LOAD, Zod strips it from disk (default object parsing drops unknown
+ *    keys) — a config.yaml can never inject a `dataHome` that `getDataHome`
+ *    would then trust (which would let an attacker point teamai's data home,
+ *    and `uninstall`'s recursive remove, at an arbitrary directory);
+ *  - on SAVE, `serializeLocalConfig` also drops it (belt-and-braces) — the
+ *    value is anchor-derived at runtime and the config file lives INSIDE it, so
+ *    persisting an absolute path would be both redundant and machine-specific.
+ */
+export type LocalConfig = z.infer<typeof LocalConfigSchema> & { dataHome?: string };
 export type LocalConfigInput = z.input<typeof LocalConfigSchema>;
 
 // ─── Local state (~/.teamai/state.json) ────────────────────
@@ -1230,6 +1245,11 @@ export function getKnowledgeDir(localConfig: LocalConfig): string {
  * function, so that redirect happens in one place.
  */
 export function getDataHome(localConfig: LocalConfig): string {
+  // A resolved partition dataHome (attached at detection/init) wins. Otherwise
+  // fall back to the legacy in-workspace location. In the P1-2A refactor no
+  // caller attaches dataHome yet, so this is still exactly getTeamaiHome — the
+  // partition redirect is switched on in P1-2B by making detection attach it.
+  if (localConfig.dataHome) return localConfig.dataHome;
   return getTeamaiHome(localConfig.scope, localConfig.projectRoot);
 }
 
@@ -1296,10 +1316,12 @@ export function getConfigPath(scope: Scope, projectRoot?: string): string {
 }
 
 /**
- * Get the state.json path for a given scope.
+ * Get the state.json path for a config. state.json is per-project machine data
+ * that lives beside config.yaml in the data home, so it routes through
+ * getDataHome (partition-aware in P1-2B).
  */
-export function getStatePath(scope: Scope, projectRoot?: string): string {
-  return path.join(getTeamaiHome(scope, projectRoot), 'state.json');
+export function getStatePath(localConfig: LocalConfig): string {
+  return path.join(getDataHome(localConfig), 'state.json');
 }
 
 /**

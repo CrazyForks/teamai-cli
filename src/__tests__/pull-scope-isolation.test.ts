@@ -164,9 +164,9 @@ describe('pull scope isolation (issue #73)', () => {
 
     vi.mocked(loadTeamConfig).mockResolvedValue(teamConfig);
     vi.mocked(getHeadRev).mockResolvedValue('abc1234');
-    vi.mocked(loadStateForScope).mockImplementation(async (scope) => ({
-      lastPull: scope === 'project' ? '2026-04-01' : null,
-      lastPullRev: scope === 'project' ? 'abc1234' : null,
+    vi.mocked(loadStateForScope).mockImplementation(async (localConfig) => ({
+      lastPull: localConfig.scope === 'project' ? '2026-04-01' : null,
+      lastPullRev: localConfig.scope === 'project' ? 'abc1234' : null,
       lastPush: null,
       pushedRules: [],
       pushedSkills: [],
@@ -208,8 +208,8 @@ describe('pull scope isolation (issue #73)', () => {
     await pull({ silent: true });
 
     expect(loadLocalConfigForScope).toHaveBeenCalledWith('user');
-    expect(loadStateForScope).toHaveBeenCalledWith('user', undefined);
-    expect(loadStateForScope).toHaveBeenCalledWith('project', projectRoot);
+    expect(loadStateForScope).toHaveBeenCalledWith(expect.objectContaining({ scope: 'user' }));
+    expect(loadStateForScope).toHaveBeenCalledWith(expect.objectContaining({ scope: 'project', projectRoot }));
     expect(log.info).toHaveBeenCalledWith(
       'project scope detected, inheriting user-scope resources and knowledge',
     );
@@ -223,8 +223,7 @@ describe('pull scope isolation (issue #73)', () => {
         lastPullRev: null,
         lastInheritedPullRev: 'abc1234',
       }),
-      'user',
-      undefined,
+      expect.objectContaining({ scope: 'user' }),
     );
     expect(reconcileTeamHooksForConfig).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -255,7 +254,7 @@ describe('pull scope isolation (issue #73)', () => {
     expect(log.warn).toHaveBeenCalledWith(
       'user-scope inheritance is enabled, but user scope is not initialized',
     );
-    expect(loadStateForScope).toHaveBeenCalledWith('project', projectRoot);
+    expect(loadStateForScope).toHaveBeenCalledWith(expect.objectContaining({ scope: 'project', projectRoot }));
   });
 
   it('user mode: pulls user scope and routes source against user (no skip notice)', async () => {
