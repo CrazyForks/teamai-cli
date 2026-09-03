@@ -948,9 +948,8 @@ recallCmd
   .action(async (cmdOpts) => {
     const { autoDetectInit } = await import('./config.js');
     const { localConfig } = await autoDetectInit();
-    const repoPath = localConfig.repo.localPath;
-    const votesDir = `${repoPath}/votes`;
-    const learningsDir = `${repoPath}/learnings`;
+    const { resolveMaintenancePaths } = await import('./maintenance/index.js');
+    const { repoPath, votesDir, learningsDir } = await resolveMaintenancePaths(localConfig);
 
     if (cmdOpts.confidenceWriteback) {
       const { computeAllConfidence, writeBackConfidence } = await import('./maintenance/index.js');
@@ -1020,10 +1019,12 @@ recallCmd
   .action(async (learningId, cmdOpts) => {
     const { autoDetectInit } = await import('./config.js');
     const { localConfig } = await autoDetectInit();
-    const repoPath = localConfig.repo.localPath;
-    const votesDir = `${repoPath}/votes`;
-    const learningsDir = `${repoPath}/learnings`;
-    const { findPromotionCandidates, executePromotion } = await import('./maintenance/index.js');
+    const {
+      resolveMaintenancePaths,
+      findPromotionCandidates,
+      executePromotion,
+    } = await import('./maintenance/index.js');
+    const { repoPath, votesDir, learningsDir } = await resolveMaintenancePaths(localConfig);
     const { log } = await import('./utils/logger.js');
 
     const candidates = await findPromotionCandidates(learningsDir, votesDir);

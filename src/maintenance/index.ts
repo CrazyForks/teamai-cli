@@ -7,3 +7,5 @@ export { findStaleEntries, reportStaleEntries, findRelatedAdoptedLearnings, gene
 export type { StaleEntry, QualityUpdateOptions } from './quality-update.js';
 export { findPromotionCandidates, executePromotion } from './promote.js';
 export type { PromotionCandidate, PromoteOptions } from './promote.js';
+export { resolveMaintenancePaths } from './paths.js';
+export type { MaintenancePaths } from './paths.js';
