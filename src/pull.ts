@@ -24,7 +24,7 @@ import {
   CultureFrontmatterSchema,
   resolveBaseDir,
   resolveHookScope,
-  getTeamaiHome,
+  getDataHome,
   isRecallEnabled,
   isAgentDisabled,
   scopedToolPaths,
@@ -521,7 +521,7 @@ async function pullForScope(
         log.info(`[${scopeLabel}] [dry-run] Would sync ${varCount} env variable(s)`);
       } else {
         await envHandler.pullItem(items[0], freshConfig, localConfig);
-        const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+        const teamaiHome = getDataHome(localConfig);
         log.success(`[${scopeLabel}] Synced ${varCount} env variable(s) to ${teamaiHome}/env.sh`);
       }
       totalSynced += 1;
@@ -734,7 +734,7 @@ async function pullForScope(
 
       if (hasAnySource || effectiveCodebaseDir) {
         const votesExist = await pathExists(votesDir);
-        const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+        const teamaiHome = getDataHome(localConfig);
         const indexPath = path.join(teamaiHome, 'search-index.json');
         const { buildIndex } = await import('./utils/search-index.js');
         const elapsed = await buildIndex({
