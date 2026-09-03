@@ -5,7 +5,7 @@ import type { SearchResult } from './utils/search-index.js';
 import { readFileSafe, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions, SearchIndex, LocalConfig } from './types.js';
-import { getTeamaiHome } from './types.js';
+import { getDataHome } from './types.js';
 import { queryCodeKnowledge } from './code-knowledge-recall.js';
 import type { CodeKnowledgeResult, SourceAnchor } from './code-knowledge-recall.js';
 import { recordRecallQuality } from './recall-quality.js';
@@ -264,9 +264,7 @@ async function loadOrBuildScopeIndex(
   localConfig: LocalConfig,
   scopeLabel: 'user' | 'project',
 ): Promise<{ index: SearchIndex; learningsBase: string } | null> {
-  const teamaiHome = localConfig.scope === 'project' && localConfig.projectRoot
-    ? getTeamaiHome('project', localConfig.projectRoot)
-    : getTeamaiHome('user');
+  const teamaiHome = getDataHome(localConfig);
   const indexPath = path.join(teamaiHome, 'search-index.json');
 
   // user scope: learnings 已被 pull 同步到 ~/.teamai/learnings/

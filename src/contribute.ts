@@ -10,7 +10,7 @@ import { log, spinner } from './utils/logger.js';
 import { markContributed } from './contribute-check.js';
 import { savePendingLearning } from './utils/pending-learnings.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
-import { LEARNINGS_LOCAL_DIR, getTeamaiHome } from './types.js';
+import { LEARNINGS_LOCAL_DIR, getDataHome } from './types.js';
 
 /**
  * Rebuild this scope's local search index so the freshly-written contribution
@@ -41,7 +41,7 @@ async function rebuildIndexAfterContribute(localConfig: LocalConfig): Promise<vo
     effectiveLearningsDir = (await pathExists(learningsRepoDir)) ? learningsRepoDir : undefined;
   }
 
-  const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+  const teamaiHome = getDataHome(localConfig);
   const indexPath = path.join(teamaiHome, 'search-index.json');
   const { buildIndex } = await import('./utils/search-index.js');
   await buildIndex({
@@ -276,7 +276,7 @@ async function contributeSelf(
           if (await pathExists(candidate)) votesDir = candidate;
         } catch { /* reports worktree unavailable — index without votes */ }
 
-        const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+        const teamaiHome = getDataHome(localConfig);
         const { buildIndex } = await import('./utils/search-index.js');
         await buildIndex({
           learningsDir: await pathExists(LEARNINGS_LOCAL_DIR) ? LEARNINGS_LOCAL_DIR : undefined,

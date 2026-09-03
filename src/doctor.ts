@@ -7,7 +7,7 @@ import {
   TeamaiConfigSchema,
   TEAMAI_ENV_START,
   resolveHookScope,
-  getTeamaiHome,
+  getDataHome,
   type TeamaiConfig,
 } from './types.js';
 import { TEAMAI_HOOK_SUBCOMMANDS, isCodexTrustGatedTool, codexTrustReminder } from './hooks.js';
@@ -183,7 +183,7 @@ export async function doctor(options: GlobalOptions): Promise<void> {
         // project scope and ~/.teamai in user scope — mirror the path that
         // `teamai pull` actually writes to, not a hardcoded user-home path.
         const envShPath = path.join(
-          getTeamaiHome(localConfig.scope, localConfig.projectRoot),
+          getDataHome(localConfig),
           'env.sh',
         );
         if (!await pathExists(envShPath)) return false;

@@ -18,7 +18,7 @@ import {
   TEAMAI_RECALL_RULES_END,
   TEAMAI_ENV_START,
   TEAMAI_ENV_END,
-  getTeamaiHome,
+  getDataHome,
   managedMcpManifestPath,
   resolveBaseDir,
   resolveHookScope,
@@ -349,7 +349,7 @@ async function buildRemovalPlan(
   agentFilter?: string,
 ): Promise<RemovalPlan> {
   const baseDir = resolveBaseDir(localConfig);
-  const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+  const teamaiHome = getDataHome(localConfig);
 
   // Discover team repo resource names for targeted removal. CLI built-in
   // resources (recall agent/rule, share-learnings skill, …) are deployed by

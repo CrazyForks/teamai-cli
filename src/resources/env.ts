@@ -3,7 +3,7 @@ import { z } from 'zod';
 import YAML from 'yaml';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { TEAMAI_ENV_START, TEAMAI_ENV_END, getTeamaiHome, getEnvBackupPath, isSelfMode } from '../types.js';
+import { TEAMAI_ENV_START, TEAMAI_ENV_END, getDataHome, getEnvBackupPath, isSelfMode } from '../types.js';
 import { pathExists, readFileSafe, writeFile, ensureDir, fileContentEqual } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { getUserHome } from '../utils/home.js';
@@ -156,7 +156,7 @@ export class EnvHandler extends ResourceHandler {
     // getEnvBackupPath returns <teamaiHome>/env normally, but <teamaiHome>/env.local
     // in self mode — where <teamaiHome>/env is a committed DIRECTORY (env/env.yaml)
     // and writing a file there would throw EISDIR.
-    const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+    const teamaiHome = getDataHome(localConfig);
     const backupLines = envConfig.variables.map(v => `${v.key}=${v.value}`);
     await ensureDir(teamaiHome);
     await writeFile(getEnvBackupPath(localConfig), backupLines.join('\n') + '\n');

@@ -1210,6 +1210,26 @@ export function getKnowledgeDir(localConfig: LocalConfig): string {
 }
 
 /**
+ * Directory holding this project's machine-local teamai data (search index,
+ * env backup, managed manifests, local-agent resource cache, and — in a later
+ * phase — config.yaml/state.json and the team-repo clone).
+ *
+ * This is the single source of truth for the machine-data home, sitting beside
+ * `getKnowledgeDir` (team knowledge assets) and `resolveBaseDir` (AI-tool
+ * resource landing = the workspace root). The three are orthogonal:
+ * knowledge / resource-landing / machine-data.
+ *
+ * Today it returns `getTeamaiHome(scope, projectRoot)` — i.e. `<projectRoot>/.teamai`
+ * for project scope, `~/.teamai` for user scope. A later phase (P1) redirects the
+ * project-scope case to a per-project partition under `~/.teamai/projects/<slug>/`
+ * keyed by the shared `projectAnchor`; every consumer already routes through this
+ * function, so that redirect happens in one place.
+ */
+export function getDataHome(localConfig: LocalConfig): string {
+  return getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+}
+
+/**
  * Directory holding reports data (members/sessions/votes/stats).
  * - git/http: same as knowledge (localPath) — reports live alongside knowledge.
  * - self:     <localPath>/reports-wt — a git worktree checked out on the

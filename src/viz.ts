@@ -18,7 +18,7 @@ import {
   LEARNINGS_LOCAL_DIR,
   getKnowledgeDir,
   getReportsDir,
-  getTeamaiHome,
+  getDataHome,
 } from './types.js';
 import type { SearchIndexEntry } from './types.js';
 import { findPromotionCandidates, type PromotionCandidate } from './maintenance/promote.js';
@@ -157,9 +157,7 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
     const knowledgeRoot = getKnowledgeDir(config);
     const reportsRoot = getReportsDir(config);
     const useProjectScope = config.scope === 'project' && Boolean(config.projectRoot);
-    const teamaiHome = useProjectScope
-      ? getTeamaiHome('project', config.projectRoot!)
-      : getTeamaiHome('user');
+    const teamaiHome = getDataHome(config);
     const learningsDir = useProjectScope
       ? path.join(knowledgeRoot, 'learnings')
       : LEARNINGS_LOCAL_DIR;
