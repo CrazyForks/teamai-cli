@@ -20,27 +20,32 @@ import { getUserHome } from './home.js';
  * collisions between two projects with the same basename are broken by the hash.
  */
 
-let caseInsensitiveCache: boolean | null = null;
+let caseInsensitiveCache = new Map<string, boolean>();
 
 /**
- * Detect at runtime whether the filesystem holding `~/.teamai` is
- * case-insensitive (macOS APFS/HFS+ default, Windows NTFS) vs case-sensitive
- * (Linux ext4). We must probe rather than assume: on a case-insensitive FS,
- * `CaseTest` and `casetest` are the same directory, so the two spellings must
- * hash to the SAME slug; on a case-sensitive FS they are genuinely distinct and
- * lowercasing would wrongly merge two different projects.
+ * Detect at runtime whether the filesystem holding `probeDir` is case-insensitive
+ * (macOS APFS/HFS+ default, Windows NTFS) vs case-sensitive (Linux ext4).
  *
- * `realpath` does NOT solve this — on macOS it returns the on-disk spelling
- * as-is for either input (verified in the issue), so normalization must be an
- * explicit lowercase gated on this probe.
+ * We must probe the volume that holds the ANCHOR, not `~/.teamai`: HOME and the
+ * project can live on different volumes with different case sensitivity (e.g.
+ * HOME on a case-insensitive APFS, the project on a case-sensitive volume). If
+ * we probed HOME and lowercased, two genuinely distinct anchors like
+ * `/Volumes/Case/work/Foo` and `/Volumes/Case/work/foo` would fold to one
+ * partition and clobber each other. So callers pass the anchor's directory.
  *
- * Result is cached for the process. On any probe error we fall back to
- * case-sensitive (no lowercasing) — the conservative choice: it never merges
- * two distinct anchors, at worst it keeps two spellings of one anchor separate.
+ * `realpath` does NOT fold case on macOS (it returns the queried spelling
+ * as-is, verified in the issue), so normalization must be an explicit lowercase
+ * gated on this probe.
+ *
+ * Result is cached per probe directory. On any probe error we fall back to
+ * case-sensitive (no lowercasing) — the conservative choice: it never merges two
+ * distinct anchors, at worst it keeps two spellings of one anchor separate.
  */
 export function isCaseInsensitiveFs(probeDir?: string): boolean {
-  if (caseInsensitiveCache !== null) return caseInsensitiveCache;
   const base = probeDir ?? path.join(getUserHome(), '.teamai');
+  const cached = caseInsensitiveCache.get(base);
+  if (cached !== undefined) return cached;
+  let insensitive = false;
   try {
     fs.mkdirSync(base, { recursive: true });
     const token = `.teamai-case-probe-${process.pid}-${Date.now()}`;
@@ -49,28 +54,34 @@ export function isCaseInsensitiveFs(probeDir?: string): boolean {
     fs.writeFileSync(upper, '');
     // If the lowercased path resolves to the file we wrote under the uppercased
     // name, the FS folds case → case-insensitive.
-    const insensitive = fs.existsSync(lower);
+    insensitive = fs.existsSync(lower);
     fs.rmSync(upper, { force: true });
-    caseInsensitiveCache = insensitive;
   } catch {
-    caseInsensitiveCache = false;
+    insensitive = false;
   }
-  return caseInsensitiveCache;
+  caseInsensitiveCache.set(base, insensitive);
+  return insensitive;
 }
 
-/** Test-only: reset the cached case-sensitivity probe. */
+/** Test-only: reset the cached case-sensitivity probes. */
 export function resetCaseProbeCache(): void {
-  caseInsensitiveCache = null;
+  caseInsensitiveCache = new Map();
 }
 
 /**
  * Normalize an anchor path for hashing. The anchor is already realpath-resolved
  * by `resolveAnchors` (symlinks + macOS /tmp→/private/tmp). Here we only apply
- * case-folding when the FS is case-insensitive, so different spellings of one
- * directory map to one partition.
+ * case-folding when the anchor's OWN volume is case-insensitive, so different
+ * spellings of one directory map to one partition — while distinct anchors on a
+ * case-sensitive volume stay distinct.
  */
 function normalizeAnchor(anchor: string): string {
-  return isCaseInsensitiveFs() ? anchor.toLowerCase() : anchor;
+  // Probe the anchor's parent dir: it is on the same volume as the anchor in
+  // every realistic case (an anchor whose parent is a mount point is pathological)
+  // and, unlike the anchor itself, is not the business workspace root we want to
+  // keep pristine. Falls back to the anchor if it has no parent.
+  const probeDir = path.dirname(anchor) || anchor;
+  return isCaseInsensitiveFs(probeDir) ? anchor.toLowerCase() : anchor;
 }
 
 /** Filesystem-safe, length-bounded basename for the human-readable slug prefix. */
@@ -82,14 +93,21 @@ function safeBasename(anchor: string): string {
   return bounded;
 }
 
-/** `<safe-basename>-<sha256(normalized anchor)[:8]>` — stable per projectAnchor. */
+/**
+ * `<safe-basename>-<sha256(normalized anchor)[:16]>` — stable per projectAnchor.
+ *
+ * 16 hex = 64 bits of the digest. An 8-hex (32-bit) suffix is NOT collision-safe
+ * — a second-preimage against a target slug is constructible in well under a
+ * second, which would silently merge two projects' config/state/plaintext-env
+ * into one partition. 64 bits pushes a deliberate collision search past ~2^32
+ * hashes, out of casual reach, while keeping the directory name reasonable.
+ */
 export function projectSlug(anchor: string): string {
   // Normalize once so BOTH the basename prefix and the hash are derived from the
-  // same canonical spelling — on a case-insensitive FS this makes the whole slug
-  // string identical for any spelling of one directory (the dir would fold to a
-  // single partition anyway; folding the string keeps callers consistent too).
+  // same canonical spelling — on a case-insensitive volume this makes the whole
+  // slug string identical for any spelling of one directory.
   const norm = normalizeAnchor(anchor);
-  const hash = createHash('sha256').update(norm).digest('hex').slice(0, 8);
+  const hash = createHash('sha256').update(norm).digest('hex').slice(0, 16);
   return `${safeBasename(norm)}-${hash}`;
 }
 

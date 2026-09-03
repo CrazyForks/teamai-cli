@@ -20,7 +20,7 @@ describe('projectSlug / projectDataHome (issue #374 partition identity)', () => 
     const a = projectSlug('/Users/x/Project/teamai-cli');
     const b = projectSlug('/Users/x/Project/teamai-cli');
     expect(a).toBe(b);
-    expect(a).toMatch(/^teamai-cli-[0-9a-f]{8}$/);
+    expect(a).toMatch(/^teamai-cli-[0-9a-f]{16}$/);
   });
 
   it('does NOT collide for escape-ambiguous paths (/x/my-proj vs /x/my/proj)', () => {
@@ -57,6 +57,15 @@ describe('projectSlug / projectDataHome (issue #374 partition identity)', () => 
     vi.spyOn(fs, 'existsSync').mockReturnValue(false); // probe file not found → case-sensitive
     expect(isCaseInsensitiveFs()).toBe(false);
     expect(projectSlug('/work/CaseTest')).not.toBe(projectSlug('/work/casetest'));
+  });
+
+  it('uses a 64-bit (16 hex) digest suffix, not 32-bit', () => {
+    resetCaseProbeCache();
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    const slug = projectSlug('/work/proj');
+    const hex = slug.split('-').pop() ?? '';
+    // 32-bit (8 hex) is cheaply collidable; require the widened suffix.
+    expect(hex).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('projectDataHome roots under ~/.teamai/projects/<slug>', () => {

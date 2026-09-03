@@ -320,19 +320,24 @@ export const LocalConfigSchema = z.object({
   enabledAgents: z.array(z.string()).optional(),
   /** Tools explicitly excluded from all teamai sync (set by `uninstall --agent`). Removed again by `init --agent`. */
   disabledAgents: z.array(z.string()).optional(),
-  /**
-   * Runtime-only: the resolved machine-data home for this config
-   * (`~/.teamai/projects/<slug>/` in the P1 partition layout). Attached in
-   * memory by `detectProjectConfig`/init when the git anchor is resolvable, and
-   * consumed by `getDataHome`. NEVER persisted — the config file lives INSIDE
-   * this directory, and the value is derived from the projectAnchor at runtime
-   * (like the anchor itself), so save helpers strip it. Present in the schema so
-   * it is typed on the in-memory object; a persisted value is ignored on load.
-   */
-  dataHome: z.string().optional(),
 });
 
-export type LocalConfig = z.infer<typeof LocalConfigSchema>;
+/**
+ * In-memory config: the persisted schema plus a runtime-only `dataHome`.
+ *
+ * `dataHome` is the resolved machine-data home (`~/.teamai/projects/<slug>/` in
+ * the P1 partition layout), attached in memory by `detectProjectConfig`/init
+ * when the git anchor is resolvable, and consumed by `getDataHome`. It is
+ * deliberately NOT part of `LocalConfigSchema`, so:
+ *  - on LOAD, Zod strips it from disk (default object parsing drops unknown
+ *    keys) — a config.yaml can never inject a `dataHome` that `getDataHome`
+ *    would then trust (which would let an attacker point teamai's data home,
+ *    and `uninstall`'s recursive remove, at an arbitrary directory);
+ *  - on SAVE, `serializeLocalConfig` also drops it (belt-and-braces) — the
+ *    value is anchor-derived at runtime and the config file lives INSIDE it, so
+ *    persisting an absolute path would be both redundant and machine-specific.
+ */
+export type LocalConfig = z.infer<typeof LocalConfigSchema> & { dataHome?: string };
 export type LocalConfigInput = z.input<typeof LocalConfigSchema>;
 
 // ─── Local state (~/.teamai/state.json) ────────────────────

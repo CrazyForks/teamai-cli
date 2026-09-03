@@ -10,6 +10,7 @@ import {
   getTeamaiHome,
   getConfigPath,
   getStatePath,
+  getDataHome,
   type LocalConfig,
 } from '../types.js';
 import {
@@ -747,5 +748,35 @@ describe('recall layered-scope index primitives', () => {
     expect(userFilePath).toBe(`${userLearningsBase}/user-doc.md`);
     expect(projFilePath).toBe(`${projectLearningsBase}/proj-doc.md`);
     expect(userFilePath).not.toEqual(projFilePath);
+  });
+});
+
+describe('dataHome is runtime-only (security: disk config cannot inject it)', () => {
+  const base = {
+    repo: { localPath: '/work/proj/.teamai/team-repo', remote: 'r' },
+    username: 'u',
+    scope: 'project' as const,
+    projectRoot: '/work/proj',
+    additionalRoles: [],
+  };
+
+  it('LocalConfigSchema.parse drops a persisted dataHome (Zod strips unknown keys)', () => {
+    // A malicious/hand-edited config.yaml must NOT be able to set dataHome:
+    // getDataHome would trust it and uninstall would recursively remove it.
+    const parsed = LocalConfigSchema.parse({ ...base, dataHome: '/tmp/evil-target' });
+    expect((parsed as { dataHome?: string }).dataHome).toBeUndefined();
+  });
+
+  it('getDataHome ignores a would-be persisted dataHome and uses the legacy path', () => {
+    process.env.HOME = '/home/alice';
+    const parsed = LocalConfigSchema.parse({ ...base, dataHome: '/tmp/evil-target' });
+    // No runtime attacher set it, so getDataHome falls back to <projectRoot>/.teamai.
+    expect(getDataHome(parsed)).toBe(path.join('/work/proj', '.teamai'));
+    expect(getDataHome(parsed)).not.toBe('/tmp/evil-target');
+  });
+
+  it('getDataHome honors a runtime-attached dataHome', () => {
+    const cfg: LocalConfig = { ...base, dataHome: '/home/alice/.teamai/projects/proj-abc' };
+    expect(getDataHome(cfg)).toBe('/home/alice/.teamai/projects/proj-abc');
   });
 });
