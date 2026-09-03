@@ -437,6 +437,38 @@ describe('parseGetConfig', () => {
     expect(vars['user_name']).toBe('admin123');
   });
 
+  it('extracts arbitrary scalar fields as substitution vars', () => {
+    const resp = {
+      cls: {
+        endpoint: 'ap-guangzhou.cls.tencentcs.com',
+        cls_uin: '10001',
+        topic_id: 'topic-1',
+        extra_flag: 8,
+        'cls-uin': 'hyphenated',
+        nested: { ignored: true },
+        enabled: true,
+        install_cmd: 'curl install | bash -s -- --cls-uin ${cls_uin}',
+        update_cmd: 'curl install | bash -s -- upgrade',
+        uninstall_cmd: 'bash uninstall',
+        run_cmd: 'true',
+        version: '1.2.3',
+      },
+    };
+    const { vars } = parseGetConfig(resp);
+    expect(vars['cls_uin']).toBe('10001');
+    expect(vars['endpoint']).toBe('ap-guangzhou.cls.tencentcs.com');
+    expect(vars['topic_id']).toBe('topic-1');
+    expect(vars['extra_flag']).toBe('8');
+    expect(vars['cls-uin']).toBeUndefined();
+    expect(vars['nested']).toBeUndefined();
+    expect(vars['enabled']).toBeUndefined();
+    expect(vars['install_cmd']).toBeUndefined();
+    expect(vars['update_cmd']).toBeUndefined();
+    expect(vars['run_cmd']).toBeUndefined();
+    expect(vars['uninstall_cmd']).toBeUndefined();
+    expect(vars['version']).toBeUndefined();
+  });
+
   it('skips non-object section values', () => {
     const resp = { cls: 'not-an-object', other: 42 };
     expect(parseGetConfig(resp).plugins).toHaveLength(0);
