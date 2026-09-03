@@ -731,12 +731,12 @@ function redactSecrets(s: string): string {
  * emit 'close', producing a false timeout even though the command itself finished.
  * Rejects on non-zero exit, termination by signal, or timeout.
  */
-async function execPluginCommand(cmd: string, timeoutMs: number): Promise<void> {
+export async function execPluginCommand(cmd: string, timeoutMs: number): Promise<void> {
   const { spawn } = await import('node:child_process');
   await new Promise<void>((resolve, reject) => {
     const child = process.platform === 'win32'
       ? spawn('cmd', ['/c', cmd], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
-      : spawn('/bin/sh', ['-lc', cmd], { stdio: ['ignore', 'ignore', 'pipe'] });
+      : spawn('bash', ['-lc', cmd], { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     let settled = false;
     let timer: ReturnType<typeof setTimeout>;
