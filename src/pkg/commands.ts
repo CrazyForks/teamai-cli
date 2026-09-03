@@ -201,7 +201,9 @@ export async function pkgInstall(
   if ((manifest.packages.npm?.length ?? 0) > 0 && (!added || added.ecosystem === 'npm')) {
     if (added?.npm) {
       await npm.install([added.npm], context);
-      lock.packages.npm = await npm.snapshot(cwd, manifest.packages.npm ?? []);
+      if (!options.dryRun) {
+        lock.packages.npm = await npm.snapshot(cwd, manifest.packages.npm ?? []);
+      }
     } else {
       lock.packages.npm = await npm.install(manifest.packages.npm ?? [], context);
     }
@@ -212,7 +214,9 @@ export async function pkgInstall(
         marketplaces: [added.marketplace],
         plugins: [{ name: added.pluginName }],
       }, context);
-      lock.packages.claude = await claude.snapshot(manifest.packages.claude);
+      if (!options.dryRun) {
+        lock.packages.claude = await claude.snapshot(manifest.packages.claude);
+      }
     } else {
       lock.packages.claude = await claude.install(manifest.packages.claude, context);
     }

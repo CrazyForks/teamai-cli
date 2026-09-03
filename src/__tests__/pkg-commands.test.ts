@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   autoDetectInit: vi.fn(),
   npmInstall: vi.fn(),
   npmSnapshot: vi.fn(),
+  claudeInstall: vi.fn(),
+  claudeSnapshot: vi.fn(),
   assertNotReadOnly: vi.fn(),
 }));
 
@@ -42,8 +44,8 @@ vi.mock('../pkg/adapters/claude-plugin.js', () => ({
   ClaudePluginAdapter: class {
     validate = vi.fn().mockResolvedValue({ valid: true, errors: [] });
     registeredMarketplaces = vi.fn().mockResolvedValue([]);
-    install = vi.fn().mockResolvedValue({ marketplaces: [], plugins: [] });
-    snapshot = vi.fn().mockResolvedValue({ marketplaces: [], plugins: [] });
+    install = mocks.claudeInstall;
+    snapshot = mocks.claudeSnapshot;
     status = vi.fn().mockResolvedValue([]);
   },
 }));
@@ -93,6 +95,8 @@ describe('pkgInstall npm target options', () => {
       global: true,
       registry: 'https://mirrors.tencent.com/npm/',
     }]);
+    mocks.claudeInstall.mockResolvedValue({ marketplaces: [], plugins: [] });
+    mocks.claudeSnapshot.mockResolvedValue({ marketplaces: [], plugins: [] });
   });
 
   afterEach(() => {
@@ -212,6 +216,38 @@ describe('pkgInstall npm target options', () => {
     await expect(pkgInstall(undefined, { global: true }))
       .rejects.toThrow('--global and --registry require an npm package target');
     expect(mocks.npmInstall).not.toHaveBeenCalled();
+  });
+
+  it('does not snapshot or write files for a global npm target in dry-run mode', async () => {
+    await pkgInstall('typescript@latest', { global: true, dryRun: true });
+
+    expect(mocks.npmInstall).toHaveBeenCalledWith(
+      [{ name: 'typescript', version: 'latest', global: true }],
+      expect.objectContaining({ dryRun: true }),
+    );
+    expect(mocks.npmSnapshot).not.toHaveBeenCalled();
+    const raw = YAML.parse(fs.readFileSync(path.join(teamRepo, 'teamai.yaml'), 'utf8'));
+    expect(raw.packages).toBeUndefined();
+    expect(await loadPackageLock(path.join(projectRoot, '.teamai'))).toBeNull();
+  });
+
+  it('does not snapshot or write files for a Claude target in dry-run mode', async () => {
+    await pkgInstall('code-review@claude-plugins-official', { dryRun: true });
+
+    expect(mocks.claudeInstall).toHaveBeenCalledWith(
+      {
+        marketplaces: [{
+          name: 'claude-plugins-official',
+          repo: 'anthropics/claude-plugins-official',
+        }],
+        plugins: [{ name: 'code-review@claude-plugins-official' }],
+      },
+      expect.objectContaining({ dryRun: true }),
+    );
+    expect(mocks.claudeSnapshot).not.toHaveBeenCalled();
+    const raw = YAML.parse(fs.readFileSync(path.join(teamRepo, 'teamai.yaml'), 'utf8'));
+    expect(raw.packages).toBeUndefined();
+    expect(await loadPackageLock(path.join(projectRoot, '.teamai'))).toBeNull();
   });
 
   it('does not add a package failure when teamai.yaml is absent', async () => {
