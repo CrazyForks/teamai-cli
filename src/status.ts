@@ -60,7 +60,7 @@ export async function status(options: GlobalOptions): Promise<void> {
   }
 
   // State
-  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+  const state = await loadStateForScope(localConfig);
   console.log('');
   log.info('Sync state:');
   console.log(`  last push: ${state.lastPush ?? 'never'}`);

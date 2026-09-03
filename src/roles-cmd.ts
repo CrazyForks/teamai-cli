@@ -304,9 +304,9 @@ export async function rolesSet(
 
     // Invalidate pull cache so next pull does full sync with cleanup
     try {
-        const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+        const state = await loadStateForScope(localConfig);
         state.lastPullRev = null;
-        await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+        await saveStateForScope(state, localConfig);
     } catch {
         // Non-critical: if state doesn't exist yet, next pull will do full sync anyway
     }

@@ -385,7 +385,7 @@ async function pushCore(
   // Sync team repo updates to local tool directories before scanning.
   // This prevents files changed by teammates from being falsely flagged as "modified".
   try {
-    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+    const state = await loadStateForScope(localConfig);
     await syncTeamUpdatesToLocal(teamConfig, localConfig, state.lastPullRev);
   } catch (e) {
     log.debug(`Pre-push sync skipped: ${(e as Error).message}`);
@@ -589,7 +589,7 @@ async function pushCore(
   // Resources waiting in an unmerged PR are absent from the default branch, so
   // the scan above flags them as new every single time. Without this check each
   // run opens another duplicate PR.
-  const pushState = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+  const pushState = await loadStateForScope(localConfig);
   const pruned = await prunePendingPushes(
     localConfig.repo.localPath,
     pushState.pendingPushes,
@@ -597,7 +597,7 @@ async function pushCore(
   );
   pushState.pendingPushes = pruned.pending;
   if (pruned.changed) {
-    await saveStateForScope(pushState, localConfig.scope, localConfig.projectRoot);
+    await saveStateForScope(pushState, localConfig);
   }
   const pendingPushes = pushState.pendingPushes;
 
@@ -797,7 +797,7 @@ async function pushCore(
     if (!ok) {
       // The branch/PR for earlier groups is already on the remote, so their
       // records must survive this failure or the next run would duplicate them.
-      await saveStateForScope(pushState, localConfig.scope, localConfig.projectRoot);
+      await saveStateForScope(pushState, localConfig);
       process.exitCode = 1;
       return;
     }
@@ -818,7 +818,7 @@ async function pushCore(
       state.pushedEnvVars.push(item.name);
     }
   }
-  await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
+  await saveStateForScope(state, localConfig);
 }
 
 /**

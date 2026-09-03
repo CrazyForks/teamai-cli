@@ -84,10 +84,21 @@ export async function loadLocalConfig(): Promise<LocalConfig | null> {
 }
 
 /**
+ * Serialize a LocalConfig for on-disk storage, dropping runtime-only fields.
+ * `dataHome` is derived from the projectAnchor at runtime and the config file
+ * lives inside that directory, so it must never be persisted (a stale absolute
+ * path would defeat the anchor-derived design and break on another machine).
+ */
+function serializeLocalConfig(config: LocalConfig): string {
+  const { dataHome: _dataHome, ...persisted } = config;
+  return YAML.stringify(persisted);
+}
+
+/**
  * Save the local config
  */
 export async function saveLocalConfig(config: LocalConfig): Promise<void> {
-  await writeFile(expandHome(TEAMAI_CONFIG_PATH), YAML.stringify(config));
+  await writeFile(expandHome(TEAMAI_CONFIG_PATH), serializeLocalConfig(config));
 }
 
 /**
@@ -162,24 +173,24 @@ export async function saveLocalConfigForScope(
   projectRoot?: string,
 ): Promise<void> {
   const configPath = getConfigPath(scope, projectRoot);
-  await writeFile(expandHome(configPath), YAML.stringify(config));
+  await writeFile(expandHome(configPath), serializeLocalConfig(config));
 }
 
 /**
- * Load state for a specific scope.
+ * Load state for a config (reads state.json from its data home).
  */
-export async function loadStateForScope(scope: Scope, projectRoot?: string): Promise<State> {
-  const statePath = getStatePath(scope, projectRoot);
+export async function loadStateForScope(localConfig: LocalConfig): Promise<State> {
+  const statePath = getStatePath(localConfig);
   const raw = await readJson<Record<string, unknown>>(expandHome(statePath));
   if (!raw) return StateSchema.parse({});
   return StateSchema.parse(raw);
 }
 
 /**
- * Save state for a specific scope.
+ * Save state for a config (writes state.json into its data home).
  */
-export async function saveStateForScope(state: State, scope: Scope, projectRoot?: string): Promise<void> {
-  const statePath = getStatePath(scope, projectRoot);
+export async function saveStateForScope(state: State, localConfig: LocalConfig): Promise<void> {
+  const statePath = getStatePath(localConfig);
   await writeJson(expandHome(statePath), state);
 }
 

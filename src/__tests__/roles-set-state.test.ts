@@ -166,8 +166,7 @@ describe('rolesSet — state invalidation', () => {
 
         expect(saveStateForScope).toHaveBeenCalledWith(
             expect.objectContaining({ lastPullRev: null }),
-            'project',
-            '/tmp/my-project',
+            expect.objectContaining({ scope: 'project', projectRoot: '/tmp/my-project' }),
         );
     });
 

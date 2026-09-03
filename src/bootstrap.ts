@@ -168,9 +168,9 @@ export async function bootstrapSelfRepo(
 
     // Invalidate pull cache so the next pull does a full sync.
     try {
-      const state = await loadStateForScope('project', businessRepoRoot);
+      const state = await loadStateForScope(localConfig);
       state.lastPullRev = null;
-      await saveStateForScope(state, 'project', businessRepoRoot);
+      await saveStateForScope(state, localConfig);
     } catch {
       // state may not exist yet
     }
