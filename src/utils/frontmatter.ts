@@ -1,4 +1,5 @@
 import matter from 'gray-matter';
+import { log } from './logger.js';
 
 /** Result of splitting a document into its YAML frontmatter and body. */
 export interface FrontmatterSplit {
@@ -17,6 +18,9 @@ export interface FrontmatterSplit {
  * LF or CRLF line endings, and trailing horizontal whitespace on delimiter lines.
  */
 const FRONTMATTER_BLOCK = /^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/** Matches a leading line that looks like a frontmatter opening delimiter. */
+const OPENING_FENCE = /^﻿?---[ \t]*(?:\r?\n|$)/;
 
 /** Strip a single leading UTF-8 BOM if present. */
 function stripBom(text: string): string {
@@ -40,6 +44,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 export function splitFrontmatter(content: string): FrontmatterSplit {
     const match = content.match(FRONTMATTER_BLOCK);
     if (!match) {
+        if (OPENING_FENCE.test(content)) {
+            log.warn('Frontmatter block has opening "---" but no closing delimiter; metadata will be ignored');
+        }
         return { data: {}, valid: false, body: stripBom(content), raw: '' };
     }
     const rawFull = match[0];
