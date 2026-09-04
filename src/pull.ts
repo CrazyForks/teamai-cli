@@ -1421,8 +1421,12 @@ export async function pull(options: GlobalOptions): Promise<void> {
   }
 
   // 5. Pull cross-team source skills (always — even in project mode), against
-  //    the active scope so deploys land in the right base dir.
-  const sourceConfig = projectConfig ?? activeUserConfig;
+  //    the active scope so deploys land in the right base dir. Use the
+  //    contention-filtered scopes: pullSources re-reads `sources` from the shared
+  //    clone's teamai.yaml and deploys external skills, so a contended scope must
+  //    be excluded here too — otherwise a lock holder's transient push branch
+  //    could sync unmerged source declarations into the workspace.
+  const sourceConfig = reconcileProject ?? reconcileUser;
   if (sourceConfig) {
     try {
       const { pullSources } = await import('./source.js');
