@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { parse as parseYaml } from 'yaml';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
 import { listFiles, pathExists, copyFile, ensureDir, remove, fileContentEqual, getFileMtime, writeFile, readFileSafe } from '../utils/fs.js';
@@ -18,7 +20,7 @@ import {
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
 } from './agent-format.js';
-import type { AgentSpec, ToolName, ReverseResult, ParseResult } from './agent-format.js';
+import type { AgentSpec, ToolName, ReverseResult, ParseResult, MergeResult } from './agent-format.js';
 
 /**
  * Extended ResourceItem for agents — carries merged spec or skip reason
@@ -136,9 +138,38 @@ export class AgentsHandler extends ResourceHandler {
       const hasTeamYaml = await pathExists(teamYamlPath);
       const hasTeamMd = await pathExists(teamMdPath);
 
+      let canonicalSpec: AgentSpec | undefined;
+      if (hasTeamYaml) {
+        const raw = await readFileSafe(teamYamlPath);
+        const parsed = raw === null ? null : parseAgentYaml(raw, `${stem}.yaml`);
+        if (!parsed?.ok) {
+          items.push({ name: stem, type: 'agents', sourcePath: teamYamlPath,
+            relativePath: `agents/${stem}.yaml`, status: 'modified',
+            skipReason: 'cannot read or parse canonical agent YAML' });
+          continue;
+        }
+        // Validation normalizes known fields, but unrelated canonical fields
+        // must survive edits from a tool that cannot represent them.
+        canonicalSpec = { ...(parseYaml(raw!) as Record<string, unknown>), ...parsed.spec };
+        // Compare like with like: native files against a native rendering of
+        // the canonical YAML. Unchanged/untargeted copies must not join a merge.
+        for (const [tool, filePath] of toolFiles) {
+          if (!isKnownTool(tool) || isAgentDisabled(localConfig, tool)
+            || (canonicalSpec.targets && !canonicalSpec.targets.includes(tool))) {
+            toolFiles.delete(tool);
+            continue;
+          }
+          if (await readFileSafe(filePath) === renderForTool(canonicalSpec, tool).content) {
+            toolFiles.delete(tool);
+          }
+        }
+      }
+
       // Check if any local file differs from team copy
       let hasChange = false;
-      if (!hasTeamYaml && !hasTeamMd) {
+      if (hasTeamYaml) {
+        hasChange = toolFiles.size > 0;
+      } else if (!hasTeamMd) {
         hasChange = true; // brand new
       } else {
         for (const [, filePath] of toolFiles) {
@@ -178,26 +209,33 @@ export class AgentsHandler extends ResourceHandler {
       for (const [tool, filePath] of toolFiles) {
         if (!isKnownTool(tool)) continue;
         const content = await readFileSafe(filePath);
-        if (!content) continue;
+        if (!content) {
+          if (canonicalSpec) skipReason = `cannot read edited agent file for ${tool}`;
+          continue;
+        }
 
         const result = reverseByTool(tool, filePath, content);
         if (result.ok) {
           perToolSpecs[tool as ToolName] = result.spec;
         } else {
+          if (canonicalSpec) skipReason = `cannot parse edited agent file for ${tool}: ${result.reason}`;
           log.debug(`Reverse failed for ${stem} from ${tool}: ${result.reason}`);
         }
       }
 
-      if (Object.keys(perToolSpecs).length === 0) {
+      if (!skipReason && Object.keys(perToolSpecs).length === 0) {
         skipReason = `could not reverse-parse any tool's agent file for ${stem}`;
-      } else {
-        const mergeResult = mergeReverseResults(perToolSpecs);
+      } else if (!skipReason) {
+        const mergeResult = canonicalSpec
+          ? mergeCanonicalEdits(canonicalSpec, perToolSpecs)
+          : mergeReverseResults(perToolSpecs);
         if (!mergeResult.ok) {
           const conflictSummary = mergeResult.conflicts
             .map((c) => `${c.field}: ${JSON.stringify(c.values)}`)
             .join('; ');
           skipReason = `conflicting values across tools — ${conflictSummary}`;
         } else {
+          if (canonicalSpec && isDeepStrictEqual(canonicalSpec, mergeResult.spec)) continue;
           items.push({
             name: stem,
             type: 'agents',
@@ -436,6 +474,58 @@ export class AgentsHandler extends ResourceHandler {
 }
 
 // ─── Module-level helpers ──────────────────────────────────────────────────
+
+/** Apply native-file deltas to the canonical spec, never replace it with a
+ * lossy reverse rendering. Compare against each tool's projection so omitted
+ * fields (e.g. Codex tools) and other tools' metadata remain untouched. */
+function mergeCanonicalEdits(
+  canonical: AgentSpec,
+  perTool: Partial<Record<ToolName, AgentSpec>>,
+): MergeResult {
+  const merged = { ...canonical };
+  const extras = { ...canonical.tool_extras };
+  const changes = new Map<string, { value: unknown; apply: () => void }>();
+  const conflicts: Array<{ field: string; values: Record<string, unknown> }> = [];
+  const propose = (key: string, value: unknown, apply: () => void) => {
+    const previous = changes.get(key);
+    if (previous && !isDeepStrictEqual(previous.value, value)) {
+      conflicts.push({ field: key, values: { previous: previous.value, next: value } });
+    } else {
+      changes.set(key, { value, apply });
+    }
+  };
+
+  for (const [tool, edited] of Object.entries(perTool) as Array<[ToolName, AgentSpec]>) {
+    const rendered = renderForTool(canonical, tool);
+    const baseline = reverseByTool(tool, `${canonical.name}${rendered.ext}`, rendered.content);
+    if (!baseline.ok) return { ok: false, conflicts: [{ field: tool, values: { error: baseline.reason } }] };
+    for (const field of ['name', 'description', 'instructions', 'model', 'tools'] as const) {
+      if (isDeepStrictEqual(baseline.spec[field], edited[field])) continue;
+      propose(field, edited[field], () => {
+        const output = merged as unknown as Record<string, unknown>;
+        if (edited[field] === undefined) delete output[field];
+        else output[field] = edited[field];
+      });
+    }
+
+    // These aliases render the base tool's private metadata; other renderers
+    // own their own namespace even when they share a reverse parser.
+    const extrasKey = tool === 'tclaude' ? 'claude' : tool === 'tcodex' ? 'codex' : tool;
+    const before = Object.values(baseline.spec.tool_extras ?? {})[0] ?? {};
+    const after = Object.values(edited.tool_extras ?? {})[0] ?? {};
+    if (!isDeepStrictEqual(before, after)) {
+      propose(`tool_extras.${extrasKey}`, after, () => {
+        if (Object.keys(after).length) extras[extrasKey] = after;
+        else delete extras[extrasKey];
+      });
+    }
+  }
+  if (conflicts.length) return { ok: false, conflicts };
+  for (const change of changes.values()) change.apply();
+  if (Object.keys(extras).length) merged.tool_extras = extras;
+  else delete merged.tool_extras;
+  return { ok: true, spec: merged };
+}
 
 /**
  * Extract agent name stem from a filename.

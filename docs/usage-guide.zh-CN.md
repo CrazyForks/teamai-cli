@@ -1161,6 +1161,8 @@ JoyCode 已作为内置目标支持。Skills、Rules 和 Subagents 分别下发�
 
 JoyCode 规则清理采用保守策略：不在团队规则列表中的本地 `.mdc` 和 `.md` 文件会被保留，只有团队明确记录了删除标记（tombstone）才会清理。这能保护同一目录中的个人规则；缺少删除记录的旧团队副本也会保留，不会猜测其已过期。
 
+对于以 YAML 保存的团队 Agent，push 会将本地文件与对应工具的渲染结果比较，只将真实编辑合并回原始配置。部署范围 `targets`、其他工具的元数据，以及本地格式未输出的字段都会保留。遇到冲突或无法解析的编辑时跳过回写，不会替换团队源文件。
+
 ### Cursor
 
 Cursor 的项目规则必须以 **`.mdc`** 文件形式放在 `.cursor/rules/` 下，且带 YAML frontmatter——放在那里的纯 `.md` 会被 Cursor 直接忽略。因此 teamai 向 Cursor 写规则时用 `<name>.mdc`（其他工具仍写纯 `.md`），并从团队规则派生 frontmatter：

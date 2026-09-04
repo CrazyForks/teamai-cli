@@ -694,6 +694,96 @@ describe('AgentsHandler.pullItem — multi-target', () => {
     expect(await fse.pathExists(path.join(homeDir, '.cursor', 'agents', 'test-agent.md'))).toBe(false);
   });
 
+  it('does not report an untouched JoyCode rendering as modified', async () => {
+    const spec = makeSpec({ targets: ['joycode'], tool_extras: { cursor: { composer_mode: true } } });
+    const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');
+    await fse.writeFile(yamlPath, serializeAgentYaml(spec));
+    await fse.ensureDir(path.join(homeDir, '.joycode'));
+    const config = buildTeamConfig({ joycode: { agents: '.joycode/agents' } });
+    await handler.pullItem({ name: 'test-agent', type: 'agents', sourcePath: yamlPath, relativePath: 'agents/test-agent.yaml' }, config, localConfig);
+
+    expect(await handler.scanLocalForPush(config, localConfig)).toEqual([]);
+  });
+
+  it('merges real JoyCode edits without losing canonical targets or other tools metadata', async () => {
+    const spec = makeSpec({ targets: ['joycode'], model: 'test-model',
+      tool_extras: { joycode: { color: 'blue' }, cursor: { composer_mode: true } } });
+    const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');
+    await fse.writeFile(yamlPath, serializeAgentYaml(spec) + 'custom_setting: keep\n');
+    await fse.ensureDir(path.join(homeDir, '.joycode'));
+    const config = buildTeamConfig({ joycode: { agents: '.joycode/agents' }, codex: { agents: '.codex/agents' } });
+    const item = { name: 'test-agent', type: 'agents' as const, sourcePath: yamlPath, relativePath: 'agents/test-agent.yaml' };
+    await handler.pullItem(item, config, localConfig);
+    const edited = { ...spec, instructions: 'Edited prompt.', tool_extras: { joycode: { color: 'red' } } };
+    await fse.writeFile(path.join(homeDir, '.joycode/agents/test-agent.md'), renderForJoycode(edited).content);
+
+    const candidates = await handler.scanLocalForPush(config, localConfig);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].skipReason).toBeUndefined();
+    await handler.pushItem(candidates[0], config, localConfig);
+    expect(await fse.readFile(yamlPath, 'utf-8')).toContain('custom_setting: keep');
+    const result = parseAgentYaml(await fse.readFile(yamlPath, 'utf-8'), 'test-agent.yaml');
+    expect(result).toEqual({ ok: true, spec: { ...spec, instructions: 'Edited prompt.',
+      tool_extras: { ...spec.tool_extras, joycode: { color: 'red' } } } });
+    await handler.pullItem(item, config, localConfig);
+    expect(await fse.pathExists(path.join(homeDir, '.codex/agents/test-agent.toml'))).toBe(false);
+    expect(await handler.scanLocalForPush(config, localConfig)).toEqual([]);
+  });
+
+  it.each(['unchanged', 'conflicting', 'invalid'] as const)('handles an %s second tool copy without data loss', async (mode) => {
+    const spec = makeSpec({ targets: ['joycode', 'claude'],
+      tool_extras: { cursor: { composer_mode: true } } });
+    const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');
+    const original = serializeAgentYaml(spec);
+    await fse.writeFile(yamlPath, original);
+    await fse.ensureDir(path.join(homeDir, '.joycode'));
+    const config = buildTeamConfig({ joycode: { agents: '.joycode/agents' }, claude: { agents: '.claude/agents' } });
+    await handler.pullItem({ name: 'test-agent', type: 'agents', sourcePath: yamlPath, relativePath: 'agents/test-agent.yaml' }, config, localConfig);
+    await fse.writeFile(path.join(homeDir, '.joycode/agents/test-agent.md'), renderForJoycode({ ...spec, instructions: 'JoyCode edit.' }).content);
+    if (mode !== 'unchanged') {
+      await fse.writeFile(path.join(homeDir, '.claude/agents/test-agent.md'), mode === 'invalid' ? 'Not an agent' : renderForClaude({ ...spec, instructions: 'Conflicting edit.' }).content);
+    }
+    const candidates = await handler.scanLocalForPush(config, localConfig);
+    expect(candidates).toHaveLength(1);
+    if (mode === 'unchanged') {
+      expect(candidates[0].skipReason).toBeUndefined();
+      expect(candidates[0].mergedSpec).toEqual({ ...spec, instructions: 'JoyCode edit.' });
+    } else {
+      expect(candidates[0].skipReason).toBeTruthy();
+      await handler.pushItem(candidates[0], config, localConfig);
+      expect(await fse.readFile(yamlPath, 'utf-8')).toBe(original);
+    }
+  });
+
+  it('preserves canonical metadata while removing optional JoyCode fields intentionally', async () => {
+    const spec = makeSpec({ targets: ['joycode'], model: 'old-model', tools: ['Read'],
+      tool_extras: { joycode: { color: 'blue' }, cursor: { composer_mode: true } } });
+    const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');
+    await fse.writeFile(yamlPath, serializeAgentYaml(spec));
+    await fse.ensureDir(path.join(homeDir, '.joycode/agents'));
+    await fse.writeFile(path.join(homeDir, '.joycode/agents/test-agent.md'), renderForJoycode(makeSpec()).content);
+    const config = buildTeamConfig({ joycode: { agents: '.joycode/agents' } });
+    const candidates = await handler.scanLocalForPush(config, localConfig);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].mergedSpec).toEqual(makeSpec({ targets: ['joycode'], tool_extras: { cursor: { composer_mode: true } } }));
+  });
+
+  it.each(['codex', 'cursor', 'opencode'] as const)('retains canonical fields not rendered by %s', async (tool) => {
+    const spec = makeSpec({ targets: [tool], model: 'canonical-model', tools: ['Read'],
+      tool_extras: { joycode: { color: 'blue' } } });
+    const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');
+    await fse.writeFile(yamlPath, serializeAgentYaml(spec));
+    const config = buildTeamConfig({ [tool]: { agents: `.${tool}/agents` } });
+    await fse.ensureDir(path.join(homeDir, `.${tool}`));
+    await handler.pullItem({ name: 'test-agent', type: 'agents', sourcePath: yamlPath, relativePath: 'agents/test-agent.yaml' }, config, localConfig);
+    expect(await handler.scanLocalForPush(config, localConfig)).toEqual([]);
+    const edited = renderForTool({ ...spec, instructions: 'Changed prompt.' }, tool);
+    await fse.writeFile(path.join(homeDir, `.${tool}/agents/test-agent${edited.ext}`), edited.content);
+    const candidates = await handler.scanLocalForPush(config, localConfig);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].mergedSpec).toEqual({ ...spec, instructions: 'Changed prompt.' });
+  });
+
   it('legacy .md items are copied only to claude/codebuddy/claude-internal', async () => {
     const mdPath = path.join(repoPath, 'agents', 'legacy.md');
     await fse.writeFile(mdPath, '# legacy agent');
