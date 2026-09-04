@@ -1198,30 +1198,37 @@ async function collectClaudemdFiles(
  * it means the user updated the CLI but hooks are still in old format.
  * Reinjects with the current version's hook definitions.
  */
-async function autoMigrateHooksIfNeeded(): Promise<void> {
+async function legacyHooksNeedReinject(): Promise<boolean> {
   const home = getUserHome();
-  // Quick check: read the primary settings file and see if it has hook-dispatch
+  // Quick check: read the primary settings file and see if it has hook-dispatch.
+  // Reads ONLY HOME's settings — never the shared team clone — so it is safe to
+  // call before the scope lock is held.
   const primarySettings = path.join(home, '.claude', 'settings.json');
-  if (!await pathExists(primarySettings)) return;
-
+  if (!await pathExists(primarySettings)) return false;
   const content = await readFileSafe(primarySettings);
-  if (!content) return;
+  if (!content) return false;
+  // If hook-dispatch is already present, no migration needed.
+  if (content.includes('hook-dispatch')) return false;
+  // If no teamai hooks at all (user never ran init), skip.
+  if (!content.includes('teamai')) return false;
+  return true;
+}
 
-  // If hook-dispatch is already present, no migration needed
-  if (content.includes('hook-dispatch')) return;
-
-  // If no teamai hooks at all (user never ran init), skip
-  if (!content.includes('teamai')) return;
-
-  // Old format detected — reinject all tools
+/**
+ * Reinject hooks in the merged dispatch format for a config whose shared clone is
+ * already locked by the caller. MUST run under the scope's sync-lock: it reads
+ * `teamConfig.toolPaths` from the shared clone and writes executable hook config,
+ * so a concurrent push's transient branch must not be visible here.
+ */
+async function reinjectLegacyHooks(localConfig: LocalConfig): Promise<void> {
   log.debug('Auto-migrating hooks to dispatch format...');
-  const { autoDetectInit } = await import('./config.js');
+  const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
+  if (!teamConfig) return;
   const { injectHooksToAllTools } = await import('./hooks.js');
-  const { localConfig, teamConfig } = await autoDetectInit();
   // Reinject where hooks actually live (resolveHookScope), not resolveBaseDir.
-  // The old-format check above reads HOME; for a non-self project scope
-  // resolveBaseDir → <projectRoot>, so reinjecting there never clears HOME's
-  // legacy format and this migration would re-fire on every pull (#370).
+  // The old-format check reads HOME; for a non-self project scope resolveBaseDir
+  // → <projectRoot>, so reinjecting there never clears HOME's legacy format and
+  // this migration would re-fire on every pull (#370).
   const { baseDir } = resolveHookScope(localConfig);
   const disabled = localConfig.disabledAgents;
   let hookFilter = localConfig.enabledAgents;
@@ -1242,14 +1249,10 @@ async function autoMigrateHooksIfNeeded(): Promise<void> {
  * source skills are pulled only for the active project scope.
  */
 export async function pull(options: GlobalOptions): Promise<void> {
-  // 0. Auto-migrate hooks if settings.json has old format (pre-dispatch era).
-  //    This runs on the first session start after a CLI update — the new binary
-  //    detects the old individual hooks and reinjects the merged dispatch format.
-  try {
-    await autoMigrateHooksIfNeeded();
-  } catch {
-    // Non-fatal — pull continues even if hook migration fails
-  }
+  // Whether HOME's settings.json still has the pre-dispatch hook format. Read now
+  // (HOME-only, no shared clone), but the actual reinject runs later under the
+  // scope lock so it never consumes a concurrent push's transient branch config.
+  const needsHookMigration = await legacyHooksNeedReinject().catch(() => false);
 
   // Shared-clone concurrency (issue #374). A git-mode scope's team clone is
   // reachable from every worktree of the repo, so a concurrent pull/push races
@@ -1344,6 +1347,23 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // — the next uncontended pull reconciles and reports normally.
   const reconcileUser = activeUserConfig && !contended.has(activeUserConfig) ? activeUserConfig : null;
   const reconcileProject = projectConfig && !contended.has(projectConfig) ? projectConfig : null;
+
+  // 3.4. Legacy hook-format migration (pre-dispatch era). Runs UNDER the scope
+  // lock (unlike the old step-0 call) against a locked, non-contended scope, so
+  // it reads teamConfig.toolPaths from a stable clone rather than a concurrent
+  // push's transient branch. Skipped when the only active scopes are contended —
+  // the next uncontended pull migrates. self mode reinjects from its own on-disk
+  // .teamai (no external clone) and is covered here too via reconcileProject.
+  if (needsHookMigration) {
+    const migrateScope = reconcileProject ?? reconcileUser;
+    if (migrateScope) {
+      try {
+        await reinjectLegacyHooks(migrateScope);
+      } catch {
+        // Non-fatal — pull continues even if hook migration fails.
+      }
+    }
+  }
 
   // 3.5. Reconcile built-in + team hooks for the active scope only. Runs OUTSIDE
   // pullForScope so it bypasses the "Already synced" rev fast-path — this is
