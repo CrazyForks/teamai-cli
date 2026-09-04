@@ -371,6 +371,14 @@ async function pullForScope(
   policy: {
     resourceTypes?: readonly ResourceType[];
     revisionField?: 'lastPullRev' | 'lastInheritedPullRev';
+    /**
+     * Accumulator: when the shared-clone sync-lock is contended, this scope's
+     * config is added here so the caller excludes it from EVERY later stage that
+     * reads or mutates the shared clone (hooks/MCP/co-author reconcile, usage
+     * report). Skipping only the fetch is not enough — those stages
+     * loadTeamConfig() and reset/pull the same clone the lock holder is using.
+     */
+    contended?: Set<LocalConfig>;
   } = {},
 ): Promise<void> {
   const scopeLabel = localConfig.scope;
@@ -396,8 +404,10 @@ async function pullForScope(
     if (skipped) {
       // The shared clone is locked by a concurrent pull/push; its working tree
       // may be on a transient branch. Skip this scope entirely — do not scan or
-      // deploy from a clone we could not safely snapshot. Idempotent: the next
-      // pull (once the lock frees) syncs normally.
+      // deploy from a clone we could not safely snapshot, and mark it contended
+      // so the caller also skips the later reconcile/report stages that touch the
+      // same clone. Idempotent: the next pull (once the lock frees) syncs normally.
+      policy.contended?.add(localConfig);
       pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);
       return;
     }
@@ -1277,6 +1287,11 @@ export async function pull(options: GlobalOptions): Promise<void> {
     // Non-fatal — pull continues even if hook migration fails
   }
 
+  // Scopes whose shared clone was locked by a concurrent pull/push this run.
+  // pullForScope adds to it on contention; the reconcile/report stages below
+  // exclude these scopes so nothing reads or resets a clone we couldn't snapshot.
+  const contended = new Set<LocalConfig>();
+
   // 1. Detect project scope first. Its presence decides whether user scope is
   //    processed at all (issue #73: project install isolates from user).
   let projectConfig: LocalConfig | null = null;
@@ -1304,10 +1319,11 @@ export async function pull(options: GlobalOptions): Promise<void> {
           await pullForScope(inheritedUserConfig, options, {
             resourceTypes: ['skills', 'rules', 'docs', 'agents'],
             revisionField: 'lastInheritedPullRev',
+            contended,
           });
         } else {
           activeUserConfig = loadedUserConfig;
-          await pullForScope(activeUserConfig, options);
+          await pullForScope(activeUserConfig, options, { contended });
         }
       } else if (inheritUserScope) {
         log.warn('user-scope inheritance is enabled, but user scope is not initialized');
@@ -1322,28 +1338,35 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // 3. Project scope.
   if (projectConfig) {
     try {
-      await pullForScope(projectConfig, options);
+      await pullForScope(projectConfig, options, { contended });
     } catch (e) {
       log.warn(`Project-scope pull error: ${(e as Error).message}`);
     }
   }
+
+  // A scope whose shared clone was locked this run is dropped from every stage
+  // below: they all loadTeamConfig()/reset the same clone, which may be on a
+  // transient branch held by the concurrent writer. Skipping is safe/idempotent
+  // — the next uncontended pull reconciles and reports normally.
+  const reconcileUser = activeUserConfig && !contended.has(activeUserConfig) ? activeUserConfig : null;
+  const reconcileProject = projectConfig && !contended.has(projectConfig) ? projectConfig : null;
 
   // 3.5. Reconcile built-in + team hooks for the active scope only. Runs OUTSIDE
   // pullForScope so it bypasses the "Already synced" rev fast-path — this is
   // what self-heals new built-in hooks and applies hooks.yaml changes on every
   // session start. In project mode user is null, even when safe resources are
   // inherited, so executable hook configuration is never composed implicitly.
-  await reconcileHooksAllScopes(activeUserConfig, projectConfig, options);
+  await reconcileHooksAllScopes(reconcileUser, reconcileProject, options);
 
   // 3.6. Reconcile team MCP servers. Outside pullForScope for the same reason as
   // hooks. User-scope MCP remains isolated in project mode.
-  await reconcileMcpAllScopes(activeUserConfig, projectConfig, options);
+  await reconcileMcpAllScopes(reconcileUser, reconcileProject, options);
 
   // 3.7. Reconcile the team co-author policy (does an AI tool stamp a
   // Co-Authored-By / attribution trailer on its commits?). Outside pullForScope
   // for the same reason as hooks/MCP; write-only, so it self-heals but never
   // strips a trailer once the team drops the policy.
-  await reconcileCoAuthorAllScopes(activeUserConfig, projectConfig, options);
+  await reconcileCoAuthorAllScopes(reconcileUser, reconcileProject, options);
 
   // 4. Auto-report usage data to all active scopes. Events live in a single
   //    shared file (~/.teamai/usage.jsonl), so we report to each repo with
@@ -1355,28 +1378,28 @@ export async function pull(options: GlobalOptions): Promise<void> {
       const { reportUsageToTeam } = await import('./team-push.js');
       const { truncateUsageAfterReport, readUsageEvents } = await import('./usage-tracker.js');
       const targets: Array<{ repoPath: string; username: string; opts: { skipTruncate: true; projectRoot?: string; excludeProjectRoots?: string[]; selfConfig?: LocalConfig } }> = [];
-      if (projectConfig && projectConfig.repo.kind !== 'http') {
+      if (reconcileProject && reconcileProject.repo.kind !== 'http') {
         targets.push({
-          repoPath: projectConfig.repo.localPath,
-          username: projectConfig.username,
+          repoPath: reconcileProject.repo.localPath,
+          username: reconcileProject.username,
           opts: {
             skipTruncate: true,
-            projectRoot: projectConfig.projectRoot,
+            projectRoot: reconcileProject.projectRoot,
             // Self mode routes stats/votes to the teamai-reports orphan branch.
-            ...(projectConfig.repo.kind === 'self' ? { selfConfig: projectConfig } : {}),
+            ...(reconcileProject.repo.kind === 'self' ? { selfConfig: reconcileProject } : {}),
           },
         });
       }
-      if (activeUserConfig && activeUserConfig.repo.kind !== 'http') {
+      if (reconcileUser && reconcileUser.repo.kind !== 'http') {
         targets.push({
-          repoPath: activeUserConfig.repo.localPath,
-          username: activeUserConfig.username,
+          repoPath: reconcileUser.repo.localPath,
+          username: reconcileUser.username,
           opts: {
             skipTruncate: true,
             excludeProjectRoots: projectConfig?.projectRoot ? [projectConfig.projectRoot] : [],
             // Self mode routes stats/votes to the teamai-reports orphan branch —
             // never reset/pull the business repo working tree.
-            ...(activeUserConfig.repo.kind === 'self' ? { selfConfig: activeUserConfig } : {}),
+            ...(reconcileUser.repo.kind === 'self' ? { selfConfig: reconcileUser } : {}),
           },
         });
       }
