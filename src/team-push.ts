@@ -15,8 +15,9 @@ import { withTimeout } from './utils/async.js';
 import { writeFile, readFileSafe, ensureDir, pathExists, readJson, writeJson } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { UserStats, UserInterventionStats, SessionMetrics, TokenUsage, DashboardEvent, LocalConfig } from './types.js';
-import { VOTES_LOCAL_DIR, emptyTokenUsage, addTokenUsage } from './types.js';
+import { VOTES_LOCAL_DIR, emptyTokenUsage, addTokenUsage, SYNC_LOCK_FILENAME } from './types.js';
 import { getUserHome } from './utils/home.js';
+import { acquireLock, releaseLock } from './update.js';
 
 /** Snapshot of already-reported per-session intervention counts (idempotency basis). */
 type ReportedInterventions = Record<string, { interrupt: number; toolReject: number; correction: number }>;
@@ -316,6 +317,19 @@ export async function reportUsageToTeam(
   const selfConfig = options?.selfConfig;
   const selfMode = selfConfig?.repo.kind === 'self';
 
+  // git mode auto-report reset/pull/commit/pushes the SHARED team clone, so it
+  // must hold the same partition sync-lock as pull/push — otherwise it can reset
+  // or checkout a clone another pull/push is mid-operation on. (self mode writes
+  // the reports orphan-branch worktree, coordinated by its own reports-lock.)
+  const syncLock = selfMode ? null : path.join(path.dirname(repoPath), SYNC_LOCK_FILENAME);
+  if (syncLock) {
+    const locked = await acquireLock(syncLock);
+    if (!locked) {
+      log.debug('Skipping report: another pull/push holds the sync lock');
+      return;
+    }
+  }
+
   try {
     const events = await readUsageEvents();
     const filesToPush: string[] = [];
@@ -491,5 +505,7 @@ export async function reportUsageToTeam(
     }
   } catch (e) {
     log.error(`Auto-report skipped: ${(e as Error).message}`);
+  } finally {
+    if (syncLock) await releaseLock(syncLock);
   }
 }

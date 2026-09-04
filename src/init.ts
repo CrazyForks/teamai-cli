@@ -761,6 +761,24 @@ export async function initSelfRepo(options: GlobalOptions & {
   await saveLocalConfigForScope(localConfig, 'project', businessRepoRoot);
   log.success(`Local config saved to ${teamaiHome}/config.yaml`);
 
+  // Retire any stale project partition from an earlier git-mode install: detection
+  // treats an existing partition as authoritative, so leaving it behind would make
+  // this self install unreachable (pull/push would keep hitting the old external
+  // repo). Removing the partition config is enough for detection to fall through to
+  // this self config; the rest of the old partition is left for the user to clean.
+  try {
+    const partition = await resolveProjectDataHome(businessRepoRoot);
+    if (partition !== teamaiHome) {
+      const partitionConfig = path.join(partition, 'config.yaml');
+      if (await pathExists(partitionConfig)) {
+        await remove(partitionConfig);
+        log.info(`Retired stale project partition config at ${partitionConfig}`);
+      }
+    }
+  } catch (e) {
+    log.debug(`partition retire skipped: ${(e as Error).message}`);
+  }
+
   const gitignorePath = path.join(teamaiHome, '.gitignore');
   await writeFile(gitignorePath, buildSelfModeGitignore());
   log.debug('Generated single-repo .teamai/.gitignore');
