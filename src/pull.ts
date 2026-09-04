@@ -55,7 +55,7 @@ interface RolePullContext {
  */
 async function refreshTeamRepo(
   localConfig: LocalConfig,
-): Promise<{ label: string; version: string | null; reportingOnly: boolean; skipped?: boolean }> {
+): Promise<{ label: string; version: string | null; reportingOnly: boolean }> {
   if (localConfig.repo.kind === 'http') {
     const { resolveApiKey } = await import('./api-key.js');
     const apiKey = resolveApiKey();
@@ -91,50 +91,32 @@ async function refreshTeamRepo(
     return { label: 'single-repo (knowledge on main)', version, reportingOnly: false };
   }
 
-  // Guard the shared team clone with the partition sync-lock: the main checkout
-  // and a worktree resolve to the SAME clone, so two `teamai pull`/`push` runs can
-  // race git operations on it. On contention we skip the ENTIRE clone-mutating
-  // section — both the fetch AND flushPendingLearnings (which writes files and
-  // runs git add/commit/push on this clone) — and report the clone's current HEAD
-  // so the deploy step still proceeds from its present state. The lock is held
-  // across the whole section (fetch + flush + rev read) so no other writer can
-  // reset/checkout the tree mid-operation.
-  const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
-  const locked = await acquireLock(syncLock);
-  if (!locked) {
-    // Another pull/push holds the lock. We must NOT read or deploy from the
-    // shared clone now: the holder may have it checked out on a generated push
-    // branch or be mid reset/checkout, so its tree can contain unmerged,
-    // unreviewed content. Signal `skipped` so pullForScope skips this scope's
-    // deploy entirely rather than syncing a transient tree into the workspace.
-    log.debug('[pull] another pull/push holds the sync lock; skipping this scope');
-    return { label: 'sync in progress elsewhere — skipped', version: null, reportingOnly: false, skipped: true };
-  }
+  // The shared team clone is mutated here (git pull + flushPendingLearnings'
+  // add/commit/push). The partition sync-lock that serializes this against a
+  // concurrent pull/push is acquired by the CALLER (pull()) and held across this
+  // scope's ENTIRE clone-consuming lifecycle — fetch, resource scan/deploy, and
+  // the reconcile/source/report stages — so there is no unlocked window in which
+  // another writer could reset/checkout the tree. We must NOT lock here: the lock
+  // is non-reentrant, so re-acquiring it in the same process would fail.
+  const result = await pullRepo(localConfig.repo.localPath);
 
+  // Retry any learnings whose push previously failed (see savePendingLearning).
+  // Best-effort: never let a flush error block the pull.
   try {
-    const result = await pullRepo(localConfig.repo.localPath);
-
-    // Retry any learnings whose push previously failed (see savePendingLearning).
-    // Best-effort: never let a flush error block the pull. Inside the lock because
-    // it writes + commits + pushes the shared clone.
-    try {
-      await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
-    } catch (e) {
-      log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
-    }
-
-    let version: string | null = null;
-    try {
-      version = await getHeadRev(localConfig.repo.localPath);
-    } catch {
-      // Can't resolve a rev → skip the incremental fast-path and do a full sync.
-      log.debug('Rev check failed, proceeding with full sync');
-      version = null;
-    }
-    return { label: result, version, reportingOnly: false };
-  } finally {
-    await releaseLock(syncLock);
+    await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
+  } catch (e) {
+    log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
   }
+
+  let version: string | null = null;
+  try {
+    version = await getHeadRev(localConfig.repo.localPath);
+  } catch {
+    // Can't resolve a rev → skip the incremental fast-path and do a full sync.
+    log.debug('Rev check failed, proceeding with full sync');
+    version = null;
+  }
+  return { label: result, version, reportingOnly: false };
 }
 
 async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {
@@ -371,14 +353,6 @@ async function pullForScope(
   policy: {
     resourceTypes?: readonly ResourceType[];
     revisionField?: 'lastPullRev' | 'lastInheritedPullRev';
-    /**
-     * Accumulator: when the shared-clone sync-lock is contended, this scope's
-     * config is added here so the caller excludes it from EVERY later stage that
-     * reads or mutates the shared clone (hooks/MCP/co-author reconcile, usage
-     * report). Skipping only the fetch is not enough — those stages
-     * loadTeamConfig() and reset/pull the same clone the lock holder is using.
-     */
-    contended?: Set<LocalConfig>;
   } = {},
 ): Promise<void> {
   const scopeLabel = localConfig.scope;
@@ -400,17 +374,7 @@ async function pullForScope(
   // there and must not be injected.
   let reportingOnly = false;
   try {
-    const { label, version, reportingOnly: ro, skipped } = await refreshTeamRepo(localConfig);
-    if (skipped) {
-      // The shared clone is locked by a concurrent pull/push; its working tree
-      // may be on a transient branch. Skip this scope entirely — do not scan or
-      // deploy from a clone we could not safely snapshot, and mark it contended
-      // so the caller also skips the later reconcile/report stages that touch the
-      // same clone. Idempotent: the next pull (once the lock frees) syncs normally.
-      policy.contended?.add(localConfig);
-      pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);
-      return;
-    }
+    const { label, version, reportingOnly: ro } = await refreshTeamRepo(localConfig);
     currentRev = version;
     reportingOnly = ro;
     pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);
@@ -1287,10 +1251,35 @@ export async function pull(options: GlobalOptions): Promise<void> {
     // Non-fatal — pull continues even if hook migration fails
   }
 
-  // Scopes whose shared clone was locked by a concurrent pull/push this run.
-  // pullForScope adds to it on contention; the reconcile/report stages below
-  // exclude these scopes so nothing reads or resets a clone we couldn't snapshot.
+  // Shared-clone concurrency (issue #374). A git-mode scope's team clone is
+  // reachable from every worktree of the repo, so a concurrent pull/push races
+  // git operations on it. We hold the partition sync-lock for the FULL lifecycle
+  // in which this pull consumes that clone — fetch, resource scan/deploy, and the
+  // reconcile/source/report stages — because those later stages also
+  // loadTeamConfig()/reset the same clone. Locks are acquired per git-mode scope
+  // up front and released together in the finally at the end of pull(). A scope
+  // whose lock is held by another process is added to `contended` and excluded
+  // from every clone-consuming stage (idempotent — the next pull syncs it).
   const contended = new Set<LocalConfig>();
+  const heldLocks = new Map<LocalConfig, string>();
+  const lockScope = async (config: LocalConfig): Promise<boolean> => {
+    // Only git-mode has a shared team clone to guard. http has no clone; self
+    // mode writes the reports orphan-branch worktree under its own reports-lock.
+    if (config.repo.kind && config.repo.kind !== 'git') return true;
+    const lock = path.join(getDataHome(config), SYNC_LOCK_FILENAME);
+    if (await acquireLock(lock)) {
+      heldLocks.set(config, lock);
+      return true;
+    }
+    // User-visible: this scope is skipped wholesale (no fetch/deploy/reconcile),
+    // so a plain success line would be misleading. Idempotent — the next pull
+    // once the other process finishes syncs it normally.
+    log.info(`[${config.scope}] sync in progress elsewhere — skipped (another pull/push holds the lock)`);
+    contended.add(config);
+    return false;
+  };
+
+  try {
 
   // 1. Detect project scope first. Its presence decides whether user scope is
   //    processed at all (issue #73: project install isolates from user).
@@ -1316,14 +1305,17 @@ export async function pull(options: GlobalOptions): Promise<void> {
         if (inheritUserScope) {
           inheritedUserConfig = loadedUserConfig;
           log.info('project scope detected, inheriting user-scope resources and knowledge');
-          await pullForScope(inheritedUserConfig, options, {
-            resourceTypes: ['skills', 'rules', 'docs', 'agents'],
-            revisionField: 'lastInheritedPullRev',
-            contended,
-          });
+          if (await lockScope(inheritedUserConfig)) {
+            await pullForScope(inheritedUserConfig, options, {
+              resourceTypes: ['skills', 'rules', 'docs', 'agents'],
+              revisionField: 'lastInheritedPullRev',
+            });
+          }
         } else {
           activeUserConfig = loadedUserConfig;
-          await pullForScope(activeUserConfig, options, { contended });
+          if (await lockScope(activeUserConfig)) {
+            await pullForScope(activeUserConfig, options);
+          }
         }
       } else if (inheritUserScope) {
         log.warn('user-scope inheritance is enabled, but user scope is not initialized');
@@ -1338,7 +1330,9 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // 3. Project scope.
   if (projectConfig) {
     try {
-      await pullForScope(projectConfig, options, { contended });
+      if (await lockScope(projectConfig)) {
+        await pullForScope(projectConfig, options);
+      }
     } catch (e) {
       log.warn(`Project-scope pull error: ${(e as Error).message}`);
     }
@@ -1433,6 +1427,13 @@ export async function pull(options: GlobalOptions): Promise<void> {
       await pullSources(sourceConfig, options);
     } catch (e) {
       log.debug(`Source pull skipped: ${(e as Error).message}`);
+    }
+  }
+  } finally {
+    // Release every partition sync-lock this pull held, now that all
+    // shared-clone reads/writes for every scope are done.
+    for (const lock of heldLocks.values()) {
+      await releaseLock(lock);
     }
   }
 }
