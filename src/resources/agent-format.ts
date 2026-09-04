@@ -5,7 +5,7 @@ import { stringify as stringifyToml, parse as parseToml } from 'smol-toml';
 
 // ─── Tool name type ──────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'joycode' | 'opencode';
+export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'joycode' | 'qoder' | 'opencode';
 
 export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'claude',
@@ -17,6 +17,7 @@ export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'tcodex',
   'cursor',
   'joycode',
+  'qoder',
   'opencode',
 ];
 
@@ -66,6 +67,7 @@ export interface AgentSpec {
     tcodex?: Record<string, unknown>;
     cursor?: Record<string, unknown>;
     joycode?: Record<string, unknown>;
+    qoder?: Record<string, unknown>;
     opencode?: Record<string, unknown>;
   };
   /**
@@ -632,6 +634,7 @@ export function renderForTool(spec: AgentSpec, tool: ToolName): RenderResult {
     case 'tcodex': return renderForCodex(spec);
     case 'cursor': return renderForCursor(spec);
     case 'joycode': return renderForJoycode(spec);
+    case 'qoder': return renderForClaude(spec);
     case 'opencode': return renderForOpencode(spec);
   }
 }

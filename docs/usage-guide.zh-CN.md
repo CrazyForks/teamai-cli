@@ -312,7 +312,7 @@ teamai skill show hai-deploy-test   # 看单个 skill 的来源 / 贡献者 / �
 
 `teamai init` 时已注入 Hooks 到你的 AI 工具中。**每次启动 AI 会话时会自动执行 `teamai pull`**，无需手动操作。在 project scope 下，该 SessionStart hook 会先为当前 Agent 创建项目根目录（例如用 Claude Code 打开仓库时创建 `<project>/.claude`），然后再 pull。
 
-*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 Claude Code、Codex、Cursor、CodeBuddy、WorkBuddy、OpenCode、Hermes、OpenClaw 等。对于暂无 Hooks 支持的工具（如 JoyCode、Gemini CLI 等），无法触发会话启动 Hook，需在终端手动执行 `teamai pull` 同步团队资源。)*
+*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 Claude Code、Codex、Cursor、CodeBuddy、WorkBuddy、Qoder、OpenCode、Hermes、OpenClaw 等。对于暂无 Hooks 支持的工具（如 JoyCode、Gemini CLI 等），无法触发会话启动 Hook，需在终端手动执行 `teamai pull` 同步团队资源。)*
 
 如果需要立即同步，可以手动执行：
 
@@ -596,9 +596,10 @@ servers:
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | 不支持 |
+| qoder | `~/.qoder/settings.json` | `<project>/.qoder/settings.json` |
 | opencode | `~/.config/opencode/opencode.json` | `<project>/opencode.json` |
 
-Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。OpenCode 支持 `stdio`（写成其 `type:"local"` 形态）与 `http`（`type:"remote"`），`sse` 会被跳过，其 server 位于共享 `opencode.json` 的 `mcp` 键下。归属记录在 `~/.teamai/managed-mcp.json`——手动添加的 server 不动；与手写同名则跳过，除非 `--force`。
+Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。Qoder 使用对应作用域 `.qoder/settings.json` 中与 Claude 兼容的 `mcpServers` 格式。OpenCode 支持 `stdio`（写成其 `type:"local"` 形态）与 `http`（`type:"remote"`），`sse` 会被跳过，其 server 位于共享 `opencode.json` 的 `mcp` 键下。归属记录在 `~/.teamai/managed-mcp.json`——手动添加的 server 不动；与手写同名则跳过，除非 `--force`。
 
 **密钥**：在 `mcp.yaml` 里写 `${VAR}`，不要写明文。取值优先来自环境变量，其次是 `env/env.yaml` → `~/.teamai/env`。变量无法解析则跳过并提示。
 
@@ -1180,6 +1181,10 @@ team-repo/
 - **Rules** 会被复制到 `.opencode/rules/`（或 `~/.config/opencode/rules/`），但 OpenCode 不会自动扫描 rules 目录——文件在被引用前是惰性的。因此 teamai 会往 `opencode.json` 的 `instructions` 数组里加一条 `rules/*.md` glob，并在团队最后一条 rule 消失时再把它移除，且只编辑这一个键、不动你自己的 `instructions` 条目。
 - **Hooks** 以 OpenCode *plugin* 形式交付，而非配置文件条目——OpenCode 没有 `hooks` 数组，它会**同时**加载 `~/.config/opencode/plugin/` 和 `<project>/.opencode/plugin/` 下的 JS/TS 插件。两个目录都有插件时会被加载两次，每个事件也就派发两次，因此 teamai 只保留一份：写在用户目录的 `teamai-hooks.ts`，覆盖所有项目；早期布局残留的项目级副本会在下次同步时被删除。这与其他工具一致——它们的 `settings.json` hooks 同样放在 HOME，靠传给 `hook-dispatch` 的 `cwd` 做作用域判断。插件订阅 OpenCode 自己的事件，并 shell 到其他所有工具共用的 `teamai hook-dispatch` 入口。事件映射对齐 Claude 内置集合：`session.created` → session-start、`session.idle` → stop、`chat.message` → prompt-submit、`tool.execute.after` → post-tool-use。插件会转发与其他工具一致的 STDIN 负载（`cwd`、`tool_name`、`tool_input`、`prompt`），并把 OpenCode 的小写工具 id（`skill`、`todowrite`）映射回 handler 注册表期望的 PascalCase matcher。OpenCode 无法把 hook 的 stdout 回注到会话，因此 hooks 只为副作用运行（状态上报 / 同步 / 更新）。注意 OpenCode 会 **await** 它的具名 hook（`chat.message`、`tool.execute.after`），所以这两个事件的派发会短暂等待 `teamai` 子进程后 agent 才继续；错误始终被吞掉，hook 永远不会让会话失败。服务端下发的 agent hook（`teamai-agent-<slug>.ts`）同样装在这个用户级 plugin 目录下。
 - **MCP** server 位于共享 `opencode.json` 的 `mcp` 键下（详见上文 MCP 章节）。
+
+### Qoder
+
+Qoder 已作为内置目标支持。TeamAI 会将 Skills、Rules 和 Subagents 分别下发到 `.qoder/skills/`、`.qoder/rules/` 和 `.qoder/agents/`。Hooks 与 MCP Server 会合并进对应作用域的 `.qoder/settings.json`，并保留用户已有的其他设置；这些路径与 Qoder 的用户级和项目级配置约定一致。
 
 ### JoyCode
 

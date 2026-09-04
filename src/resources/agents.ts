@@ -583,6 +583,8 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromCursor(filePath, content);
     case 'joycode':
       return reverseFromJoycode(filePath, content);
+    case 'qoder':
+      return reverseFromClaude(filePath, content);
     case 'opencode':
       return reverseFromOpencode(filePath, content);
   }

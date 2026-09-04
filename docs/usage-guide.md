@@ -314,7 +314,7 @@ teamai skill show hai-deploy-test   # View a single skill's source / contributor
 
 `teamai init` already injected Hooks into your AI tools. **`teamai pull` runs automatically every time you start an AI session** — no manual action needed. In project scope, that SessionStart hook first creates the current agent's project root (e.g. `<project>/.claude` when Claude Code opens the repo) if it is missing, then pulls.
 
-*(Note: Automatic sync on session start requires an agent that supports lifecycle hooks, such as Claude Code, Codex, Cursor, CodeBuddy, WorkBuddy, OpenCode, Hermes, or OpenClaw. For tools without hooks support such as JoyCode or Gemini CLI, session start hooks do not fire, so you should run `teamai pull` manually to keep resources up to date.)*
+*(Note: Automatic sync on session start requires an agent that supports lifecycle hooks, such as Claude Code, Codex, Cursor, CodeBuddy, WorkBuddy, Qoder, OpenCode, Hermes, or OpenClaw. For tools without hooks support such as JoyCode or Gemini CLI, session start hooks do not fire, so you should run `teamai pull` manually to keep resources up to date.)*
 
 If you need to sync immediately, you can run it manually:
 
@@ -598,9 +598,10 @@ Where each tool's servers land:
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
 | codex | `~/.codex/config.toml` | not supported |
+| qoder | `~/.qoder/settings.json` | `<project>/.qoder/settings.json` |
 | opencode | `~/.config/opencode/opencode.json` | `<project>/opencode.json` |
 
-Codex supports `stdio` and `http`; `sse` is skipped. OpenCode supports `stdio` (written as its `type:"local"` shape) and `http` (`type:"remote"`); `sse` is skipped, and its servers live under the `mcp` key of the shared `opencode.json`. Ownership is tracked in `~/.teamai/managed-mcp.json` — hand-added servers are left alone; name collisions skip unless `--force`.
+Codex supports `stdio` and `http`; `sse` is skipped. Qoder supports the Claude-compatible `mcpServers` format in its scope-specific `.qoder/settings.json`. OpenCode supports `stdio` (written as its `type:"local"` shape) and `http` (`type:"remote"`); `sse` is skipped, and its servers live under the `mcp` key of the shared `opencode.json`. Ownership is tracked in `~/.teamai/managed-mcp.json` — hand-added servers are left alone; name collisions skip unless `--force`.
 
 **Secrets.** Write `${VAR}`, never a literal, in `mcp.yaml`. Values resolve from the environment, then from `env/env.yaml` → `~/.teamai/env`. Unresolved variables skip the server with a hint.
 
@@ -1185,6 +1186,10 @@ team-repo/
 - **Rules** are copied into `.opencode/rules/` (or `~/.config/opencode/rules/`), but OpenCode does not auto-scan a rules directory — the files are inert until referenced. teamai therefore adds a `rules/*.md` glob to the `instructions` array in `opencode.json` and removes it again when the team's last rule goes away, editing only that one key and leaving your own `instructions` entries untouched.
 - **Hooks** are delivered as an OpenCode *plugin*, not a settings-file entry — OpenCode has no `hooks` array; it auto-loads JS/TS plugins from **both** `~/.config/opencode/plugin/` and `<project>/.opencode/plugin/`. A plugin present in both dirs is loaded twice and would dispatch every event twice, so teamai keeps exactly one copy: `teamai-hooks.ts` in the user dir, which covers every project. Any project-scope copy left by an earlier layout is deleted on the next sync. This matches the other tools, whose `settings.json` hooks also live in HOME and gate on the `cwd` handed to `hook-dispatch`. The plugin subscribes to OpenCode's own events and shelling out to the same `teamai hook-dispatch` entry point every other tool uses. The event mapping mirrors the Claude built-in set: `session.created` → session-start, `session.idle` → stop, `chat.message` → prompt-submit, `tool.execute.after` → post-tool-use. The plugin forwards the same STDIN payload other agents send (`cwd`, `tool_name`, `tool_input`, `prompt`), and maps OpenCode's lowercase tool ids (`skill`, `todowrite`) back to the PascalCase matchers the handler registry expects. OpenCode cannot inject a hook's stdout back into the session, so hooks run purely for their side effects (status report / sync / update). Note that OpenCode *awaits* its named hooks (`chat.message`, `tool.execute.after`), so those dispatches briefly wait on the `teamai` subprocess before the agent continues; the errors are always swallowed so a hook can never fail the session. Server-pushed agent hooks (`teamai-agent-<slug>.ts`) install into the same user plugin dir.
 - **MCP** servers live under the `mcp` key of the shared `opencode.json` (see the MCP section above).
+
+### Qoder
+
+Qoder is available as a built-in target. TeamAI deploys skills, rules, and subagents to `.qoder/skills/`, `.qoder/rules/`, and `.qoder/agents/`. Hooks and MCP servers are merged into the scope-specific `.qoder/settings.json`, preserving unrelated user settings. The paths match Qoder's user and project configuration contracts.
 
 ### JoyCode
 
