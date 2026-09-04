@@ -195,6 +195,72 @@ describe('AgentsHandler — Phase 1 push/pull/remove', () => {
     expect(items.find((i) => i.name === 'same')).toBeUndefined();
   });
 
+  it('scanLocalForPush ignores an untouched Codex agent rendered from team YAML', async () => {
+    const codexConfig = buildTeamConfig({
+      codex: { skills: '.codex/skills', agents: '.codex/agents' },
+    });
+    await fse.ensureDir(path.join(homeDir, '.codex', 'agents'));
+
+    const sourcePath = path.join(repoPath, 'agents', 'same.yaml');
+    await fse.writeFile(sourcePath, [
+      'name: same',
+      'description: Unchanged Codex agent',
+      'instructions: Review the current change.',
+      'targets:',
+      '  - codex',
+      '',
+    ].join('\n'));
+
+    await handler.pullItem(
+      {
+        name: 'same',
+        type: 'agents',
+        sourcePath,
+        relativePath: 'agents/same.yaml',
+      },
+      codexConfig,
+      localConfig,
+    );
+
+    const items = await handler.scanLocalForPush(codexConfig, localConfig);
+    expect(items.find((i) => i.name === 'same')).toBeUndefined();
+  });
+
+  it('scanLocalForPush detects edits to a Codex agent rendered from team YAML', async () => {
+    const codexConfig = buildTeamConfig({
+      codex: { skills: '.codex/skills', agents: '.codex/agents' },
+    });
+    const codexAgentsDir = path.join(homeDir, '.codex', 'agents');
+    await fse.ensureDir(codexAgentsDir);
+
+    const sourcePath = path.join(repoPath, 'agents', 'edited.yaml');
+    await fse.writeFile(sourcePath, [
+      'name: edited',
+      'description: Original description',
+      'instructions: Review the current change.',
+      'targets:',
+      '  - codex',
+      '',
+    ].join('\n'));
+
+    await handler.pullItem(
+      {
+        name: 'edited',
+        type: 'agents',
+        sourcePath,
+        relativePath: 'agents/edited.yaml',
+      },
+      codexConfig,
+      localConfig,
+    );
+    const codexPath = path.join(codexAgentsDir, 'edited.toml');
+    const rendered = await fse.readFile(codexPath, 'utf8');
+    await fse.writeFile(codexPath, rendered.replace('Original description', 'Locally edited description'));
+
+    const items = await handler.scanLocalForPush(codexConfig, localConfig);
+    expect(items.find((i) => i.name === 'edited')?.status).toBe('modified');
+  });
+
   it('scanLocalForPush excludes built-in CLI agents (e.g. teamai-recall)', async () => {
     await fse.writeFile(
       path.join(homeDir, '.claude/agents', 'teamai-recall.md'),

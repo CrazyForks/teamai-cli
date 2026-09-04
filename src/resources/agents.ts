@@ -140,9 +140,9 @@ export class AgentsHandler extends ResourceHandler {
       if (!hasTeamYaml && !hasTeamMd) {
         hasChange = true; // brand new
       } else {
-        for (const [, filePath] of toolFiles) {
+        for (const [tool, filePath] of toolFiles) {
           const teamRef = hasTeamYaml ? teamYamlPath : teamMdPath;
-          const equal = await fileContentEqual(filePath, teamRef).catch((err) => {
+          const equal = await agentContentEqual(tool, filePath, teamRef).catch((err) => {
             console.warn(
               `[agents] 比较文件内容失败 ${filePath} vs ${teamRef}: ${err instanceof Error ? err.message : String(err)}`,
             );
@@ -451,6 +451,26 @@ function getAgentStem(filename: string): string | null {
  */
 function isKnownTool(tool: string): tool is ToolName {
   return (ALL_SUPPORTED_TOOLS as string[]).includes(tool);
+}
+
+/**
+ * Compare a tool-native agent with its canonical team-repo definition.
+ * YAML definitions must be rendered first because tools such as Codex use a
+ * different on-disk format (TOML), making a raw byte comparison always differ.
+ */
+async function agentContentEqual(tool: string, localPath: string, teamPath: string): Promise<boolean> {
+  if (!teamPath.endsWith('.yaml') || !isKnownTool(tool)) {
+    return fileContentEqual(localPath, teamPath);
+  }
+
+  const canonicalContent = await readFileSafe(teamPath);
+  const localContent = await readFileSafe(localPath);
+  if (canonicalContent === null || localContent === null) return false;
+
+  const parsed = parseAgentYaml(canonicalContent, path.basename(teamPath));
+  if (!parsed.ok) return false;
+
+  return localContent === renderForTool(parsed.spec, tool).content;
 }
 
 /**
