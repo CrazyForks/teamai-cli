@@ -230,6 +230,11 @@ export const TeamaiConfigSchema = z.object({
     tclaude: { skills: '.tclaude/skills', rules: '.tclaude/rules', settings: '.tclaude/settings.json', claudemd: '.tclaude/CLAUDE.md', agents: '.tclaude/agents', mcp: '.tclaude/.claude.json' },
     tcodex: { skills: '.tcodex/skills', rules: '.tcodex/rules', settings: '.tcodex/hooks.json', agents: '.tcodex/agents' },
     cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json', agents: '.cursor/agents', mcp: '.cursor/mcp.json', mcpProject: '.cursor/mcp.json' },
+    // JoyCode: skills, rules (.mdc), and subagents are synced to .joycode/.
+    // JoyCode currently does not provide a lifecycle hooks system or startup
+    // adapter, so it intentionally has no `settings` path. Hook reconciliation
+    // skips JoyCode cleanly without generating ghost files; users must sync
+    // manually via `teamai pull`.
     joycode: { skills: '.joycode/skills', rules: '.joycode/rules', agents: '.joycode/agents' },
     codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents', mcp: '.codebuddy/mcp.json', mcpProject: '.codebuddy/mcp.json' },
     openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules', claudemd: '.openclaw/workspace/AGENTS.md' },
