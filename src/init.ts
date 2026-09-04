@@ -275,7 +275,7 @@ export async function initHttp(
     log.warn(fallbackReason);
   }
   const teamaiHome = scope === 'project' && projectRoot
-    ? await resolveProjectDataHome(projectRoot)
+    ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
     : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 
@@ -937,7 +937,7 @@ export async function init(options: GlobalOptions & {
     log.warn(fallbackReason);
   }
   const teamaiHome = scope === 'project' && projectRoot
-    ? await resolveProjectDataHome(projectRoot)
+    ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
     : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 

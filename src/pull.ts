@@ -92,40 +92,50 @@ async function refreshTeamRepo(
   }
 
   // Guard the shared team clone with the partition sync-lock: the main checkout
-  // and a worktree can both run `teamai pull` and race `git pull` on one clone.
-  // pull is idempotent, so on contention we skip the fetch and proceed with the
-  // clone's current state (the winner's pull already advanced it).
+  // and a worktree resolve to the SAME clone, so two `teamai pull`/`push` runs can
+  // race git operations on it. On contention we skip the ENTIRE clone-mutating
+  // section — both the fetch AND flushPendingLearnings (which writes files and
+  // runs git add/commit/push on this clone) — and report the clone's current HEAD
+  // so the deploy step still proceeds from its present state. The lock is held
+  // across the whole section (fetch + flush + rev read) so no other writer can
+  // reset/checkout the tree mid-operation.
   const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
-  let result: string;
   const locked = await acquireLock(syncLock);
   if (!locked) {
-    log.debug('[pull] another pull/push holds the sync lock; using the current clone state');
-    result = 'sync in progress elsewhere — skipped fetch';
-  } else {
+    log.debug('[pull] another pull/push holds the sync lock; skipping clone refresh');
+    let heldVersion: string | null = null;
     try {
-      result = await pullRepo(localConfig.repo.localPath);
-    } finally {
-      await releaseLock(syncLock);
+      heldVersion = await getHeadRev(localConfig.repo.localPath);
+    } catch {
+      heldVersion = null;
     }
+    return { label: 'sync in progress elsewhere — skipped', version: heldVersion, reportingOnly: false };
   }
 
-  // Retry any learnings whose push previously failed (see savePendingLearning).
-  // Best-effort: never let a flush error block the pull.
   try {
-    await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
-  } catch (e) {
-    log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
-  }
+    const result = await pullRepo(localConfig.repo.localPath);
 
-  let version: string | null = null;
-  try {
-    version = await getHeadRev(localConfig.repo.localPath);
-  } catch {
-    // Can't resolve a rev → skip the incremental fast-path and do a full sync.
-    log.debug('Rev check failed, proceeding with full sync');
-    version = null;
+    // Retry any learnings whose push previously failed (see savePendingLearning).
+    // Best-effort: never let a flush error block the pull. Inside the lock because
+    // it writes + commits + pushes the shared clone.
+    try {
+      await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
+    } catch (e) {
+      log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
+    }
+
+    let version: string | null = null;
+    try {
+      version = await getHeadRev(localConfig.repo.localPath);
+    } catch {
+      // Can't resolve a rev → skip the incremental fast-path and do a full sync.
+      log.debug('Rev check failed, proceeding with full sync');
+      version = null;
+    }
+    return { label: result, version, reportingOnly: false };
+  } finally {
+    await releaseLock(syncLock);
   }
-  return { label: result, version, reportingOnly: false };
 }
 
 async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {

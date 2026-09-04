@@ -236,30 +236,29 @@ export async function resolveProjectDataHome(projectRoot: string): Promise<strin
 export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | null> {
   const dir = cwd ?? process.cwd();
 
-  // 1. Fast path: legacy layout at <dir>/.teamai (also runs the self-heal
-  //    bootstrap for a freshly-cloned single-repo project).
-  const direct = await readConfigFrom(path.join(dir, '.teamai'), dir, dir);
-  if (direct) return direct;
-
-  // 2/3. Resolve git anchors: partition first, then the workspace-root legacy
-  //      location. resolveAnchors returns null outside a git repo.
+  // Resolve git anchors FIRST so the result never depends on which directory of
+  // the repo we run from (issue #374 review): a repo with both a partition and a
+  // legacy `.teamai/` must resolve to the SAME config whether run from the root
+  // or a subdirectory. resolveAnchors returns null outside a git repo.
   const anchors = await resolveAnchors(dir);
-  if (!anchors) return null;
-
-  const fromPartition = await readConfigFrom(
-    projectDataHome(anchors.projectAnchor),
-    anchors.workspaceRoot,
-  );
-  if (fromPartition) return fromPartition;
-
-  if (anchors.workspaceRoot !== dir) {
+  if (anchors) {
+    // Strict order, independent of cwd: partition (new/migrated) wins, then the
+    // workspace-root legacy `.teamai` (un-migrated install, with self-heal).
+    const fromPartition = await readConfigFrom(
+      projectDataHome(anchors.projectAnchor),
+      anchors.workspaceRoot,
+    );
+    if (fromPartition) return fromPartition;
     return readConfigFrom(
       path.join(anchors.workspaceRoot, '.teamai'),
       anchors.workspaceRoot,
       anchors.workspaceRoot,
     );
   }
-  return null;
+
+  // Not a git repo: fall back to a legacy `.teamai` directly at `dir` (also runs
+  // the self-heal bootstrap for a freshly-cloned single-repo project).
+  return readConfigFrom(path.join(dir, '.teamai'), dir, dir);
 }
 
 /**
