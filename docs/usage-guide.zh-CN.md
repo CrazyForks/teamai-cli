@@ -5,8 +5,6 @@
 > **@tencent/teamai-cli** — AI Agents 的团队协作层
 >
 > **让每个团队通过 AI 持续变得更聪明。** 统一工作方式（Team Execution）、共享团队 Context（Team Context），并把真实 Session 沉淀成团队能力（Team Improvement）。Skills、Rules、Docs、Env、MCP 等会自动同步到 Claude Code、CodeBuddy、Cursor、Codex、OpenCode、Gemini CLI、Windsurf 等工具。
->
-> 产品愿景：[vision.md](../vision.md)。
 
 ---
 

@@ -5,8 +5,6 @@
 > **teamai-cli** — the team collaboration layer for AI agents
 >
 > **Make every team continuously smarter with AI.** Define how agents work (Team Execution), give them team knowledge (Team Context), and turn real sessions into shared capability (Team Improvement). Skills, Rules, Docs, Env, MCP, and more sync automatically to Claude Code, CodeBuddy, Cursor, Codex, OpenCode, Gemini CLI, Windsurf, and others.
->
-> Product vision: [vision.md](../vision.md).
 
 ---
 
