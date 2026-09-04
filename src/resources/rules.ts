@@ -286,6 +286,7 @@ export class RulesHandler extends ResourceHandler {
 
     // 1.5. Clean up stale local rule files not present in team repo
     const teamRuleNames = new Set(rules.map((r) => r.name));
+    const tombstones = await this.readTombstones(localConfig);
     const baseDir = resolveBaseDir(localConfig);
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!toolPath.rules) continue;
@@ -299,6 +300,11 @@ export class RulesHandler extends ResourceHandler {
       for (const localFile of localFiles) {
         const ruleName = ruleStemFromFilename(localFile);
         if (ruleName === null) continue;
+
+        // JoyCode's rules directory is shared with user-authored rules. Absence
+        // from the current team set is not proof of TeamAI ownership (including
+        // legacy .md files). Only explicit team removals authorize cleanup.
+        if (tool === 'joycode' && !tombstones.has(ruleName)) continue;
 
         // `.mdc` tools only read `.mdc`, so any `.md` here is inert leftover from the
         // layout that predates it — removed whether or not the rule is still

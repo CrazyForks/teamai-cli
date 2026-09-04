@@ -743,6 +743,46 @@ describe('RulesHandler — Cursor-compatible .mdc handling', () => {
     expect(items.find((i) => i.name === 'enforced')).toBeUndefined();
   });
 
+  it.each(['user', 'project'] as const)('preserves unrelated JoyCode rules across repeated %s-scope pulls', async (scope) => {
+    localConfig.scope = scope;
+    if (scope === 'project') localConfig.projectRoot = homeDir;
+    await fse.writeFile(path.join(repoPath, 'rules', 'team.md'), 'Team rule.');
+    const personalFiles = ['personal.mdc', 'notes.md', 'nested/private.mdc', 'nested/notes.md'];
+    for (const file of personalFiles) {
+      await fse.outputFile(path.join(homeDir, '.joycode/rules', file), `Personal content: ${file}`);
+    }
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    for (const file of personalFiles) {
+      expect(await fse.readFile(path.join(homeDir, '.joycode/rules', file), 'utf-8'))
+        .toBe(`Personal content: ${file}`);
+    }
+    expect(await fse.readFile(path.join(homeDir, '.joycode/rules/team.mdc'), 'utf-8'))
+      .toContain('Team rule.');
+  });
+
+  it.each(['user', 'project'] as const)('cleans only explicitly removed JoyCode rules in %s scope', async (scope) => {
+    localConfig.scope = scope;
+    if (scope === 'project') localConfig.projectRoot = homeDir;
+    await fse.writeFile(path.join(repoPath, 'rules', 'keep.md'), 'Current team rule.');
+    await fse.writeFile(path.join(repoPath, 'rules', '.removed'), 'nested/removed\n');
+    for (const ext of ['.mdc', '.md']) {
+      await fse.outputFile(path.join(homeDir, '.joycode/rules/nested', `removed${ext}`), 'Former team rule.');
+    }
+    const personalPath = path.join(homeDir, '.joycode/rules/nested/personal.mdc');
+    await fse.outputFile(personalPath, 'Personal rule.');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    for (const ext of ['.mdc', '.md']) {
+      expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/nested', `removed${ext}`))).toBe(false);
+    }
+    expect(await fse.readFile(personalPath, 'utf-8')).toBe('Personal rule.');
+    expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/keep.mdc'))).toBe(true);
+  });
+
   it('detects a genuine edit to a cursor .mdc body as modified', async () => {
     await fse.writeFile(path.join(repoPath, 'rules', 'edit-me.md'), 'Original body.');
     await handler.pullAllRules(teamConfig, localConfig);
