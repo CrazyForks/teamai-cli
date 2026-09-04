@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="470" height="160" viewBox="0 0 470 160" role="img" aria-label="teamai-cli — The team harness for AI agents">
+<svg xmlns="http://www.w3.org/2000/svg" width="470" height="160" viewBox="0 0 470 160" role="img" aria-label="teamai-cli — Make Every Team AI Native">
   <rect x="0.5" y="0.5" width="469" height="159" rx="28" fill="#15161a" stroke="#ffffff" stroke-opacity="0.06"></rect>
   <g transform="translate(40,36) scale(0.91667)">
     <g stroke="#FAFAFB" stroke-width="2.6" stroke-linecap="round" opacity="0.9">
@@ -18,5 +18,5 @@
   <text x="166" y="76" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="46" font-weight="700" letter-spacing="-1.5">
     <tspan fill="#FAFAFB">teamai</tspan><tspan fill="#3D96EA">-cli</tspan>
   </text>
-  <text x="168" y="108" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="14.5" letter-spacing="0.2" fill="#ffffff" fill-opacity="0.5">The team harness for AI agents</text>
+  <text x="168" y="108" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="14.5" letter-spacing="0.2" fill="#ffffff" fill-opacity="0.5">Make Every Team AI Native</text>
 </svg>
