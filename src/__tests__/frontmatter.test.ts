@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
     parseFrontmatter,
     splitFrontmatter,
@@ -6,6 +6,7 @@ import {
     hasFrontmatter,
     stringifyFrontmatter,
 } from '../utils/frontmatter.js';
+import { log } from '../utils/logger.js';
 
 const BOM = '﻿';
 
@@ -154,5 +155,50 @@ describe('stringifyFrontmatter', () => {
     it('produces LF-only output (no CR)', () => {
         const out = stringifyFrontmatter({ name: 'a', description: 'b' }, 'body');
         expect(out.includes('\r')).toBe(false);
+    });
+});
+
+describe('splitFrontmatter – unclosed frontmatter warning', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('warns when opening --- exists but closing --- is missing', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        const result = splitFrontmatter('---\nname: broken\n');
+        expect(warnSpy).toHaveBeenCalledOnce();
+        expect(warnSpy.mock.calls[0][0]).toMatch(/no closing delimiter/);
+        expect(result.data).toEqual({});
+        expect(result.valid).toBe(false);
+    });
+
+    it('warns for BOM-prefixed unclosed frontmatter', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        splitFrontmatter(BOM + '---\nname: broken\n');
+        expect(warnSpy).toHaveBeenCalledOnce();
+    });
+
+    it('warns for CRLF unclosed frontmatter', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        splitFrontmatter('---\r\nname: broken\r\n');
+        expect(warnSpy).toHaveBeenCalledOnce();
+    });
+
+    it('does not warn when no frontmatter at all', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        splitFrontmatter('# just body');
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not warn for valid closed frontmatter', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        splitFrontmatter('---\nname: foo\n---\nbody');
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('warns for --- on its own with no content after', () => {
+        const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        splitFrontmatter('---\n');
+        expect(warnSpy).toHaveBeenCalledOnce();
     });
 });
