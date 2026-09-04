@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/teamai-cli-logo.svg" alt="teamai-cli" width="430">
+  <img src="assets/teamai-cli-logo.svg" alt="teamai-cli">
 </p>
 
-# TeamAI — The team harness for AI agents
+# TeamAI — Make Every Team AI Native
 
 > [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -11,9 +11,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/teamai-cli.svg)](https://www.npmjs.com/package/teamai-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Make every AI coding agent work by the best harness.
-
-Git-native management of skills, rules, MCP, env vars, knowledge base, and more — across Claude Code / Codex / CodeBuddy / WorkBuddy / OpenCode and more.
+TeamAI manages your team's skills, rules, MCP, and knowledge across Claude Code, Codex, CodeBuddy, WorkBuddy, OpenCode, Cursor, and other AI agents.
 
 ## Quick Start
 
@@ -46,15 +44,25 @@ Once initialized, every AI session automatically pulls the latest skills / rules
 
 > **Full usage guide:** [docs/usage-guide.md](docs/usage-guide.md) ([中文版](docs/usage-guide.zh-CN.md)) — covers everything from team creation to day-to-day use.
 
+## Product architecture
+
+**Team Execution × Team Context × Team Improvement**:
+
+| Layer | Job | In this CLI today |
+|-------|-----|-------------------|
+| **Team Execution** | Make every agent work the team's way | `init` / `pull` / `push`, skills, rules, agents, hooks, MCP, env |
+| **Team Context** | Make every agent understand the team | recall, learnings, codebase graph, teamwiki... |
+| **Team Improvement** | Make every execution improve the team | friction-based share-learnings, sessions, digest, dashboard... |
+
 ## Overview
 
 <table>
   <thead>
     <tr>
       <th rowspan="2">Agent</th>
-      <th colspan="7">Harness</th>
-      <th colspan="3">Knowledge Base</th>
-      <th colspan="3">Analytics</th>
+      <th colspan="7">Team Execution</th>
+      <th colspan="3">Team Context</th>
+      <th colspan="3">Team Improvement</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -87,18 +95,9 @@ Team-wide settings an admin configures once and delivers to every member on `tea
 | **Tags** | `teamai tags` | Tag skills / rules so members subscribe to just the tags they need. |
 | **Sources** | `teamai source` | Subscribe to additional skill repos — other teams' public repos, or shared/public repos within your own org; subscribed skills sync automatically on pull. |
 
-### Analytics
+## Team Execution
 
-Insight into how the team actually uses its AI tools:
-
-| Capability | Command | What it shows |
-|------------|---------|---------------|
-| **Usage** | `teamai digest` | Weekly team digest — token usage, conversation volume, and intervention rate. |
-| **Sessions** | `teamai session save` | Privacy-scrubbed per-session summaries (tool sequence, prompt turns, interventions) that feed the digest's Session Highlights. |
-| **Dashboard** | `teamai dashboard` | Web dashboard showing team members' live coding-session status, intervention count, and token usage. |
-| **KB Health** | `teamai dashboard` → KB Health | Built-in dashboard page reporting knowledge-base usage & health — coverage by type, top recalled entries, silent entries, recall trend, author contributions, and a maintenance console. |
-
-## Harness Management & Distribution
+> One Team. One Harness. Every Agent.
 
 TeamAI keeps skills, rules, docs, and hooks in a shared git repo and distributes them to every member's local AI tools through a "push → review & merge → pull" flow — with support for subscribing to other teams' or shared repos' Harness.
 
@@ -177,7 +176,9 @@ teamai install    # Install everything declared by the team
 
 See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
 
-## Knowledge Base
+## Team Context
+
+> Every agent understands how the team works.
 
 Beyond distributing the Harness, TeamAI organizes accumulated team experience and code structure into a searchable knowledge base that the AI recalls automatically when needed.
 
@@ -236,6 +237,19 @@ Edges come from two tracks that run together, with AST results taking precedence
 - **Heuristic track** (all languages, including Java/Rust): regex-based extraction (tagged `code-heuristic`), which also covers languages the AST track does not.
 
 The WASM parser is a pure-JavaScript dependency — no native toolchain is required. If it fails to load for any reason, extraction falls back to the heuristic track and records an `AST_UNAVAILABLE` gap. Set `TEAMAI_SKIP_AST=1` to force heuristic-only extraction.
+
+## Team Improvement
+
+> Every execution makes the entire team smarter.
+
+Insight into how the team actually uses its AI tools, and a starting point for turning session friction into shared skills, rules, and knowledge:
+
+| Capability | Command | What it shows |
+|------------|---------|---------------|
+| **Usage** | `teamai digest` | Weekly team digest — token usage, conversation volume, and intervention rate. |
+| **Sessions** | `teamai session save` | Privacy-scrubbed per-session summaries (tool sequence, prompt turns, interventions) that feed the digest's Session Highlights. |
+| **Dashboard** | `teamai dashboard` | Web dashboard showing team members' live coding-session status, intervention count, and token usage. |
+| **KB Health** | `teamai dashboard` → KB Health | Built-in dashboard page reporting knowledge-base usage & health — coverage by type, top recalled entries, silent entries, recall trend, author contributions, and a maintenance console. |
 
 ## Commands
 

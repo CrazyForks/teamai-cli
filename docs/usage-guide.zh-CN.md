@@ -2,14 +2,17 @@
 
 > [English](usage-guide.md) | [简体中文](usage-guide.zh-CN.md)
 
-> **@tencent/teamai-cli** — 团队 AI 经验共享框架
+> **@tencent/teamai-cli** — AI Agents 的团队协作层
 >
-> 帮助团队统一管理和共享 Skills、Rules、Docs、Env 等资源，自动同步到 Claude Code、CodeBuddy、Cursor、Codex、OpenCode、Gemini CLI、Windsurf 等 AI 编程工具中。
+> **让每个团队通过 AI 持续变得更聪明。** 统一工作方式（Team Execution）、共享团队 Context（Team Context），并把真实 Session 沉淀成团队能力（Team Improvement）。Skills、Rules、Docs、Env、MCP 等会自动同步到 Claude Code、CodeBuddy、Cursor、Codex、OpenCode、Gemini CLI、Windsurf 等工具。
+>
+> 产品愿景：[vision.md](../vision.md)。
 
 ---
 
 ## 目录
 
+- [TeamAI 是什么](#teamai-是什么)
 - [核心概念](#核心概念)
 - [安装](#安装)
 - [管理员初始化](#管理员初始化)
@@ -29,12 +32,31 @@
 
 ---
 
+## TeamAI 是什么
+
+Agent 作为个人工具已经很强，但学到的东西留在个人手里：昨天某位成员的 Agent 摸索出来的结论，今天到不了其他人的 Agent 面前。
+
+TeamAI 的产品是一条闭环，而不是三个独立产品：
+
+| 层 | 要解决的问题 | 在本 CLI 中怎么用 |
+|----|--------------|-------------------|
+| **Team Execution** | 让每个 Agent 按团队的方式工作 | `init` / `pull` / `push` 共享 Harness（skills、rules、agents、hooks、MCP、env） |
+| **Team Context** | 让每个 Agent 理解整个团队 | recall、docs、learnings、代码知识图谱 |
+| **Team Improvement** | 让每一次执行都成为团队能力的积累 | 基于摩擦信号的经验分享、sessions、digest |
+
+**Execute → Understand → Learn → Self-Improve。** 从 Harness 分发起步；Context 与 Improvement 随团队真实使用 Agent 而加深。
+
+---
+
 ## 核心概念
 
 | 概念 | 说明 |
 |------|------|
-| **Team Repo** | 一个 Git 仓库，集中存放团队共享的 Skills / Rules / Docs / Env / Packages |
+| **Team Repo** | 一个 Git 仓库，集中存放团队 Harness 与知识（Skills / Rules / Docs / Env / Packages，以及 learnings、wiki） |
 | **Scope** | 资源安装位置：`project`（当前项目，默认）或 `user`（用户主目录）|
+| **Team Execution** | 一份共享 Harness，分发到每位成员的 Agent |
+| **Team Context** | 可检索的团队知识，避免 Agent 每次 Session 从零理解团队 |
+| **Team Improvement** | 把 Session 摩擦与用量信号转化为新的 Skill、Rule 和知识 |
 | **Skills** | AI 可调用的自定义技能（目录形式，含 `SKILL.md`） |
 | **Rules** | Markdown 格式的团队规范，自动合并到 AI 工具配置中 |
 | **Docs** | 团队共享文档，供 AI 参考 |
@@ -473,6 +495,8 @@ teamai pull
 
 ## 共享团队资源
 
+这是 Team Execution：Skills、Rules 等 Harness 定义一次，经 MR 评审后由 `teamai pull` 分发到每个 Agent。
+
 ### Skills（技能）
 
 ```bash
@@ -594,6 +618,8 @@ teamai mcp remove            # 移除所有 teamai 管理的 server
 ---
 
 ## 知识沉淀与检索
+
+这是 Team Context，也是 Team Improvement 的起点：先记下本次 Session 真正学到的东西，再让下一次 Agent 能检索到。
 
 ### 贡献知识
 

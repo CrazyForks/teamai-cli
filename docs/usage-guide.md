@@ -2,14 +2,17 @@
 
 > [English](usage-guide.md) | [简体中文](usage-guide.zh-CN.md)
 
-> **teamai-cli** — a shared AI experience framework for teams
+> **teamai-cli** — the team collaboration layer for AI agents
 >
-> Helps teams centrally manage and share Skills, Rules, Docs, and Env resources, automatically syncing them to AI coding tools like Claude Code, CodeBuddy, Cursor, Codex, OpenCode, Gemini CLI, and Windsurf.
+> **Make every team continuously smarter with AI.** Define how agents work (Team Execution), give them team knowledge (Team Context), and turn real sessions into shared capability (Team Improvement). Skills, Rules, Docs, Env, MCP, and more sync automatically to Claude Code, CodeBuddy, Cursor, Codex, OpenCode, Gemini CLI, Windsurf, and others.
+>
+> Product vision: [vision.md](../vision.md).
 
 ---
 
 ## Table of Contents
 
+- [What TeamAI is](#what-teamai-is)
 - [Core Concepts](#core-concepts)
 - [Installation](#installation)
 - [Admin Initialization](#admin-initialization)
@@ -30,12 +33,31 @@
 
 ---
 
+## What TeamAI is
+
+Agents are strong as personal tools, but their learning stays personal: what one member's agent worked out yesterday does not reach anyone else's agent today.
+
+TeamAI's product is one loop, not three separate products:
+
+| Layer | Job | What you do in this CLI |
+|-------|-----|-------------------------|
+| **Team Execution** | Make every agent work the team's way | `init` / `pull` / `push` the shared harness (skills, rules, agents, hooks, MCP, env) |
+| **Team Context** | Make every agent understand the team | recall, docs, learnings, codebase graph |
+| **Team Improvement** | Make every execution improve the team | friction-based share-learnings, sessions, digest |
+
+**Execute → Understand → Learn → Self-Improve.** Start with harness distribution; context and improvement grow as the team actually runs agents.
+
+---
+
 ## Core Concepts
 
 | Concept | Description |
 |------|------|
-| **Team Repo** | A Git repository that centrally stores a team's shared Skills / Rules / Docs / Env / Packages |
+| **Team Repo** | A Git repository that centrally stores the team's harness and knowledge (Skills / Rules / Docs / Env / Packages, plus learnings and wiki) |
 | **Scope** | Where resources are installed: `project` (current project, default) or `user` (home directory) |
+| **Team Execution** | One shared harness, distributed to every member's agents |
+| **Team Context** | Searchable team knowledge so agents do not start from zero each session |
+| **Team Improvement** | Session friction and usage signals that become new skills, rules, and knowledge |
 | **Skills** | Custom skills the AI can invoke (a directory containing a `SKILL.md`) |
 | **Rules** | Markdown-formatted team conventions, automatically merged into AI tool configs |
 | **Docs** | Shared team documentation for the AI to reference |
@@ -475,6 +497,8 @@ teamai pull
 
 ## Sharing Team Resources
 
+This is Team Execution: define skills, rules, and other harness once, review via MR, then `teamai pull` delivers them to every agent.
+
 ### Skills
 
 ```bash
@@ -596,6 +620,8 @@ teamai mcp remove            # remove every teamai-managed server
 ---
 
 ## Knowledge Capture & Retrieval
+
+This is Team Context plus the start of Team Improvement: capture what a session actually learned, then let the next agent find it.
 
 ### Contributing knowledge
 
