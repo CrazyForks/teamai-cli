@@ -27,7 +27,7 @@ async function removeRecallArtifacts(teamConfig: TeamaiConfig, localConfig: Loca
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
     // Remove recall rule file
     if (toolPath.rules) {
-      // Cursor's copy is `.mdc`; older layouts also left a `.md` there.
+      // Cursor-compatible copies are `.mdc`; older layouts also left `.md` files.
       const extensions = new Set<string>([ruleFileExtensionForTool(tool), '.md']);
       for (const extension of extensions) {
         const ruleFile = path.join(baseDir, toolPath.rules, `teamai-recall${extension}`);

@@ -664,7 +664,7 @@ describe('RulesHandler.pullAllRules — OpenCode instructions activation', () =>
   });
 });
 
-describe('RulesHandler — Cursor .mdc handling', () => {
+describe('RulesHandler — Cursor-compatible .mdc handling', () => {
   let tmpDir: string;
   let homeDir: string;
   let repoPath: string;
@@ -680,6 +680,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     // Both tools installed so pull targets both dirs.
     await fse.ensureDir(path.join(homeDir, '.claude', 'rules'));
     await fse.ensureDir(path.join(homeDir, '.cursor', 'rules'));
+    await fse.ensureDir(path.join(homeDir, '.joycode', 'rules'));
 
     vi.stubEnv('HOME', homeDir);
     handler = new RulesHandler();
@@ -694,6 +695,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
         cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json' },
+        joycode: { skills: '.joycode/skills', rules: '.joycode/rules' },
       },
     };
 
@@ -711,7 +713,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     await fse.remove(tmpDir);
   });
 
-  it('pull writes .mdc (not .md) with derived frontmatter for cursor', async () => {
+  it('pull writes .mdc (not .md) with derived frontmatter for Cursor and JoyCode', async () => {
     await fse.writeFile(
       path.join(repoPath, 'rules', 'ts-style.md'),
       '---\npaths:\n  - "**/*.ts"\n---\n\nUse named exports.',
@@ -725,6 +727,10 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     const content = await fse.readFile(mdcPath, 'utf-8');
     expect(content).toContain('globs: "**/*.ts"');
     expect(content).toContain('alwaysApply: false');
+    const joycodeMdcPath = path.join(homeDir, '.joycode/rules/ts-style.mdc');
+    expect(await fse.pathExists(joycodeMdcPath)).toBe(true);
+    expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/ts-style.md'))).toBe(false);
+    expect(await fse.readFile(joycodeMdcPath, 'utf-8')).toBe(content);
     // claude still gets a plain .md copy
     expect(await fse.pathExists(path.join(homeDir, '.claude/rules/ts-style.md'))).toBe(true);
   });

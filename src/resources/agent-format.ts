@@ -5,7 +5,7 @@ import { stringify as stringifyToml, parse as parseToml } from 'smol-toml';
 
 // ─── Tool name type ──────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'opencode';
+export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'joycode' | 'opencode';
 
 export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'claude',
@@ -16,6 +16,7 @@ export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'codex-internal',
   'tcodex',
   'cursor',
+  'joycode',
   'opencode',
 ];
 
@@ -64,6 +65,7 @@ export interface AgentSpec {
     'codex-internal'?: Record<string, unknown>;
     tcodex?: Record<string, unknown>;
     cursor?: Record<string, unknown>;
+    joycode?: Record<string, unknown>;
     opencode?: Record<string, unknown>;
   };
   /**
@@ -176,6 +178,18 @@ export function renderForCodebuddy(spec: AgentSpec): RenderResult {
   return {
     ext: agentFileExtensionForTool('codebuddy'),
     content: renderMarkdownAgent(spec, spec.tool_extras?.['codebuddy']),
+  };
+}
+
+/**
+ * Render an AgentSpec for JoyCode.
+ * JoyCode agents use Markdown with YAML frontmatter, matching the common
+ * name/description/instructions representation.
+ */
+export function renderForJoycode(spec: AgentSpec): RenderResult {
+  return {
+    ext: agentFileExtensionForTool('joycode'),
+    content: renderMarkdownAgent(spec, spec.tool_extras?.['joycode']),
   };
 }
 
@@ -369,6 +383,22 @@ export function reverseFromCodebuddy(filePath: string, content: string): Reverse
   // Move extras from 'claude' to 'codebuddy'
   if (spec.tool_extras?.['claude']) {
     spec.tool_extras = { codebuddy: spec.tool_extras['claude'] };
+  }
+  return { ok: true, spec };
+}
+
+/**
+ * Reverse a JoyCode-format .md file into an AgentSpec.
+ * Its common Markdown format matches Claude; private fields are namespaced to
+ * tool_extras.joycode so a pull/push round trip keeps tool-specific metadata.
+ */
+export function reverseFromJoycode(filePath: string, content: string): ReverseResult {
+  const result = reverseFromClaude(filePath, content);
+  if (!result.ok) return result;
+
+  const spec = result.spec;
+  if (spec.tool_extras?.['claude']) {
+    spec.tool_extras = { joycode: spec.tool_extras['claude'] };
   }
   return { ok: true, spec };
 }
@@ -601,6 +631,7 @@ export function renderForTool(spec: AgentSpec, tool: ToolName): RenderResult {
     case 'codex-internal': return renderForCodexInternal(spec);
     case 'tcodex': return renderForCodex(spec);
     case 'cursor': return renderForCursor(spec);
+    case 'joycode': return renderForJoycode(spec);
     case 'opencode': return renderForOpencode(spec);
   }
 }

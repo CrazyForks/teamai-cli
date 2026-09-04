@@ -13,6 +13,7 @@ import {
   reverseFromCodebuddy,
   reverseFromCodex,
   reverseFromCursor,
+  reverseFromJoycode,
   reverseFromOpencode,
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
@@ -301,7 +302,7 @@ export class AgentsHandler extends ResourceHandler {
    * Pull an agent to every installed tool's agents/ directory.
    *
    * New format (.yaml): parses spec, respects spec.targets, renders per-tool native format.
-   * Legacy format (.md): copies .md as-is to claude/claude-internal/codebuddy only.
+   * Legacy format (.md): copies .md as-is to Claude-compatible tools.
    */
   async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
     const agentItem = item as AgentResourceItem;
@@ -399,7 +400,7 @@ export class AgentsHandler extends ResourceHandler {
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   /**
-   * Legacy pull: copies .md as-is to claude/claude-internal/codebuddy.
+   * Legacy pull: copies .md as-is to Claude-compatible tools, including JoyCode.
    */
   private async pullLegacyMd(
     item: ResourceItem,
@@ -407,7 +408,7 @@ export class AgentsHandler extends ResourceHandler {
     baseDir: string,
     localConfig: LocalConfig,
   ): Promise<void> {
-    const legacyTools = new Set(['claude', 'claude-internal', 'tclaude', 'codebuddy']);
+    const legacyTools = new Set(['claude', 'claude-internal', 'tclaude', 'codebuddy', 'joycode']);
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!legacyTools.has(tool)) continue;
@@ -447,7 +448,7 @@ function getAgentStem(filename: string): string | null {
 }
 
 /**
- * Check if a tool name is one of the 6 known agent-capable tools.
+ * Check if a tool name is a known agent-capable tool.
  */
 function isKnownTool(tool: string): tool is ToolName {
   return (ALL_SUPPORTED_TOOLS as string[]).includes(tool);
@@ -470,6 +471,8 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromCodex(filePath, content);
     case 'cursor':
       return reverseFromCursor(filePath, content);
+    case 'joycode':
+      return reverseFromJoycode(filePath, content);
     case 'opencode':
       return reverseFromOpencode(filePath, content);
   }

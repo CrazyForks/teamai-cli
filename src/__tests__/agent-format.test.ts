@@ -28,11 +28,13 @@ import {
   renderForCodex,
   renderForCodexInternal,
   renderForCursor,
+  renderForJoycode,
   renderForOpencode,
   reverseFromClaude,
   reverseFromCodebuddy,
   reverseFromCodex,
   reverseFromCursor,
+  reverseFromJoycode,
   reverseFromOpencode,
   renderForTool,
   mergeReverseResults,
@@ -226,6 +228,35 @@ describe('renderForCursor', () => {
     const spec = makeSpec({ tool_extras: { cursor: { composer_mode: true } } });
     const { content } = renderForCursor(spec);
     expect(content).toContain('composer_mode: true');
+  });
+});
+
+// ─── renderForJoycode ────────────────────────────────────────────────────────
+
+describe('renderForJoycode', () => {
+  it('produces a Markdown agent with common YAML frontmatter', () => {
+    const spec = makeSpec({ tools: ['Bash'], tool_extras: { joycode: { color: 'blue' } } });
+    const { ext, content } = renderForJoycode(spec);
+    expect(ext).toBe('.md');
+    expect(content).toContain('name: test-agent');
+    expect(content).toContain('description: A test agent');
+    expect(content).toContain('- Bash');
+    expect(content).toContain('color: blue');
+    expect(content).toContain('You are a helpful assistant.');
+  });
+
+  it('is available through renderForTool', () => {
+    expect(renderForTool(makeSpec(), 'joycode').ext).toBe('.md');
+  });
+
+  it('round-trips JoyCode-private frontmatter', () => {
+    const content = renderForJoycode(
+      makeSpec({ tool_extras: { joycode: { color: 'blue' } } }),
+    ).content;
+    const result = reverseFromJoycode('/agents/test-agent.md', content);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.tool_extras?.joycode).toEqual({ color: 'blue' });
   });
 });
 
@@ -627,9 +658,9 @@ describe('AgentsHandler.pullItem — multi-target', () => {
     await fse.remove(tmpDir);
   });
 
-  it('deploys only to spec.targets=[claude, codex] with correct extensions', async () => {
+  it('deploys to JoyCode when included in spec.targets', async () => {
     const spec: AgentSpec = makeSpec({
-      targets: ['claude', 'codex'] as ToolName[],
+      targets: ['claude', 'codex', 'joycode'] as ToolName[],
       model: 'claude-haiku',
     });
     const yamlContent = serializeAgentYaml(spec);
@@ -638,11 +669,13 @@ describe('AgentsHandler.pullItem — multi-target', () => {
 
     // Create .codex/agents directory (marks codex as installed)
     await fse.ensureDir(path.join(homeDir, '.codex', 'agents'));
+    await fse.ensureDir(path.join(homeDir, '.joycode', 'agents'));
 
     const teamConfig = buildTeamConfig({
       claude: { skills: '.claude/skills', agents: '.claude/agents' },
       codex: { skills: '.codex/skills', agents: '.codex/agents' },
       cursor: { skills: '.cursor/skills', agents: '.cursor/agents' },
+      joycode: { skills: '.joycode/skills', agents: '.joycode/agents' },
     });
 
     await handler.pullItem(
@@ -655,6 +688,8 @@ describe('AgentsHandler.pullItem — multi-target', () => {
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'agents', 'test-agent.md'))).toBe(true);
     // codex: .toml
     expect(await fse.pathExists(path.join(homeDir, '.codex', 'agents', 'test-agent.toml'))).toBe(true);
+    // joycode: .md
+    expect(await fse.pathExists(path.join(homeDir, '.joycode', 'agents', 'test-agent.md'))).toBe(true);
     // cursor: not in targets, should not be created
     expect(await fse.pathExists(path.join(homeDir, '.cursor', 'agents', 'test-agent.md'))).toBe(false);
   });

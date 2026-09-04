@@ -2,9 +2,9 @@
  * Per-tool on-disk format for rule files.
  *
  * The team repo always stores rules as tool-neutral `<name>.md`. Most tools take
- * a verbatim `.md` copy, but Cursor only reads `.cursor/rules/*.mdc` — a plain
- * `.md` placed there is silently ignored — so its copies carry the `.mdc`
- * extension and machine-derived frontmatter (see `./cursor-mdc.ts`).
+ * a verbatim `.md` copy, but Cursor and JoyCode use `.mdc` rules — so their
+ * copies carry the `.mdc` extension and machine-derived frontmatter (see
+ * `./cursor-mdc.ts`).
  *
  * This module is the single place that decision lives, mirroring
  * `agentFileExtensionForTool` in `./agent-format.ts`. Every site that writes,
@@ -12,14 +12,16 @@
  * new per-tool extension never has to be re-discovered call site by call site.
  */
 
+const CURSOR_MDC_RULE_TOOLS = new Set(['cursor', 'joycode']);
+
 /** Extension teamai writes rules with for a given tool. */
 export function ruleFileExtensionForTool(tool: string): '.md' | '.mdc' {
-  return tool === 'cursor' ? '.mdc' : '.md';
+  return usesCursorMdcRules(tool) ? '.mdc' : '.md';
 }
 
-/** True when the tool stores rules in Cursor's `.mdc` format. */
+/** True when the tool stores rules in Cursor-compatible `.mdc` format. */
 export function usesCursorMdcRules(tool: string): boolean {
-  return tool === 'cursor';
+  return CURSOR_MDC_RULE_TOOLS.has(tool);
 }
 
 /**
@@ -42,8 +44,8 @@ export function ruleStemFromFilename(filename: string): string | null {
 }
 
 /**
- * True when `filename` is a copy left in a Cursor rules directory by an older
- * teamai layout: Cursor never reads `.md` there, so such a file is inert
+ * True when `filename` is a copy left in an `.mdc` rules directory by an older
+ * teamai layout: the target tool never reads `.md` there, so such a file is inert
  * leftover rather than an active rule.
  */
 export function isLegacyCursorRuleFile(tool: string, filename: string): boolean {

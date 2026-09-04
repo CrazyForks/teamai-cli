@@ -182,7 +182,7 @@ teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
 
 **选择启用哪些 AI 工具。** 单仓模式会在你的仓库里为每个工具创建一个目录（如 `.claude/`、`.codex/`）—— 建好 skills 目录、注入 teamai hooks,并把该工具的 settings 提交到 main,让队友 clone 后即可获得。由你决定启用哪些工具:
 
-- **`--agent <name...>`** —— 显式列表,可重复或逗号分隔:`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。支持的 id:`claude`、`codex`、`cursor`、`codebuddy`、`workbuddy`、`dsh`(DeepSeek Harness)。
+- **`--agent <name...>`** —— 显式列表,可重复或逗号分隔:`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。支持的 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`dsh`（DeepSeek Harness）。
 - **交互式（无 `--agent`、有终端）** —— teamai 弹出多选列表。第 1 项是 **Auto**,会列出你本机已安装的 AI 工具（`~/.claude`、`~/.codex`……）并作为回车默认项;其余各项是具体工具。Auto 与具体工具可以组合勾选。
 - **非交互（无 `--agent`、无终端 —— CI、hook、clone 时自愈 bootstrap）** —— teamai 会按你本机 home 目录下已装的工具（`~/.claude`、`~/.codex`……）来建。若一个都没检测到,则什么都不建（你仍拿到知识,可稍后运行 `teamai init .` 再选工具）。
 
@@ -1154,6 +1154,10 @@ team-repo/
 - **Rules** 会被复制到 `.opencode/rules/`（或 `~/.config/opencode/rules/`），但 OpenCode 不会自动扫描 rules 目录——文件在被引用前是惰性的。因此 teamai 会往 `opencode.json` 的 `instructions` 数组里加一条 `rules/*.md` glob，并在团队最后一条 rule 消失时再把它移除，且只编辑这一个键、不动你自己的 `instructions` 条目。
 - **Hooks** 以 OpenCode *plugin* 形式交付，而非配置文件条目——OpenCode 没有 `hooks` 数组，它会**同时**加载 `~/.config/opencode/plugin/` 和 `<project>/.opencode/plugin/` 下的 JS/TS 插件。两个目录都有插件时会被加载两次，每个事件也就派发两次，因此 teamai 只保留一份：写在用户目录的 `teamai-hooks.ts`，覆盖所有项目；早期布局残留的项目级副本会在下次同步时被删除。这与其他工具一致——它们的 `settings.json` hooks 同样放在 HOME，靠传给 `hook-dispatch` 的 `cwd` 做作用域判断。插件订阅 OpenCode 自己的事件，并 shell 到其他所有工具共用的 `teamai hook-dispatch` 入口。事件映射对齐 Claude 内置集合：`session.created` → session-start、`session.idle` → stop、`chat.message` → prompt-submit、`tool.execute.after` → post-tool-use。插件会转发与其他工具一致的 STDIN 负载（`cwd`、`tool_name`、`tool_input`、`prompt`），并把 OpenCode 的小写工具 id（`skill`、`todowrite`）映射回 handler 注册表期望的 PascalCase matcher。OpenCode 无法把 hook 的 stdout 回注到会话，因此 hooks 只为副作用运行（状态上报 / 同步 / 更新）。注意 OpenCode 会 **await** 它的具名 hook（`chat.message`、`tool.execute.after`），所以这两个事件的派发会短暂等待 `teamai` 子进程后 agent 才继续；错误始终被吞掉，hook 永远不会让会话失败。服务端下发的 agent hook（`teamai-agent-<slug>.ts`）同样装在这个用户级 plugin 目录下。
 - **MCP** server 位于共享 `opencode.json` 的 `mcp` 键下（详见上文 MCP 章节）。
+
+### JoyCode
+
+JoyCode 已作为内置目标支持。Skills、Rules 和 Subagents 分别下发到 `.joycode/skills/`、`.joycode/rules/` 和 `.joycode/agents/`。Rules 使用与 Cursor 兼容的 `.mdc` 格式，包括下文所述的派生 frontmatter 和仅正文往返同步；Subagents 使用带 YAML frontmatter 的 Markdown 文件。
 
 ### Cursor
 
