@@ -14,14 +14,16 @@ export interface MaintenancePaths {
  *
  * In self mode, knowledge remains on the business repository's main branch,
  * while votes live in the teamai-reports worktree. Other repository kinds keep
- * both data sets under localConfig.repo.localPath.
+ * both data sets under localConfig.repo.localPath. Maintenance is a report
+ * reader, so a cold start may create its local cache but never publishes a new
+ * reports branch as a side effect.
  */
 export async function resolveMaintenancePaths(
   localConfig: LocalConfig,
 ): Promise<MaintenancePaths> {
   if (isSelfMode(localConfig)) {
-    const { ensureReportsWorktree } = await import('../utils/reports-branch.js');
-    await ensureReportsWorktree(localConfig);
+    const { refreshReportsWorktree } = await import('../utils/reports-branch.js');
+    await refreshReportsWorktree(localConfig, { pushIfCreated: false });
   }
 
   const repoPath = getKnowledgeDir(localConfig);

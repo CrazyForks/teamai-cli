@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LocalConfig } from '../types.js';
 import { REPORTS_WORKTREE_DIRNAME } from '../types.js';
 import { resolveMaintenancePaths } from '../maintenance/paths.js';
-import { ensureReportsWorktree } from '../utils/reports-branch.js';
+import { refreshReportsWorktree } from '../utils/reports-branch.js';
 
 vi.mock('../utils/reports-branch.js', () => ({
-  ensureReportsWorktree: vi.fn(),
+  refreshReportsWorktree: vi.fn(),
 }));
 
 function makeConfig(kind: 'git' | 'self'): LocalConfig {
@@ -31,9 +31,7 @@ function makeConfig(kind: 'git' | 'self'): LocalConfig {
 
 describe('resolveMaintenancePaths', () => {
   beforeEach(() => {
-    vi.mocked(ensureReportsWorktree).mockReset().mockResolvedValue(
-      '/workspace/project/.teamai/reports-wt',
-    );
+    vi.mocked(refreshReportsWorktree).mockReset().mockResolvedValue();
   });
 
   it('reads self-mode votes from the reports worktree', async () => {
@@ -48,8 +46,8 @@ describe('resolveMaintenancePaths', () => {
       ),
       learningsDir: '/workspace/project/.teamai/learnings',
     });
-    expect(ensureReportsWorktree).toHaveBeenCalledOnce();
-    expect(ensureReportsWorktree).toHaveBeenCalledWith(config);
+    expect(refreshReportsWorktree).toHaveBeenCalledOnce();
+    expect(refreshReportsWorktree).toHaveBeenCalledWith(config, { pushIfCreated: false });
   });
 
   it('keeps knowledge and votes together for standalone team repos', async () => {
@@ -60,6 +58,6 @@ describe('resolveMaintenancePaths', () => {
       votesDir: '/home/alice/.teamai/team-repo/votes',
       learningsDir: '/home/alice/.teamai/team-repo/learnings',
     });
-    expect(ensureReportsWorktree).not.toHaveBeenCalled();
+    expect(refreshReportsWorktree).not.toHaveBeenCalled();
   });
 });
