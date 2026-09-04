@@ -664,7 +664,7 @@ describe('RulesHandler.pullAllRules — OpenCode instructions activation', () =>
   });
 });
 
-describe('RulesHandler — Cursor .mdc handling', () => {
+describe('RulesHandler — Cursor-compatible .mdc handling', () => {
   let tmpDir: string;
   let homeDir: string;
   let repoPath: string;
@@ -680,6 +680,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     // Both tools installed so pull targets both dirs.
     await fse.ensureDir(path.join(homeDir, '.claude', 'rules'));
     await fse.ensureDir(path.join(homeDir, '.cursor', 'rules'));
+    await fse.ensureDir(path.join(homeDir, '.joycode', 'rules'));
 
     vi.stubEnv('HOME', homeDir);
     handler = new RulesHandler();
@@ -694,6 +695,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
         cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json' },
+        joycode: { skills: '.joycode/skills', rules: '.joycode/rules' },
       },
     };
 
@@ -711,7 +713,7 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     await fse.remove(tmpDir);
   });
 
-  it('pull writes .mdc (not .md) with derived frontmatter for cursor', async () => {
+  it('pull writes .mdc (not .md) with derived frontmatter for Cursor and JoyCode', async () => {
     await fse.writeFile(
       path.join(repoPath, 'rules', 'ts-style.md'),
       '---\npaths:\n  - "**/*.ts"\n---\n\nUse named exports.',
@@ -725,6 +727,10 @@ describe('RulesHandler — Cursor .mdc handling', () => {
     const content = await fse.readFile(mdcPath, 'utf-8');
     expect(content).toContain('globs: "**/*.ts"');
     expect(content).toContain('alwaysApply: false');
+    const joycodeMdcPath = path.join(homeDir, '.joycode/rules/ts-style.mdc');
+    expect(await fse.pathExists(joycodeMdcPath)).toBe(true);
+    expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/ts-style.md'))).toBe(false);
+    expect(await fse.readFile(joycodeMdcPath, 'utf-8')).toBe(content);
     // claude still gets a plain .md copy
     expect(await fse.pathExists(path.join(homeDir, '.claude/rules/ts-style.md'))).toBe(true);
   });
@@ -735,6 +741,46 @@ describe('RulesHandler — Cursor .mdc handling', () => {
 
     const items = await handler.scanLocalForPush(teamConfig, localConfig);
     expect(items.find((i) => i.name === 'enforced')).toBeUndefined();
+  });
+
+  it.each(['user', 'project'] as const)('preserves unrelated JoyCode rules across repeated %s-scope pulls', async (scope) => {
+    localConfig.scope = scope;
+    if (scope === 'project') localConfig.projectRoot = homeDir;
+    await fse.writeFile(path.join(repoPath, 'rules', 'team.md'), 'Team rule.');
+    const personalFiles = ['personal.mdc', 'notes.md', 'nested/private.mdc', 'nested/notes.md'];
+    for (const file of personalFiles) {
+      await fse.outputFile(path.join(homeDir, '.joycode/rules', file), `Personal content: ${file}`);
+    }
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    for (const file of personalFiles) {
+      expect(await fse.readFile(path.join(homeDir, '.joycode/rules', file), 'utf-8'))
+        .toBe(`Personal content: ${file}`);
+    }
+    expect(await fse.readFile(path.join(homeDir, '.joycode/rules/team.mdc'), 'utf-8'))
+      .toContain('Team rule.');
+  });
+
+  it.each(['user', 'project'] as const)('cleans only explicitly removed JoyCode rules in %s scope', async (scope) => {
+    localConfig.scope = scope;
+    if (scope === 'project') localConfig.projectRoot = homeDir;
+    await fse.writeFile(path.join(repoPath, 'rules', 'keep.md'), 'Current team rule.');
+    await fse.writeFile(path.join(repoPath, 'rules', '.removed'), 'nested/removed\n');
+    for (const ext of ['.mdc', '.md']) {
+      await fse.outputFile(path.join(homeDir, '.joycode/rules/nested', `removed${ext}`), 'Former team rule.');
+    }
+    const personalPath = path.join(homeDir, '.joycode/rules/nested/personal.mdc');
+    await fse.outputFile(personalPath, 'Personal rule.');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    for (const ext of ['.mdc', '.md']) {
+      expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/nested', `removed${ext}`))).toBe(false);
+    }
+    expect(await fse.readFile(personalPath, 'utf-8')).toBe('Personal rule.');
+    expect(await fse.pathExists(path.join(homeDir, '.joycode/rules/keep.mdc'))).toBe(true);
   });
 
   it('detects a genuine edit to a cursor .mdc body as modified', async () => {

@@ -74,12 +74,12 @@ async function syncRulesToLocal(
     const rulesDir = path.join(baseDir, toolPath.rules);
     if (!await pathExists(rulesDir)) continue;
 
-    // Cursor's copies are `.mdc` with derived frontmatter; every other tool's
-    // are verbatim `.md`. Matching only `.md` here would skip Cursor entirely,
+    // Cursor-compatible copies are `.mdc` with derived frontmatter; every other
+    // tool's are verbatim `.md`. Matching only `.md` would skip `.mdc` tools,
     // leaving a stale copy that push then reports as "modified" and sends
     // upstream — silently reverting the teammate's update.
     const ext = ruleFileExtensionForTool(tool);
-    const isCursor = usesCursorMdcRules(tool);
+    const isMdcTool = usesCursorMdcRules(tool);
 
     const files = await listFilesRecursive(rulesDir);
     for (const file of files) {
@@ -94,7 +94,7 @@ async function syncRulesToLocal(
 
       // Only process files that exist in both places but differ
       if (!await pathExists(teamFilePath)) continue;
-      if (isCursor) {
+      if (isMdcTool) {
         const localRaw = await readFileSafe(localFilePath);
         const teamRaw = await readFileSafe(teamFilePath);
         if (localRaw === null || teamRaw === null) continue;

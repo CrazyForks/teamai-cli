@@ -611,7 +611,7 @@ async function pullForScope(
         if (!await ResourceHandler.isToolInstalled(dir, baseDir)) continue;
         if (isAgentDisabled(localConfig, tool)) continue;
 
-        // Rules carry a per-tool extension (Cursor uses `.mdc`), and Cursor dirs
+        // Rules carry a per-tool extension (`.mdc` for compatible tools), and those dirs
         // may still hold a `.md` copy from the layout that predates it, so a
         // tombstoned rule is cleaned up under every extension it may wear.
         const extensions = type === 'rules'

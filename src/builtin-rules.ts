@@ -74,9 +74,8 @@ export async function deployBuiltinRules(
         try {
             await ensureDir(rulesDir);
 
-            // Deploy current built-in rules. Cursor only reads `.cursor/rules/*.mdc`
-            // — a plain `.md` there is silently ignored — so its copy carries the
-            // `.mdc` extension and derived frontmatter, same as team rules.
+            // Deploy current built-in rules. Cursor-compatible tools use `.mdc`
+            // with derived frontmatter; every other tool gets canonical `.md`.
             const ext = ruleFileExtensionForTool(tool);
             for (const rule of builtinRules) {
                 const destFile = path.join(rulesDir, `${rule.name}${ext}`);
@@ -86,7 +85,7 @@ export async function deployBuiltinRules(
                 await writeFile(destFile, content);
                 log.debug(`Deployed built-in rule ${rule.name} → ${tool}`);
 
-                // Drop the `.md` copy an older layout left in a Cursor rules dir.
+                // Drop the `.md` copy an older layout left in an `.mdc` rules dir.
                 if (ext !== '.md') {
                     try {
                         await fs.unlink(path.join(rulesDir, `${rule.name}.md`));
@@ -168,4 +167,3 @@ teamai-recall subagent 的返回里已列出本次检索到的候选 doc-id（�
 一个都没用到就留空：\`<!-- teamai:referenced-doc-ids: [] -->\`。
 若直接用 \`teamai recall\` 命令（未走 subagent），从召回结果的 File 路径推出 doc-id 自行填入。
 `;
-
