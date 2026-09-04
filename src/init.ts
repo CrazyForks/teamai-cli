@@ -1,7 +1,7 @@
 import YAML from 'yaml';
 import fs from 'node:fs';
 import path from 'node:path';
-import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConfigForScope, loadStateForScope, saveStateForScope } from './config.js';
+import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConfigForScope, loadStateForScope, saveStateForScope, resolveProjectDataHome } from './config.js';
 import { reconcileTeamHooksForConfig } from './hooks.js';
 import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
@@ -274,7 +274,9 @@ export async function initHttp(
   if (fallbackReason) {
     log.warn(fallbackReason);
   }
-  const teamaiHome = getTeamaiHome(scope, projectRoot);
+  const teamaiHome = scope === 'project' && projectRoot
+    ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
+    : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 
   if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
@@ -282,7 +284,7 @@ export async function initHttp(
   }
 
   // Re-init guard
-  const existingConfigPath = getConfigPath(scope, projectRoot);
+  const existingConfigPath = path.join(teamaiHome, 'config.yaml');
   if (await pathExists(existingConfigPath) && !options.force) {
     const confirmed = await askConfirmation(`teamai already initialized at ${existingConfigPath}. Overwrite? [y/N] `);
     if (!confirmed) {
@@ -325,6 +327,7 @@ export async function initHttp(
     scope,
     projectRoot,
     additionalRoles: [],
+    ...(scope === 'project' ? { dataHome: teamaiHome } : {}),
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
   try {
@@ -758,6 +761,24 @@ export async function initSelfRepo(options: GlobalOptions & {
   await saveLocalConfigForScope(localConfig, 'project', businessRepoRoot);
   log.success(`Local config saved to ${teamaiHome}/config.yaml`);
 
+  // Retire any stale project partition from an earlier git-mode install: detection
+  // treats an existing partition as authoritative, so leaving it behind would make
+  // this self install unreachable (pull/push would keep hitting the old external
+  // repo). Removing the partition config is enough for detection to fall through to
+  // this self config; the rest of the old partition is left for the user to clean.
+  try {
+    const partition = await resolveProjectDataHome(businessRepoRoot);
+    if (partition !== teamaiHome) {
+      const partitionConfig = path.join(partition, 'config.yaml');
+      if (await pathExists(partitionConfig)) {
+        await remove(partitionConfig);
+        log.info(`Retired stale project partition config at ${partitionConfig}`);
+      }
+    }
+  } catch (e) {
+    log.debug(`partition retire skipped: ${(e as Error).message}`);
+  }
+
   const gitignorePath = path.join(teamaiHome, '.gitignore');
   await writeFile(gitignorePath, buildSelfModeGitignore());
   log.debug('Generated single-repo .teamai/.gitignore');
@@ -933,7 +954,9 @@ export async function init(options: GlobalOptions & {
   if (fallbackReason) {
     log.warn(fallbackReason);
   }
-  const teamaiHome = getTeamaiHome(scope, projectRoot);
+  const teamaiHome = scope === 'project' && projectRoot
+    ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
+    : getTeamaiHome(scope, projectRoot);
   printScopeSummary(scope, projectRoot, explicit);
 
   if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
@@ -941,7 +964,7 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 0.5: Re-init guard — warn if config already exists
-  const existingConfigPath = getConfigPath(scope, projectRoot);
+  const existingConfigPath = path.join(teamaiHome, 'config.yaml');
   if (await pathExists(existingConfigPath)) {
     log.warn(`teamai is already initialized for ${scope} scope at ${existingConfigPath}`);
     if (options.force) {
@@ -1226,6 +1249,7 @@ export async function init(options: GlobalOptions & {
     scope,
     projectRoot,
     additionalRoles: [],
+    ...(scope === 'project' ? { dataHome: teamaiHome } : {}),
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
 

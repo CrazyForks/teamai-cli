@@ -13,9 +13,11 @@ import {
   getTeamaiHome,
   getConfigPath,
   getStatePath,
+  getDataHome,
 } from './types.js';
 import { readFileSafe, readJson, writeFile, writeJson, expandHome, pathExists } from './utils/fs.js';
 import { resolveAnchors } from './utils/git.js';
+import { projectDataHome } from './utils/partition.js';
 import { log } from './utils/logger.js';
 import { loadRolesManifest } from './roles.js';
 
@@ -136,28 +138,30 @@ export async function requireInit(): Promise<{ localConfig: LocalConfig; teamCon
 
 /**
  * Load a LocalConfig for a specific scope.
- * - 'user' → reads ~/.teamai/config.yaml (same as loadLocalConfig)
- * - 'project' → reads <projectRoot>/.teamai/config.yaml
+ * - 'user' → reads ~/.teamai/config.yaml
+ * - 'project' → partition-aware double-read via detectProjectConfig(projectRoot):
+ *   tries `~/.teamai/projects/<slug>/config.yaml` (new/migrated) then the legacy
+ *   `<projectRoot>/.teamai/config.yaml`, attaching dataHome + projectRoot.
  */
 export async function loadLocalConfigForScope(
   scope: Scope,
   projectRoot?: string,
 ): Promise<LocalConfig | null> {
+  if (scope === 'project') {
+    if (!projectRoot) return null;
+    // Reuse the single detection path so config location never drifts between
+    // "detect the active project" and "load a named project's config".
+    const detected = await detectProjectConfig(projectRoot);
+    if (!detected) return null;
+    return migrateLegacyRoleConfig(detected, path.join(getDataHome(detected), 'config.yaml'));
+  }
   const configPath = getConfigPath(scope, projectRoot);
   const content = await readFileSafe(expandHome(configPath));
   if (!content) return null;
   try {
     const raw = YAML.parse(content);
     const parsed = LocalConfigSchema.parse(raw);
-    // Config files written before `projectRoot` was added to the schema (or
-    // hand-edited) may be missing it. We already know the project root — it's
-    // the directory this config was loaded for — so backfill it instead of
-    // letting getTeamaiHome()/resolveBaseDir() silently fall back to the user
-    // home directory later (#85).
-    const withProjectRoot = scope === 'project' && projectRoot && !parsed.projectRoot
-      ? { ...parsed, projectRoot }
-      : parsed;
-    return await migrateLegacyRoleConfig(withProjectRoot, configPath);
+    return await migrateLegacyRoleConfig(parsed, configPath);
   } catch (e) {
     log.error(`Invalid ${scope} config at ${configPath}: ${(e as Error).message}`);
     return null;
@@ -165,14 +169,17 @@ export async function loadLocalConfigForScope(
 }
 
 /**
- * Save a LocalConfig for a specific scope.
+ * Save a LocalConfig. The file lives at `<dataHome>/config.yaml` — the partition
+ * for a new project install (config.dataHome attached by detection/init), or the
+ * legacy location otherwise. getDataHome resolves the right base for every mode
+ * (user → ~/.teamai, project → partition ?? <projectRoot>/.teamai).
  */
 export async function saveLocalConfigForScope(
   config: LocalConfig,
-  scope: Scope,
-  projectRoot?: string,
+  _scope?: Scope,
+  _projectRoot?: string,
 ): Promise<void> {
-  const configPath = getConfigPath(scope, projectRoot);
+  const configPath = path.join(getDataHome(config), 'config.yaml');
   await writeFile(expandHome(configPath), serializeLocalConfig(config));
 }
 
@@ -196,46 +203,95 @@ export async function saveStateForScope(state: State, localConfig: LocalConfig):
 
 /**
  * Detect whether the given directory (default: cwd) has a project-scope teamai config.
- * Returns the parsed LocalConfig if scope === 'project', null otherwise.
+ * Returns the parsed LocalConfig (with `dataHome` and `projectRoot` attached) if
+ * scope === 'project', null otherwise.
  *
- * Subdirectory / worktree aware (issue #374): if `dir` itself has no
- * `.teamai/config.yaml` but sits inside a git repository, the lookup retries at
- * the repository's workspace root (`git rev-parse --show-toplevel`). This lets
- * `teamai` run from any subdirectory of a project, and resolves the config's
- * `projectRoot` to the CURRENT checkout — so in a git worktree, project-scope
- * resources land in that worktree rather than the main checkout.
+ * Resolution order (issue #374 P1):
+ *  1. Legacy config directly at `<dir>/.teamai/config.yaml` — the fast path for
+ *     an un-migrated install run from the repo root, and the self-heal bootstrap
+ *     seam for single-repo mode. dataHome = `<dir>/.teamai`.
+ *  2. Otherwise resolve the git anchors and try the per-project PARTITION
+ *     (`~/.teamai/projects/<slug>/config.yaml`, keyed on the shared projectAnchor)
+ *     — where a new/migrated install keeps its machine data out of the workspace.
+ *     dataHome = the partition.
+ *  3. Failing that, the repo's workspace-root `.teamai` (the subdirectory case for
+ *     an un-migrated install). dataHome = `<workspaceRoot>/.teamai`.
+ *
+ * `dataHome` is always the directory the config was actually found in — the same
+ * "anchor to where it lives" rule P0 applies to projectRoot — so every machine
+ * file (state.json, search-index, env, ...) resolves beside it via getDataHome.
  */
+/**
+ * Resolve the machine-data home for a project given its workspace root:
+ * the per-project partition (`~/.teamai/projects/<slug>/`, keyed on the shared
+ * projectAnchor) when inside a git repo, else the legacy `<projectRoot>/.teamai`
+ * (non-git dir). Used by init to place a NEW project's data outside the
+ * workspace. Self mode does not call this (its data stays in the repo until P2).
+ */
+export async function resolveProjectDataHome(projectRoot: string): Promise<string> {
+  const anchors = await resolveAnchors(projectRoot);
+  return anchors ? projectDataHome(anchors.projectAnchor) : path.join(projectRoot, '.teamai');
+}
+
 export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | null> {
   const dir = cwd ?? process.cwd();
-  const direct = await loadProjectConfigAt(dir);
-  if (direct) return direct;
 
-  // Not found at `dir`. If we are inside a git repo whose workspace root differs
-  // from `dir` (i.e. `dir` is a subdirectory), retry there. resolveAnchors returns
-  // null outside a git repo, so non-git dirs simply fall through to null.
+  // Resolve git anchors FIRST so the result never depends on which directory of
+  // the repo we run from (issue #374 review): a repo with both a partition and a
+  // legacy `.teamai/` must resolve to the SAME config whether run from the root
+  // or a subdirectory. resolveAnchors returns null outside a git repo.
   const anchors = await resolveAnchors(dir);
-  if (anchors && anchors.workspaceRoot !== dir) {
-    return loadProjectConfigAt(anchors.workspaceRoot);
+  if (anchors) {
+    const legacyDir = path.join(anchors.workspaceRoot, '.teamai');
+    // Strict, cwd-independent order:
+    // 1. An existing partition config is AUTHORITATIVE. It was written by a real
+    //    `teamai init`, so it always wins — a mere working-tree `.teamai/teamai.yaml`
+    //    (which may be untracked/unverified) must never hijack it. Switching that
+    //    project to single-repo mode is `init --self`'s job (it retires the
+    //    partition), not detection's.
+    const fromPartition = await readConfigFrom(
+      projectDataHome(anchors.projectAnchor),
+      anchors.workspaceRoot,
+    );
+    if (fromPartition) return fromPartition;
+    // 2. No partition yet: a workspace that declares `mode: self` self-heals the
+    //    machine config under <workspaceRoot>/.teamai (issue #198 clone bootstrap).
+    // 3. Otherwise read the legacy `<workspaceRoot>/.teamai` config directly.
+    //    readConfigFrom runs the self-heal bootstrap when the config is missing,
+    //    so both cases funnel through the same call.
+    return readConfigFrom(legacyDir, anchors.workspaceRoot, anchors.workspaceRoot);
   }
-  return null;
+
+  // Not a git repo: fall back to a legacy `.teamai` directly at `dir` (also runs
+  // the self-heal bootstrap for a freshly-cloned single-repo project).
+  return readConfigFrom(path.join(dir, '.teamai'), dir, dir);
 }
 
 /**
- * Load a project-scope config from `<dir>/.teamai/config.yaml`, with the
- * single-repo self-heal fallback. Returns null when there is no project-scope
- * config at `dir`.
+ * Read a project-scope config from `<dataHomeDir>/config.yaml`, attaching
+ * `projectRoot` (the workspace root, where resources land) and `dataHome`
+ * (where machine data lives). Returns null when there is no project-scope
+ * config there.
+ *
+ * When `selfHealRepoRoot` is given and the config is missing, run the single-repo
+ * self-heal (issue #198): a teammate who cloned a repo carrying
+ * `.teamai/teamai.yaml` with `mode: self` has the knowledge on disk but no local
+ * config (gitignored). bootstrapSelfRepo writes it under `<repoRoot>/.teamai`,
+ * then we re-read. It is a no-op ('skip') for any non-self dir, so this stays
+ * cheap on the hot path. Only passed for the legacy `<root>/.teamai` shape (the
+ * partition is teamai-managed and never bootstrapped).
  */
-async function loadProjectConfigAt(dir: string): Promise<LocalConfig | null> {
-  const configPath = path.join(dir, '.teamai', 'config.yaml');
+async function readConfigFrom(
+  dataHomeDir: string,
+  projectRoot: string,
+  selfHealRepoRoot?: string,
+): Promise<LocalConfig | null> {
+  const configPath = path.join(dataHomeDir, 'config.yaml');
   if (!(await pathExists(configPath))) {
-    // Single-repo mode self-heal (issue #198): a teammate who cloned a repo
-    // carrying `.teamai/teamai.yaml` with `mode: self` has the team knowledge on
-    // disk but no local config (it is gitignored, not cloned). Auto-bootstrap the
-    // machine side, then re-read. bootstrapSelfRepo is a no-op ('skip') for any
-    // dir that is not a self-mode project, so this stays cheap on the hot path.
+    if (!selfHealRepoRoot) return null;
     try {
       const { bootstrapSelfRepo } = await import('./bootstrap.js');
-      const result = await bootstrapSelfRepo(dir, { silent: true });
+      const result = await bootstrapSelfRepo(selfHealRepoRoot, { silent: true });
       if (result !== 'bootstrapped') return null;
     } catch {
       return null;
@@ -248,13 +304,12 @@ async function loadProjectConfigAt(dir: string): Promise<LocalConfig | null> {
     const raw = YAML.parse(content);
     const config = LocalConfigSchema.parse(raw);
     if (config.scope !== 'project') return null;
-    // Always anchor projectRoot to the directory the config was actually found
-    // in (the current checkout's workspace root). A persisted projectRoot can be
-    // wrong — e.g. a `.teamai/` copied from the main checkout into a worktree
-    // still names the main checkout, which would send project resources to the
-    // wrong tree. Overriding here keeps resource landing tied to the real
-    // workspace (and also backfills when projectRoot was simply absent, #85).
-    return { ...config, projectRoot: dir };
+    // Anchor projectRoot to the workspace root (resource landing) and dataHome to
+    // the directory this config lives in (machine-data location). A persisted
+    // projectRoot can be wrong (e.g. a `.teamai/` copied from the main checkout
+    // into a worktree names the main checkout); overriding keeps landing tied to
+    // the real workspace (also backfills when absent, #85).
+    return { ...config, projectRoot, dataHome: dataHomeDir };
   } catch {
     return null;
   }

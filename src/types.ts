@@ -1216,6 +1216,14 @@ export const KNOWLEDGE_WORKTREE_DIRNAME = 'knowledge-wt';
 export const REPORTS_LOCK_FILENAME = '.reports-lock';
 /** Lock filename (under <repo>/.teamai) guarding concurrent self-mode bootstrap. */
 export const BOOTSTRAP_LOCK_FILENAME = '.bootstrap-lock';
+/**
+ * Lock filename (in the project data home) serializing writes to the SHARED team
+ * clone during pull/push. All worktrees of a repo resolve to the same partition
+ * (keyed on projectAnchor), so this lock coordinates a `git pull`/`git push` that
+ * could otherwise run concurrently from the main checkout and a worktree and
+ * corrupt the shared clone.
+ */
+export const SYNC_LOCK_FILENAME = '.sync-lock';
 
 /**
  * Directory holding team knowledge assets (skills/rules/docs/learnings/...).

@@ -28,10 +28,12 @@ import {
   isRecallEnabled,
   isAgentDisabled,
   scopedToolPaths,
+  SYNC_LOCK_FILENAME,
 } from './types.js';
 import type { CultureFrontmatter } from './types.js';
 import { loadRolesManifest, resolveRoleResourceNamespaces, type ResourceNamespaces } from './roles.js';
 import { getUserHome } from './utils/home.js';
+import { acquireLock, releaseLock } from './update.js';
 
 interface RolePullContext {
   activeNamespaces: ResourceNamespaces;
@@ -53,7 +55,7 @@ interface RolePullContext {
  */
 async function refreshTeamRepo(
   localConfig: LocalConfig,
-): Promise<{ label: string; version: string | null; reportingOnly: boolean }> {
+): Promise<{ label: string; version: string | null; reportingOnly: boolean; skipped?: boolean }> {
   if (localConfig.repo.kind === 'http') {
     const { resolveApiKey } = await import('./api-key.js');
     const apiKey = resolveApiKey();
@@ -89,25 +91,50 @@ async function refreshTeamRepo(
     return { label: 'single-repo (knowledge on main)', version, reportingOnly: false };
   }
 
-  const result = await pullRepo(localConfig.repo.localPath);
-
-  // Retry any learnings whose push previously failed (see savePendingLearning).
-  // Best-effort: never let a flush error block the pull.
-  try {
-    await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
-  } catch (e) {
-    log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
+  // Guard the shared team clone with the partition sync-lock: the main checkout
+  // and a worktree resolve to the SAME clone, so two `teamai pull`/`push` runs can
+  // race git operations on it. On contention we skip the ENTIRE clone-mutating
+  // section — both the fetch AND flushPendingLearnings (which writes files and
+  // runs git add/commit/push on this clone) — and report the clone's current HEAD
+  // so the deploy step still proceeds from its present state. The lock is held
+  // across the whole section (fetch + flush + rev read) so no other writer can
+  // reset/checkout the tree mid-operation.
+  const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
+  const locked = await acquireLock(syncLock);
+  if (!locked) {
+    // Another pull/push holds the lock. We must NOT read or deploy from the
+    // shared clone now: the holder may have it checked out on a generated push
+    // branch or be mid reset/checkout, so its tree can contain unmerged,
+    // unreviewed content. Signal `skipped` so pullForScope skips this scope's
+    // deploy entirely rather than syncing a transient tree into the workspace.
+    log.debug('[pull] another pull/push holds the sync lock; skipping this scope');
+    return { label: 'sync in progress elsewhere — skipped', version: null, reportingOnly: false, skipped: true };
   }
 
-  let version: string | null = null;
   try {
-    version = await getHeadRev(localConfig.repo.localPath);
-  } catch {
-    // Can't resolve a rev → skip the incremental fast-path and do a full sync.
-    log.debug('Rev check failed, proceeding with full sync');
-    version = null;
+    const result = await pullRepo(localConfig.repo.localPath);
+
+    // Retry any learnings whose push previously failed (see savePendingLearning).
+    // Best-effort: never let a flush error block the pull. Inside the lock because
+    // it writes + commits + pushes the shared clone.
+    try {
+      await flushPendingLearnings(localConfig.repo.localPath, localConfig.username);
+    } catch (e) {
+      log.debug(`pending-learnings flush skipped: ${(e as Error).message}`);
+    }
+
+    let version: string | null = null;
+    try {
+      version = await getHeadRev(localConfig.repo.localPath);
+    } catch {
+      // Can't resolve a rev → skip the incremental fast-path and do a full sync.
+      log.debug('Rev check failed, proceeding with full sync');
+      version = null;
+    }
+    return { label: result, version, reportingOnly: false };
+  } finally {
+    await releaseLock(syncLock);
   }
-  return { label: result, version, reportingOnly: false };
 }
 
 async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {
@@ -365,7 +392,15 @@ async function pullForScope(
   // there and must not be injected.
   let reportingOnly = false;
   try {
-    const { label, version, reportingOnly: ro } = await refreshTeamRepo(localConfig);
+    const { label, version, reportingOnly: ro, skipped } = await refreshTeamRepo(localConfig);
+    if (skipped) {
+      // The shared clone is locked by a concurrent pull/push; its working tree
+      // may be on a transient branch. Skip this scope entirely — do not scan or
+      // deploy from a clone we could not safely snapshot. Idempotent: the next
+      // pull (once the lock frees) syncs normally.
+      pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);
+      return;
+    }
     currentRev = version;
     reportingOnly = ro;
     pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);

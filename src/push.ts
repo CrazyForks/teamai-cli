@@ -18,6 +18,8 @@ import { scanTeamRepoNamespaces } from './resources/skills.js';
 import type {
   GlobalOptions, ResourceItem, ResourceType, LocalConfig, TeamaiConfig, State,
 } from './types.js';
+import { getDataHome, SYNC_LOCK_FILENAME } from './types.js';
+import { acquireLock, releaseLock } from './update.js';
 import { assertSafePath, assertSafeResourceName, defaultAllowedRoots } from './utils/path-safety.js';
 import { loadRolesManifest, resolveRoleResourceNamespaces } from './roles.js';
 import { askQuestion, askSelection } from './utils/prompt.js';
@@ -319,7 +321,22 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
     return;
   }
 
-  await pushCore(localConfig, teamConfig, options);
+  // Guard the shared team clone: push resets to clean master, pulls, then
+  // branches/commits/pushes on one clone shared by all worktrees of this repo.
+  // A concurrent pull/push would corrupt it. Unlike pull, push must NOT silently
+  // skip (that would drop the user's changes), so on contention we error out.
+  const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
+  const locked = await acquireLock(syncLock);
+  if (!locked) {
+    log.error('Another teamai pull/push is in progress for this project. Re-run once it finishes.');
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    await pushCore(localConfig, teamConfig, options);
+  } finally {
+    await releaseLock(syncLock);
+  }
 }
 
 async function pushCore(
