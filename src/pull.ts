@@ -55,7 +55,7 @@ interface RolePullContext {
  */
 async function refreshTeamRepo(
   localConfig: LocalConfig,
-): Promise<{ label: string; version: string | null; reportingOnly: boolean }> {
+): Promise<{ label: string; version: string | null; reportingOnly: boolean; skipped?: boolean }> {
   if (localConfig.repo.kind === 'http') {
     const { resolveApiKey } = await import('./api-key.js');
     const apiKey = resolveApiKey();
@@ -102,14 +102,13 @@ async function refreshTeamRepo(
   const syncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
   const locked = await acquireLock(syncLock);
   if (!locked) {
-    log.debug('[pull] another pull/push holds the sync lock; skipping clone refresh');
-    let heldVersion: string | null = null;
-    try {
-      heldVersion = await getHeadRev(localConfig.repo.localPath);
-    } catch {
-      heldVersion = null;
-    }
-    return { label: 'sync in progress elsewhere — skipped', version: heldVersion, reportingOnly: false };
+    // Another pull/push holds the lock. We must NOT read or deploy from the
+    // shared clone now: the holder may have it checked out on a generated push
+    // branch or be mid reset/checkout, so its tree can contain unmerged,
+    // unreviewed content. Signal `skipped` so pullForScope skips this scope's
+    // deploy entirely rather than syncing a transient tree into the workspace.
+    log.debug('[pull] another pull/push holds the sync lock; skipping this scope');
+    return { label: 'sync in progress elsewhere — skipped', version: null, reportingOnly: false, skipped: true };
   }
 
   try {
@@ -393,7 +392,15 @@ async function pullForScope(
   // there and must not be injected.
   let reportingOnly = false;
   try {
-    const { label, version, reportingOnly: ro } = await refreshTeamRepo(localConfig);
+    const { label, version, reportingOnly: ro, skipped } = await refreshTeamRepo(localConfig);
+    if (skipped) {
+      // The shared clone is locked by a concurrent pull/push; its working tree
+      // may be on a transient branch. Skip this scope entirely — do not scan or
+      // deploy from a clone we could not safely snapshot. Idempotent: the next
+      // pull (once the lock frees) syncs normally.
+      pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);
+      return;
+    }
     currentRev = version;
     reportingOnly = ro;
     pullSpin.succeed(`[${scopeLabel}] Team repo: ${label}`);

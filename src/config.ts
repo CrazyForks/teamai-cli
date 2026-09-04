@@ -233,6 +233,22 @@ export async function resolveProjectDataHome(projectRoot: string): Promise<strin
   return anchors ? projectDataHome(anchors.projectAnchor) : path.join(projectRoot, '.teamai');
 }
 
+/**
+ * True when `<dataHomeDir>/teamai.yaml` (the committed team config in single-repo
+ * mode) declares `mode: self`. Marker-only read — no schema validation — so a
+ * partial/older file still triggers. Mirrors bootstrap's readSelfModeMarker.
+ */
+async function declaresSelfMode(dataHomeDir: string): Promise<boolean> {
+  const content = await readFileSafe(path.join(dataHomeDir, 'teamai.yaml'));
+  if (!content) return false;
+  try {
+    const raw = YAML.parse(content) as { mode?: string } | null;
+    return raw?.mode === 'self';
+  } catch {
+    return false;
+  }
+}
+
 export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | null> {
   const dir = cwd ?? process.cwd();
 
@@ -242,18 +258,25 @@ export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | n
   // or a subdirectory. resolveAnchors returns null outside a git repo.
   const anchors = await resolveAnchors(dir);
   if (anchors) {
-    // Strict order, independent of cwd: partition (new/migrated) wins, then the
-    // workspace-root legacy `.teamai` (un-migrated install, with self-heal).
+    const legacyDir = path.join(anchors.workspaceRoot, '.teamai');
+    // Single-repo mode is authoritative: when the workspace's COMMITTED
+    // `.teamai/teamai.yaml` declares `mode: self`, the knowledge and the self
+    // config live in the repo, and a stale project partition (left over from an
+    // earlier git-mode install) must NOT shadow it — otherwise `init --self`
+    // would appear to succeed while pull/push kept using the old external repo.
+    // Self config wins (with self-heal for a fresh clone) before the partition.
+    if (await declaresSelfMode(legacyDir)) {
+      const selfConfig = await readConfigFrom(legacyDir, anchors.workspaceRoot, anchors.workspaceRoot);
+      if (selfConfig) return selfConfig;
+    }
+    // Otherwise, strict cwd-independent order: partition (new/migrated) wins,
+    // then the workspace-root legacy `.teamai` (un-migrated install, self-heal).
     const fromPartition = await readConfigFrom(
       projectDataHome(anchors.projectAnchor),
       anchors.workspaceRoot,
     );
     if (fromPartition) return fromPartition;
-    return readConfigFrom(
-      path.join(anchors.workspaceRoot, '.teamai'),
-      anchors.workspaceRoot,
-      anchors.workspaceRoot,
-    );
+    return readConfigFrom(legacyDir, anchors.workspaceRoot, anchors.workspaceRoot);
   }
 
   // Not a git repo: fall back to a legacy `.teamai` directly at `dir` (also runs
