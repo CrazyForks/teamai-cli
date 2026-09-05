@@ -236,6 +236,14 @@ export const TeamaiConfigSchema = z.object({
     // skips JoyCode cleanly without generating ghost files; users must sync
     // manually via `teamai pull`.
     joycode: { skills: '.joycode/skills', rules: '.joycode/rules', agents: '.joycode/agents' },
+    qoder: {
+      skills: '.qoder/skills',
+      rules: '.qoder/rules',
+      settings: '.qoder/settings.json',
+      agents: '.qoder/agents',
+      mcp: '.qoder/settings.json',
+      mcpProject: '.qoder/settings.json',
+    },
     codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents', mcp: '.codebuddy/mcp.json', mcpProject: '.codebuddy/mcp.json' },
     openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules', claudemd: '.openclaw/workspace/AGENTS.md' },
     hermes: { skills: '.hermes/skills', claudemd: 'AGENTS.md' },
