@@ -19,6 +19,22 @@ export function createGit(basePath?: string): SimpleGit {
 }
 
 /**
+ * Commit TeamAI makes in a managed checkout (knowledge-wt, reports-wt, or a
+ * dedicated team-repo PR branch created by {@link pushRepoBranch}).
+ *
+ * Isolated worktrees are based on origin/<default> and often have tracked hook
+ * scripts (e.g. `.husky/pre-commit`) without the locally generated `husky.sh`
+ * (`HUSKY=0` lives inside that file, so it cannot save the commit). Those
+ * commits only add knowledge or report files and must not run lint-staged.
+ *
+ * `--no-verify` is scoped to this git process. It does not write
+ * `core.hooksPath` and does not change the user's ordinary `git commit`.
+ */
+export function commitSkippingHooks(git: SimpleGit, message: string) {
+  return git.commit(message, { '--no-verify': null });
+}
+
+/**
  * Check whether localPath is a valid git repository (has a `.git` entry).
  *
  * Returns false if the path does not exist, or exists but is not a git repo
@@ -516,8 +532,9 @@ export async function pushRepoBranch(
     return false;
   }
 
-  // Commit and push branch
-  await git.commit(message);
+  // Commit and push branch. Skip hooks: this is a CLI-managed knowledge commit
+  // (often inside knowledge-wt, which has hook scripts but no husky.sh).
+  await commitSkippingHooks(git, message);
 
   if (opts.reuseBranch) {
     // Re-running push with no real change would otherwise force-push an

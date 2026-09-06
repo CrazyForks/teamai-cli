@@ -216,7 +216,7 @@ teamai init . --agent claude,codex   # 非交互:启用 Claude Code + Codex
 
 **克隆即初始化。** 由于知识资产和 `.teamai/teamai.yaml` 里的 `mode: self` 标记都提交在 main 上，团队成员 clone 仓库后会被自动初始化：下一条 `teamai` 命令或 AI 会话会识别该标记，并（在其 git provider 已认证的前提下）自动写入本机配置、注入 hooks、在孤儿分支上注册成员 —— 无需手抄 repo/role 参数。若尚未认证，teamai 会提示其运行一次 `teamai init .`。
 
-**安全性。** 单仓模式下 teamai 的每一次 git 写操作（知识 PR 和上报孤儿分支）都在 `.teamai/` 下的隔离 git worktree 中进行，绝不会 checkout、reset 或切换你的工作区和当前分支。
+**安全性。** 单仓模式下 teamai 的每一次 git 写操作（知识 PR 和上报孤儿分支）都在 `.teamai/` 下的隔离 git worktree 中进行，绝不会 checkout、reset 或切换你的工作区和当前分支。隔离 worktree 里的提交会跳过本地 git hook（例如 husky / lint-staged）：从 `origin/<default>` 检出的干净工作区往往只有 hook 脚本、没有本地生成的 `husky.sh`，而且知识/上报文件本来就不该跑业务仓的 lint。你在业务仓里的普通 `git commit` 仍会走 hook。
 
 **管理员在 `teamai init .` 之后的清单：**
 

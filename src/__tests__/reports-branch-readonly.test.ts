@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     add: vi.fn(),
     commit: vi.fn(),
     push: vi.fn(),
+    status: vi.fn(),
   },
   isGitRepo: vi.fn(),
 }));
@@ -23,6 +24,8 @@ vi.mock('../utils/git.js', () => ({
   isGitRepo: mocks.isGitRepo,
   getDefaultBranch: vi.fn(),
   hasCommits: vi.fn(),
+  commitSkippingHooks: (git: { commit: (...args: unknown[]) => unknown }, message: string) =>
+    git.commit(message, { '--no-verify': null }),
 }));
 
 vi.mock('../utils/fs.js', () => ({
@@ -43,7 +46,8 @@ vi.mock('../update.js', () => ({
   releaseLock: vi.fn(),
 }));
 
-import { ensureReportsWorktree } from '../utils/reports-branch.js';
+import { acquireLock, releaseLock } from '../update.js';
+import { commitAndPushReports, ensureReportsWorktree } from '../utils/reports-branch.js';
 
 const config: LocalConfig = {
   repo: {
@@ -86,5 +90,37 @@ describe('ensureReportsWorktree read-only cold start', () => {
       'origin',
       'teamai-reports',
     ]);
+  });
+
+  it('skips git hooks when initializing the reports orphan branch', async () => {
+    await ensureReportsWorktree(config, { pushIfCreated: false });
+
+    expect(mocks.worktreeGit.commit).toHaveBeenCalledWith(
+      '[teamai] Initialize reports branch',
+      { '--no-verify': null },
+    );
+  });
+});
+
+describe('commitAndPushReports', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.isGitRepo.mockResolvedValue(true);
+    mocks.worktreeGit.add.mockResolvedValue(undefined);
+    mocks.worktreeGit.commit.mockResolvedValue(undefined);
+    mocks.worktreeGit.push.mockResolvedValue(undefined);
+    mocks.worktreeGit.status.mockResolvedValue({ staged: ['members/alice.yaml'] });
+    vi.mocked(acquireLock).mockResolvedValue(true);
+    vi.mocked(releaseLock).mockResolvedValue(undefined);
+  });
+
+  it('skips git hooks on the isolated reports worktree commit', async () => {
+    const pushed = await commitAndPushReports(config, '[teamai] Register member: alice', ['members/']);
+
+    expect(pushed).toBe(true);
+    expect(mocks.worktreeGit.commit).toHaveBeenCalledWith(
+      '[teamai] Register member: alice',
+      { '--no-verify': null },
+    );
   });
 });

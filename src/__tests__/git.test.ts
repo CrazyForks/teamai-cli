@@ -123,7 +123,7 @@ describe('pushRepoBranch', () => {
     expect(result).toBe(true);
     expect(mockGit.checkoutLocalBranch).toHaveBeenCalledWith('teamai/push/test/123');
     expect(mockGit.add).toHaveBeenCalledWith(['file.txt']);
-    expect(mockGit.commit).toHaveBeenCalledWith('commit msg');
+    expect(mockGit.commit).toHaveBeenCalledWith('commit msg', { '--no-verify': null });
     expect(mockGit.push).toHaveBeenCalledWith(['-u', 'origin', 'teamai/push/test/123']);
     // Should NOT switch back to master — caller does that after gfMrCreate
     expect(mockGit.checkout).not.toHaveBeenCalled();
@@ -250,7 +250,9 @@ describe('pushRepoDirectly', () => {
     await pushRepoDirectly('/repo', 'direct commit', ['file.txt']);
 
     expect(mockGit.add).toHaveBeenCalledWith(['file.txt']);
+    // Ordinary path: do not skip hooks (unlike isolated worktree commits).
     expect(mockGit.commit).toHaveBeenCalledWith('direct commit');
+    expect(mockGit.commit.mock.calls[0]).toHaveLength(1);
     expect(mockGit.revparse).toHaveBeenCalledWith(['--abbrev-ref', 'HEAD']);
     expect(mockGit.push).toHaveBeenCalledWith(['-u', 'origin', 'main']);
   });

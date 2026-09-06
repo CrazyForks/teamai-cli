@@ -17,7 +17,7 @@
  */
 import path from 'node:path';
 import fse from 'fs-extra';
-import { createGit, isGitRepo, getDefaultBranch, hasCommits } from './git.js';
+import { createGit, isGitRepo, getDefaultBranch, hasCommits, commitSkippingHooks } from './git.js';
 import { acquireLock, releaseLock } from '../update.js';
 import { ensureDir, writeFile, pathExists } from './fs.js';
 import { log } from './logger.js';
@@ -131,7 +131,7 @@ export async function ensureReportsWorktree(
     await writeWorktreeGitignore(wt);
     const wtGit = createGit(wt);
     await wtGit.add(['.gitignore']);
-    await wtGit.commit('[teamai] Initialize reports branch');
+    await commitSkippingHooks(wtGit, '[teamai] Initialize reports branch');
     if (options.pushIfCreated !== false) {
       try {
         await wtGit.push(['-u', 'origin', REPORTS_BRANCH]);
@@ -234,7 +234,7 @@ export async function commitAndPushReports(
       return false;
     }
 
-    await git.commit(message);
+    await commitSkippingHooks(git, message);
 
     // Push with fetch+rebase retry. Each member only writes <user>.yaml, so
     // rebase conflicts are effectively impossible; retries handle the pure
