@@ -218,7 +218,7 @@ teamai init . --agent claude,codex   # non-interactive: set up Claude Code + Cod
 
 **Clone = initialized.** Because knowledge and the `mode: self` marker in `.teamai/teamai.yaml` are committed to main, a teammate who clones the repo is auto-initialized: the next `teamai` command or AI session detects the marker, and (when their git provider is already authenticated) writes their local config, injects hooks, and registers them on the reports branch — no need to re-type repo/role. If they aren't authenticated yet, teamai prompts them to run `teamai init .` once.
 
-**Safety.** Every git write teamai performs in single-repo mode (knowledge PRs and the reports orphan branch) runs in an isolated git worktree under `.teamai/`. Your working tree and current branch are never checked out, reset, or switched.
+**Safety.** Every git write teamai performs in single-repo mode (knowledge PRs and the reports orphan branch) runs in an isolated git worktree under `.teamai/`. Your working tree and current branch are never checked out, reset, or switched. Isolated worktree commits skip local git hooks (for example husky / lint-staged): a clean checkout from `origin/<default>` often has hook scripts without the locally generated `husky.sh`, and knowledge/report files should not run the business-repo lint pipeline. Your ordinary `git commit` in the business repo still runs hooks.
 
 **Admin checklist after `teamai init .`:**
 
