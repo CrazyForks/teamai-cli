@@ -10,7 +10,7 @@ import {
 import { referencedVars } from './resources/mcp-format.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions } from './types.js';
-import { managedMcpManifestPath, getDataHome } from './types.js';
+import { managedMcpManifestPath, managedMcpManifestKey, getDataHome } from './types.js';
 import { readJson } from './utils/fs.js';
 import type { ManagedMcpManifest } from './types.js';
 import { getUserHome } from './utils/home.js';
@@ -53,7 +53,7 @@ export async function mcpList(_options: GlobalOptions): Promise<void> {
     }
 
     const installedIn = targets
-      .filter((t) => (manifest[`${t.tool}${t.projectScope ? ':project' : ''}`] ?? []).some((r) => r.name === s.name))
+      .filter((t) => (manifest[managedMcpManifestKey(t.tool, t.projectScope, localConfig.projectRoot)] ?? []).some((r) => r.name === s.name))
       .map((t) => t.tool);
     console.log(`    installed: ${installedIn.length > 0 ? installedIn.join(', ') : '(none)'}`);
     console.log('');

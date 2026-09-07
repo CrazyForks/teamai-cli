@@ -548,6 +548,47 @@ export function managedMcpManifestKey(
   return `${tool}:project:${id}`;
 }
 
+/** Legacy bare project ownership key written before workspace-scoped keys (#374). */
+export function legacyManagedMcpManifestKey(tool: string, projectScope: boolean): string {
+  return projectScope ? `${tool}:project` : tool;
+}
+
+/**
+ * Resolve the effective ownership entry for a (tool, scope) in a managed-mcp
+ * manifest, migrating a pre-#374 bare `<tool>:project` key into the current
+ * workspace-scoped key WHEN SAFE.
+ *
+ * A bare key is ambiguous in a shared partition (it could belong to any worktree),
+ * so we only adopt it when `workspaceLocalManifest` is true — i.e. the manifest
+ * lives at a legacy `<workspaceRoot>/.teamai` data home, which by construction
+ * belonged to exactly this workspace. In the partition case the bare key is left
+ * untouched (a later explicit layout migration that knows the source workspace can
+ * claim it). Returns the resolved `{ key, records }`; when it migrates, the caller
+ * writes back under `key` and the bare key is removed from `manifest`.
+ */
+export function resolveManagedMcpOwnership(
+  manifest: ManagedMcpManifest,
+  tool: string,
+  projectScope: boolean,
+  workspaceRoot: string | undefined,
+  workspaceLocalManifest: boolean,
+): { key: string; records: ManagedMcpRecord[] } {
+  const key = managedMcpManifestKey(tool, projectScope, workspaceRoot);
+  if (manifest[key]) return { key, records: manifest[key] };
+  if (projectScope && workspaceLocalManifest) {
+    const legacyKey = legacyManagedMcpManifestKey(tool, true);
+    if (legacyKey !== key && manifest[legacyKey]) {
+      // Migrate: adopt the legacy records under the workspace-scoped key and drop
+      // the ambiguous bare key. Safe because this manifest is workspace-local.
+      const records = manifest[legacyKey];
+      manifest[key] = records;
+      delete manifest[legacyKey];
+      return { key, records };
+    }
+  }
+  return { key, records: [] };
+}
+
 /** Path of the managed-MCP manifest within a resolved data home. */
 export function managedMcpManifestPath(dataHome: string): string {
   return path.join(dataHome, 'managed-mcp.json');

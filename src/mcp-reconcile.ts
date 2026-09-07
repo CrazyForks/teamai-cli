@@ -13,7 +13,7 @@ import {
   getEnvBackupPath,
   getDataHome,
   managedMcpManifestPath,
-  managedMcpManifestKey,
+  resolveManagedMcpOwnership,
   resolveBaseDir,
   scopedToolPaths,
 } from './types.js';
@@ -337,9 +337,21 @@ export async function reconcileMcpForConfig(
 
   const vars = await buildVarTable(localConfig);
 
+  // A pre-#374 manifest keyed entries under a bare `<tool>:project`. Adopting that
+  // key is only unambiguous when the manifest is workspace-local (a legacy
+  // `<projectRoot>/.teamai` data home, not the shared partition).
+  const dataHome = getDataHome(localConfig);
+  const workspaceLocalManifest = !!localConfig.projectRoot
+    && dataHome === path.join(localConfig.projectRoot, '.teamai');
+
   for (const target of targets) {
-    const manifestKey = managedMcpManifestKey(target.tool, target.projectScope, localConfig.projectRoot);
-    const owned = manifest[manifestKey] ?? [];
+    const { key: manifestKey, records: owned } = resolveManagedMcpOwnership(
+      manifest,
+      target.tool,
+      target.projectScope,
+      localConfig.projectRoot,
+      workspaceLocalManifest,
+    );
     const ownedNames = new Set(owned.map((r) => r.name));
     const nextRecords: ManagedMcpRecord[] = [];
 
