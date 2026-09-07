@@ -13,6 +13,7 @@ import {
   getEnvBackupPath,
   getDataHome,
   managedMcpManifestPath,
+  managedMcpManifestKey,
   resolveBaseDir,
   scopedToolPaths,
 } from './types.js';
@@ -337,7 +338,7 @@ export async function reconcileMcpForConfig(
   const vars = await buildVarTable(localConfig);
 
   for (const target of targets) {
-    const manifestKey = `${target.tool}${target.projectScope ? ':project' : ''}`;
+    const manifestKey = managedMcpManifestKey(target.tool, target.projectScope, localConfig.projectRoot);
     const owned = manifest[manifestKey] ?? [];
     const ownedNames = new Set(owned.map((r) => r.name));
     const nextRecords: ManagedMcpRecord[] = [];

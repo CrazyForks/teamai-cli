@@ -536,6 +536,64 @@ servers:
     expect(changes[0]).toMatchObject({ action: 'skipped' });
     expect(changes[0].reason).toContain('allowedHosts');
   });
+
+  // issue #374 P1-2C: the partition keys managed-mcp.json by projectAnchor, so the
+  // main checkout and every linked worktree SHARE one manifest. A project MCP file
+  // (<workspace>/.mcp.json) is per-worktree, so the manifest ownership key must be
+  // per-worktree too — otherwise one worktree's reconcile claims/overwrites the MCP
+  // entries another worktree owns in its own file.
+  it('does not touch a sibling worktree\'s own MCP when reconciling from another worktree', async () => {
+    // Two worktrees of one repo: distinct workspace roots, SHARED data home (the
+    // partition), so both read/write the same managed-mcp.json.
+    const sharedDataHome = path.join(tmpDir, 'partition');
+    await fse.ensureDir(sharedDataHome);
+    const wtA = path.join(tmpDir, 'wtA');
+    const wtB = path.join(tmpDir, 'wtB');
+    for (const wt of [wtA, wtB]) {
+      for (const d of ['.claude', '.cursor', '.codebuddy']) {
+        await fse.ensureDir(path.join(wt, d, 'skills'));
+      }
+    }
+    const cfgA = { ...localConfig, scope: 'project', projectRoot: wtA, dataHome: sharedDataHome } as unknown as LocalConfig;
+    const cfgB = { ...localConfig, scope: 'project', projectRoot: wtB, dataHome: sharedDataHome } as unknown as LocalConfig;
+
+    // 1. Team defines `shared`; reconcile it in worktree A.
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v1.example/mcp
+`);
+    await reconcileMcpForConfig(teamConfig, cfgA);
+    expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v1.example/mcp');
+
+    // 2. Worktree B has a USER-OWNED server with the same name, pointing elsewhere.
+    await fse.writeJson(path.join(wtB, '.mcp.json'), {
+      mcpServers: { shared: { type: 'http', url: 'https://mine.example/mcp' } },
+    });
+
+    // 3. Team bumps `shared`; reconcile again FROM worktree A only.
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v2.example/mcp
+`);
+    await reconcileMcpForConfig(teamConfig, cfgA);
+
+    // A gets the new team URL…
+    expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v2.example/mcp');
+    // …but B's user-owned same-name server is left completely untouched.
+    expect((await fse.readJson(path.join(wtB, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://mine.example/mcp');
+
+    // The shared manifest carries a distinct ownership key per worktree.
+    const manifest = await fse.readJson(path.join(sharedDataHome, 'managed-mcp.json'));
+    const claudeKeys = Object.keys(manifest).filter((k) => k.startsWith('claude:project'));
+    expect(claudeKeys.every((k) => /^claude:project:[0-9a-f]{12}$/.test(k))).toBe(true);
+  });
 });
 
 describe('MCP reconcile — OpenCode', () => {

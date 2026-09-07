@@ -55,6 +55,7 @@ import {
   TEAMAI_CLAUDEMD_END,
   TeamaiConfigSchema,
   managedMcpManifestPath,
+  managedMcpManifestKey,
   type DashboardEvent,
   type LocalConfig,
   type ManagedMcpManifest,
@@ -2279,7 +2280,7 @@ async function installMcpServer(
     await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined),
   );
   const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  const manifestKey = `${tool}${projectScope ? ':project' : ''}`;
+  const manifestKey = managedMcpManifestKey(tool, projectScope, projectScope ? workspacePath : undefined);
   const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 
@@ -2342,7 +2343,7 @@ async function uninstallMcpServer(
     await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined),
   );
   const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  const manifestKey = `${tool}${projectScope ? ':project' : ''}`;
+  const manifestKey = managedMcpManifestKey(tool, projectScope, projectScope ? workspacePath : undefined);
   const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 
