@@ -103,6 +103,66 @@ describe('local-agent: buildReportPayload disk scan', () => {
   });
 });
 
+describe('local-agent: project MCP report is per-worktree (issue #374 P1-2C)', () => {
+  it('reports only the current workspace\'s MCP records from the shared partition manifest', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { realpathSync } = await import('node:fs');
+    const { managedMcpWorkspaceId } = await import('../types.js');
+
+    // Real git repo + linked worktree → same projectAnchor → same partition.
+    const repo = realpathSync(await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-la-wt-')));
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 't@e'); git(repo, 'config', 'user.name', 'T');
+    git(repo, 'commit', '--allow-empty', '-q', '-m', 'init');
+    const wtB = path.join(repo, '..', path.basename(repo) + '-wtB');
+    git(repo, 'worktree', 'add', '-q', wtB, 'HEAD');
+    const wtBReal = realpathSync(wtB);
+
+    // Partition manifest (shared): A owns `a-only`, B owns `b-only`, each under
+    // its own workspace-scoped key.
+    const { projectDataHome } = await import('../utils/partition.js');
+    const partition = projectDataHome(repo); // keyed on the shared anchor
+    await fse.ensureDir(partition);
+    // A project config in the partition makes detectProjectConfig resolve the
+    // data home to this partition (both worktrees share it).
+    const YAML = (await import('yaml')).default;
+    await fse.writeFile(path.join(partition, 'config.yaml'), YAML.stringify({
+      repo: { localPath: path.join(partition, 'team-repo'), remote: 'https://example.com/x.git', kind: 'git' },
+      username: 'u', scope: 'project', projectRoot: repo, additionalRoles: [],
+    }));
+    await fse.writeJson(path.join(partition, 'managed-mcp.json'), {
+      [`codebuddy:project:${managedMcpWorkspaceId(repo)}`]: [{ name: 'a-only', hash: 'h1' }],
+      [`codebuddy:project:${managedMcpWorkspaceId(wtBReal)}`]: [{ name: 'b-only', hash: 'h2' }],
+    });
+
+    // config with a binding for worktree B so the report scans it.
+    const configDir = path.join(tmpDir, '.teamai', 'local-agent');
+    await fse.ensureDir(configDir);
+    await fse.writeJson(path.join(configDir, 'config.json'), {
+      endpoint: 'https://test.example.com/api', token: 't', localAgentId: 'id',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      workspaceBindings: { [wtBReal]: { projectId: 1, projectName: 'p', ideType: 'codebuddy' } },
+    });
+
+    const { buildReportPayload, loadLocalAgentConfig } = await import('../local-agent.js');
+    const config = await loadLocalAgentConfig();
+    const payload = await buildReportPayload(config!, { tool: 'codebuddy', cwd: wtBReal }) as {
+      workspaces?: Array<{ path: string; mcps?: Array<{ slug: string }> }>;
+    };
+
+    const wsB = payload.workspaces?.find((w) => w.path === wtBReal);
+    expect(wsB).toBeDefined();
+    const slugs = (wsB!.mcps ?? []).map((m) => m.slug);
+    // B reports ONLY its own MCP — never A's, even though both live in the shared manifest.
+    expect(slugs).toContain('b-only');
+    expect(slugs).not.toContain('a-only');
+
+    await fse.remove(repo).catch(() => {});
+    await fse.remove(wtBReal).catch(() => {});
+  });
+});
+
 describe('local-agent: local_agent_id derivation (per-tool install dir)', () => {
   it('derives the id from ~/.<tool>, matching the historical status-report口径', async () => {
     await setupConfig();

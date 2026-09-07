@@ -544,8 +544,12 @@ export function managedMcpManifestKey(
   // Fall back to the bare project key only when no workspace is known (should not
   // happen for a real project install); otherwise isolate by workspace identity.
   if (!workspaceRoot) return `${tool}:project`;
-  const id = createHash('sha1').update(workspaceRoot).digest('hex').slice(0, 12);
-  return `${tool}:project:${id}`;
+  return `${tool}:project:${managedMcpWorkspaceId(workspaceRoot)}`;
+}
+
+/** Stable per-worktree identity segment used in project-scope manifest keys (#374). */
+export function managedMcpWorkspaceId(workspaceRoot: string): string {
+  return createHash('sha1').update(workspaceRoot).digest('hex').slice(0, 12);
 }
 
 /** Legacy bare project ownership key written before workspace-scoped keys (#374). */
