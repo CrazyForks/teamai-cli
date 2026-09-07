@@ -678,6 +678,50 @@ servers:
     expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared).toBeDefined();
     expect((await fse.readJson(path.join(wtB, '.mcp.json'))).mcpServers.shared).toBeDefined();
   });
+
+  it('project-wide uninstall clears every worktree — no sibling left "server present, ownership missing"', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // Two worktrees sharing one partition, both with `shared` installed. This is
+    // what `teamai uninstall` (project scope) must handle: it now runs a
+    // removeAll reconcile for EVERY worktree before deleting the shared partition,
+    // so no sibling is left with an injected server whose ownership record is gone.
+    const sharedDataHome = path.join(tmpDir, 'un-partition');
+    await fse.ensureDir(sharedDataHome);
+    const wtA = path.join(tmpDir, 'unA');
+    const wtB = path.join(tmpDir, 'unB');
+    for (const wt of [wtA, wtB]) {
+      for (const d of ['.claude', '.cursor', '.codebuddy']) {
+        await fse.ensureDir(path.join(wt, d, 'skills'));
+      }
+    }
+    const cfgA = { ...localConfig, scope: 'project', projectRoot: wtA, dataHome: sharedDataHome } as unknown as LocalConfig;
+    const cfgB = { ...localConfig, scope: 'project', projectRoot: wtB, dataHome: sharedDataHome } as unknown as LocalConfig;
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team.example/mcp
+`);
+    await reconcileMcpForConfig(teamConfig, cfgA);
+    await reconcileMcpForConfig(teamConfig, cfgB);
+
+    // Project-wide uninstall: removeAll reconcile for BOTH worktrees (mirrors the
+    // loop uninstall now runs before deleting the partition).
+    await reconcileMcpForConfig(teamConfig, cfgA, { removeAll: true });
+    await reconcileMcpForConfig(teamConfig, cfgB, { removeAll: true });
+
+    // Neither worktree ends in the invalid "server present, ownership missing"
+    // state: the server is gone from both .mcp.json files.
+    for (const [wt, cfg] of [[wtA, cfgA], [wtB, cfgB]] as const) {
+      const doc = await fse.readJson(path.join(wt, '.mcp.json'));
+      expect(doc.mcpServers?.shared).toBeUndefined();
+      // ownership record also cleared for each worktree's own manifest.
+      const mfPath = managedMcpManifestPath(sharedDataHome, cfg.projectRoot);
+      const mf = (await fse.pathExists(mfPath)) ? await fse.readJson(mfPath) : {};
+      expect((mf['claude:project'] ?? []).some((r: { name: string }) => r.name === 'shared')).toBe(false);
+    }
+  });
 });
 
 describe('MCP reconcile — OpenCode', () => {

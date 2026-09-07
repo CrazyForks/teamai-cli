@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveAnchors } from '../utils/git.js';
+import { resolveAnchors, listWorktrees } from '../utils/git.js';
 
 // ─── Real-git tests for resolveAnchors (issue #374 P0) ──────────────────────
 //
@@ -118,5 +118,25 @@ describe('resolveAnchors', () => {
     // And neither anchor is the shared parent directory.
     expect(a!.projectAnchor).not.toBe(gitdirs);
     expect(b!.projectAnchor).not.toBe(gitdirs);
+  });
+});
+
+describe('listWorktrees', () => {
+  it('lists the main checkout and every linked worktree (realpath\'d)', async () => {
+    const roots = await listWorktrees(repoRoot);
+    expect(roots).toContain(repoRoot);
+    expect(roots).toContain(worktreeRoot);
+    // From a subdirectory of a worktree, the full set is still returned.
+    const sub = path.join(worktreeRoot, 'nested');
+    fs.mkdirSync(sub, { recursive: true });
+    const fromSub = await listWorktrees(sub);
+    expect(fromSub).toContain(repoRoot);
+    expect(fromSub).toContain(worktreeRoot);
+  });
+
+  it('returns [] outside a git repo', async () => {
+    const plain = realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-nogit-')));
+    expect(await listWorktrees(plain)).toEqual([]);
+    fs.rmSync(plain, { recursive: true, force: true });
   });
 });
