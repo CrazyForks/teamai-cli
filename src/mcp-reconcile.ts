@@ -336,7 +336,7 @@ export async function reconcileMcpForConfig(
   let manifestPath: string;
   let manifest: ManagedMcpManifest;
   if (projectScope && localConfig.projectRoot) {
-    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, localConfig.projectRoot));
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, localConfig.projectRoot, { dryRun: options.dryRun }));
   } else {
     manifestPath = managedMcpManifestPath(dataHome);
     manifest = await readManifest(manifestPath);

@@ -25,9 +25,18 @@ import { readJson, writeJsonAtomic, expandHome } from './fs.js';
  *  - a bare `<tool>:project` key is claimed only when the data home is
  *    workspace-local (legacy `<workspaceRoot>/.teamai`), where it is unambiguous;
  *  - a `<tool>:project:<thisWorkspaceId>` key is always this worktree's.
- * The migrated records are written into the per-worktree file and removed from the
- * shared file (best-effort; a stale shared entry is harmless once the per-worktree
- * file exists, since all readers/writers use the per-worktree file afterwards).
+ *
+ * Migration is made DURABLE here, independent of the caller: we first atomically
+ * write the per-worktree destination file, and only AFTER that succeeds do we
+ * best-effort remove the claimed keys from the shared file. Persisting inside the
+ * loader (rather than relying on the caller to save) is required because callers
+ * may be read-only (report) or may skip their write when nothing changed
+ * (`reconcile` with `wrote === false`) — removing the source first in those cases
+ * would orphan the records. Ordering (destination first, source second) means a
+ * crash between the two leaves the records readable in BOTH files, never neither.
+ *
+ * `dryRun` suppresses all writes (preview): the migrated records are returned in
+ * memory but neither file is touched.
  *
  * Returns the per-worktree manifest path plus its loaded contents. Callers mutate
  * `manifest` and persist with `saveProjectMcpManifest`.
@@ -35,6 +44,7 @@ import { readJson, writeJsonAtomic, expandHome } from './fs.js';
 export async function loadProjectMcpManifest(
   dataHome: string,
   workspaceRoot: string,
+  options: { dryRun?: boolean } = {},
 ): Promise<{ manifestPath: string; manifest: ManagedMcpManifest }> {
   const manifestPath = managedMcpManifestPath(dataHome, workspaceRoot);
   const existing = (await readJson<ManagedMcpManifest>(expandHome(manifestPath))) ?? null;
@@ -55,8 +65,11 @@ export async function loadProjectMcpManifest(
         migratedFrom.push(key);
       }
     }
-    if (migratedFrom.length > 0) {
-      // Drop the claimed keys from the shared file so it can't double-own.
+    if (migratedFrom.length > 0 && !options.dryRun) {
+      // Durable order: write the destination FIRST, then drop the claimed keys
+      // from the shared file. A crash in between leaves the records in both files
+      // (harmless — the per-worktree file wins), never in neither.
+      await writeJsonAtomic(expandHome(manifestPath), manifest);
       for (const key of migratedFrom) delete shared[key];
       await writeJsonAtomic(expandHome(sharedPath), shared).catch(() => {});
     }

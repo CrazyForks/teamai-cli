@@ -158,6 +158,18 @@ describe('local-agent: project MCP report is per-worktree (issue #374 P1-2C)', (
     expect(slugs).toContain('b-only');
     expect(slugs).not.toContain('a-only');
 
+    // Migration must be DURABLE: the first report migrated B's record out of the
+    // shared file into B's per-worktree file. A SECOND report must still see it
+    // (the pre-fix bug deleted the shared record without persisting the
+    // destination, so the second report returned empty).
+    const { managedMcpManifestPath } = await import('../types.js');
+    expect(await fse.pathExists(managedMcpManifestPath(partition, wtBReal))).toBe(true);
+    const payload2 = await buildReportPayload(config!, { tool: 'codebuddy', cwd: wtBReal }) as {
+      workspaces?: Array<{ path: string; mcps?: Array<{ slug: string }> }>;
+    };
+    const wsB2 = payload2.workspaces?.find((w) => w.path === wtBReal);
+    expect((wsB2!.mcps ?? []).map((m) => m.slug)).toContain('b-only');
+
     await fse.remove(repo).catch(() => {});
     await fse.remove(wtBReal).catch(() => {});
   });
