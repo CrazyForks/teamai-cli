@@ -648,8 +648,9 @@ export interface UserStats {
    */
   prompts?: number;
   /**
-   * Cumulative token usage across all reported sessions (Claude Code transcripts
-   * only; tools without transcripts contribute nothing). Privacy: counts only.
+   * Cumulative token usage across all reported sessions (Claude Code, CodeBuddy,
+   * and Codex transcripts; tools without token records contribute nothing).
+   * Privacy: counts only.
    */
   tokens?: TokenUsage;
 }
@@ -686,9 +687,9 @@ export interface UserInterventionStats {
 //
 
 /**
- * Token usage breakdown for a session/user, summed from Claude Code transcript
- * `message.usage` records (deduplicated by message id). All fields are cumulative
- * token counts; tools without a transcript (e.g. Cursor) leave these at zero.
+ * Token usage breakdown for a session/user. Claude Code and CodeBuddy usage is
+ * summed per request; Codex uses the latest cumulative transcript snapshot. All
+ * fields are cumulative token counts; tools without token records leave these at zero.
  */
 export interface TokenUsage {
   /** Sum of usage.input_tokens. */

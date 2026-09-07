@@ -83,6 +83,93 @@ describe('scanTranscriptStop — token usage', () => {
     expect(tokens).toEqual({ input: 0, output: 7, cacheRead: 0, cacheCreation: 0 });
   });
 
+  it('uses the latest cumulative Codex Desktop token_usage_record without double counting', async () => {
+    const record = (threadUsage: Record<string, number>, responseId: string) => JSON.stringify({
+      type: 'token_usage_record',
+      payload: {
+        response_id: responseId,
+        // Per-response usage must not be added when a cumulative thread snapshot exists.
+        usage: { input_tokens: 999999, output_tokens: 999999 },
+        thread_token_usage: threadUsage,
+      },
+    });
+    const p = writeTranscript([
+      record({
+        input_tokens: 1000,
+        cached_input_tokens: 300,
+        cache_write_input_tokens: 100,
+        output_tokens: 50,
+        reasoning_output_tokens: 20,
+        total_tokens: 1050,
+      }, 'resp_1'),
+      record({
+        input_tokens: 1600,
+        cached_input_tokens: 400,
+        cache_write_input_tokens: 100,
+        output_tokens: 80,
+        reasoning_output_tokens: 30,
+        total_tokens: 1680,
+      }, 'resp_2'),
+    ]);
+
+    const { tokens } = await scanTranscriptStop(p);
+    // input_tokens includes both cache buckets and output_tokens includes reasoning.
+    expect(tokens).toEqual({ input: 1100, output: 80, cacheRead: 400, cacheCreation: 100 });
+  });
+
+  it('uses the latest cumulative Codex CLI event_msg/token_count snapshot', async () => {
+    const tokenCount = (usage: Record<string, number>) => JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { total_token_usage: usage, last_token_usage: { input_tokens: 9999 } },
+      },
+    });
+    const p = writeTranscript([
+      tokenCount({ input_tokens: 500, cached_input_tokens: 200, output_tokens: 25 }),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'done' } }),
+      tokenCount({ input_tokens: 900, cached_input_tokens: 350, output_tokens: 45 }),
+    ]);
+
+    const { tokens } = await scanTranscriptStop(p);
+    expect(tokens).toEqual({ input: 550, output: 45, cacheRead: 350, cacheCreation: 0 });
+  });
+
+  it('waits for a newer Codex cumulative snapshot flushed after Stop', async () => {
+    const p = writeTranscript([
+      JSON.stringify({
+        type: 'token_usage_record',
+        payload: {
+          response_id: 'resp_old',
+          thread_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 40,
+            cache_write_input_tokens: 10,
+            output_tokens: 20,
+          },
+        },
+      }),
+    ]);
+    const timer = setTimeout(() => {
+      fs.appendFileSync(p, JSON.stringify({
+        type: 'token_usage_record',
+        payload: {
+          response_id: 'resp_new',
+          thread_token_usage: {
+            input_tokens: 400,
+            cached_input_tokens: 100,
+            cache_write_input_tokens: 20,
+            output_tokens: 60,
+          },
+        },
+      }) + '\n');
+    }, 300);
+
+    const { tokens } = await scanTranscriptStop(p, { tool: 'codex' });
+    clearTimeout(timer);
+    expect(tokens).toEqual({ input: 280, output: 60, cacheRead: 100, cacheCreation: 20 });
+  });
+
   it('parses CodeBuddy index.json (requests[].usage + user messages)', async () => {
     // CodeBuddy persists a single index.json, not Claude JSONL. Tokens live in
     // requests[].usage.{inputTokens,outputTokens}; prompts = user messages.

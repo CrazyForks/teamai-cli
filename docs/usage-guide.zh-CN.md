@@ -1080,7 +1080,7 @@ teamai dashboard --port 8080
 | 徽标 | 含义 | 数据来源 |
 |------|------|----------|
 | `💬 N` | 该会话里**人类对话的轮数**（发了几次 prompt） | `UserPromptSubmit` 事件数 |
-| `⛁ X` | 该会话累计 **token 用量**（鼠标悬停看 输入 / 输出 / 缓存读 / 缓存写 明细） | Claude Code transcript 的 `message.usage`（按 `message.id` 去重，避免重复计数） |
+| `⛁ X` | 该会话累计 **token 用量**（鼠标悬停看 输入 / 输出 / 缓存读 / 缓存写 明细） | Claude Code `message.usage`、CodeBuddy `requests[].usage`，或 Codex 最新的累计 `token_usage_record` / `event_msg.token_count` 快照 |
 
 > 隐私：只统计**轮数与 token 数量**，不落地任何 prompt 或 transcript 原文。
 

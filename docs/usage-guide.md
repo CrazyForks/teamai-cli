@@ -1085,7 +1085,7 @@ Each session card also shows two badges:
 | Badge | Meaning | Data source |
 |------|------|----------|
 | `💬 N` | The **number of human conversation turns** in the session (how many prompts were sent) | Count of `UserPromptSubmit` events |
-| `⛁ X` | The session's cumulative **token usage** (hover to see input / output / cache read / cache write breakdown) | Claude Code transcript's `message.usage` (deduplicated by `message.id` to avoid double counting) |
+| `⛁ X` | The session's cumulative **token usage** (hover to see input / output / cache read / cache write breakdown) | Claude Code `message.usage`, CodeBuddy `requests[].usage`, or the latest cumulative Codex `token_usage_record` / `event_msg.token_count` snapshot |
 
 > Privacy: only turn counts and token counts are tracked — no prompt or transcript text is ever stored.
 
