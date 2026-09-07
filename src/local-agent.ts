@@ -55,8 +55,7 @@ import {
   TEAMAI_CLAUDEMD_END,
   TeamaiConfigSchema,
   managedMcpManifestPath,
-  managedMcpWorkspaceId,
-  resolveManagedMcpOwnership,
+  managedMcpManifestKey,
   type DashboardEvent,
   type LocalConfig,
   type ManagedMcpManifest,
@@ -1269,34 +1268,23 @@ async function scanMcpFromManifest(
 ): Promise<ReportedResource[]> {
   const { resolveDataHomeForScope } = await import('./config.js');
   const dataHome = await resolveDataHomeForScope(scope, projectRoot);
-  const manifestPath = managedMcpManifestPath(dataHome);
-  const manifest = await readJson<ManagedMcpManifest>(manifestPath);
-  if (!manifest || typeof manifest !== 'object') return [];
 
-  // The partition manifest is SHARED across worktrees, so it holds per-worktree
-  // keys (`<tool>:project:<id>`). Report ONLY this scope's own keys — otherwise
-  // worktree B would report MCPs owned by worktree A and confuse the backend.
-  // - project: keys carrying THIS workspace's id (any tool), i.e.
-  //   managedMcpWorkspaceId(projectRoot). Legacy workspace-local
-  //   manifests may still hold a bare `<tool>:project`; include those too since
-  //   such a manifest belongs to exactly this workspace.
-  // - user: bare `<tool>` keys only (no `:project` segment).
-  const isProject = scope === 'project';
-  const workspaceLocalManifest = isProject && !!projectRoot
-    && dataHome === path.join(projectRoot, '.teamai');
-  const wsId = isProject && projectRoot ? managedMcpWorkspaceId(projectRoot) : '';
-  const keyBelongsToScope = (key: string): boolean => {
-    const parts = key.split(':');
-    if (!isProject) return parts.length === 1; // `<tool>`
-    if (parts.length === 3 && parts[1] === 'project') return parts[2] === wsId;
-    if (parts.length === 2 && parts[1] === 'project') return workspaceLocalManifest; // legacy bare
-    return false;
-  };
+  // Project scope reads THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope reads the
+  // single global file. Either way every record in the loaded file belongs to this
+  // scope, so no key filtering is needed.
+  let manifest: ManagedMcpManifest;
+  if (scope === 'project' && projectRoot) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifest } = await loadProjectMcpManifest(dataHome, projectRoot));
+  } else {
+    manifest = (await readJson<ManagedMcpManifest>(managedMcpManifestPath(dataHome))) ?? {};
+  }
 
   const seen = new Set<string>();
   const results: ReportedResource[] = [];
-  for (const [key, records] of Object.entries(manifest)) {
-    if (!Array.isArray(records) || !keyBelongsToScope(key)) continue;
+  for (const records of Object.values(manifest)) {
+    if (!Array.isArray(records)) continue;
     for (const rec of records) {
       if (!rec.name || seen.has(rec.name)) continue;
       seen.add(rec.name);
@@ -2297,15 +2285,20 @@ async function installMcpServer(
 
   const { resolveDataHomeForScope } = await import('./config.js');
   const dataHome = await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined);
-  const manifestPath = managedMcpManifestPath(dataHome);
-  const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  // Adopt a pre-#374 bare `<tool>:project` record only when the manifest is
-  // workspace-local (legacy <workspace>/.teamai), matching the CLI reconcile path.
-  const workspaceLocalManifest = projectScope && !!workspacePath
-    && dataHome === path.join(workspacePath, '.teamai');
-  const { key: manifestKey, records: owned } = resolveManagedMcpOwnership(
-    manifest, tool, projectScope, projectScope ? workspacePath : undefined, workspaceLocalManifest,
-  );
+  // Project scope uses THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope uses the
+  // single global file. The ownership key needs no workspace segment.
+  let manifestPath: string;
+  let manifest: ManagedMcpManifest;
+  if (projectScope && workspacePath) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, workspacePath));
+  } else {
+    manifestPath = managedMcpManifestPath(dataHome);
+    manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
+  }
+  const manifestKey = managedMcpManifestKey(tool, projectScope);
+  const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 
   if (format === 'codex') {
@@ -2364,15 +2357,20 @@ async function uninstallMcpServer(
 
   const { resolveDataHomeForScope } = await import('./config.js');
   const dataHome = await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined);
-  const manifestPath = managedMcpManifestPath(dataHome);
-  const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  // Adopt a pre-#374 bare `<tool>:project` record only when the manifest is
-  // workspace-local (legacy <workspace>/.teamai), matching the CLI reconcile path.
-  const workspaceLocalManifest = projectScope && !!workspacePath
-    && dataHome === path.join(workspacePath, '.teamai');
-  const { key: manifestKey, records: owned } = resolveManagedMcpOwnership(
-    manifest, tool, projectScope, projectScope ? workspacePath : undefined, workspaceLocalManifest,
-  );
+  // Project scope uses THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope uses the
+  // single global file. The ownership key needs no workspace segment.
+  let manifestPath: string;
+  let manifest: ManagedMcpManifest;
+  if (projectScope && workspacePath) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, workspacePath));
+  } else {
+    manifestPath = managedMcpManifestPath(dataHome);
+    manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
+  }
+  const manifestKey = managedMcpManifestKey(tool, projectScope);
+  const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 
   if (!ownedNames.has(slug)) return;

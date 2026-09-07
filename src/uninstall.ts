@@ -458,10 +458,13 @@ async function buildRemovalPlan(
 
   if (includeShared) {
     // (d3) teamai-managed MCP servers, tracked in managed-mcp.json (same
-    // ownership model as hooks). These live under ~/.teamai, so they are shared
-    // resources: only removed when the target is the last tool using teamai.
+    // ownership model as hooks). Project scope reads THIS worktree's own
+    // per-worktree manifest; user scope reads the single global file.
     const mcpManifestPath = expandHome(
-      managedMcpManifestPath(getDataHome(localConfig)),
+      managedMcpManifestPath(
+        getDataHome(localConfig),
+        localConfig.scope === 'project' ? localConfig.projectRoot : undefined,
+      ),
     );
     const mcpManifest = (await readJson<ManagedMcpManifest>(mcpManifestPath)) ?? {};
     for (const [toolKey, records] of Object.entries(mcpManifest)) {

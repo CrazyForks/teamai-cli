@@ -535,66 +535,49 @@ export type ManagedMcpManifest = Record<string, ManagedMcpRecord[]>;
  * and the local-agent install/uninstall/report paths must build the key here so
  * they agree. user scope has a single global file, so no workspace segment.
  */
-export function managedMcpManifestKey(
-  tool: string,
-  projectScope: boolean,
-  workspaceRoot?: string,
-): string {
-  if (!projectScope) return tool;
-  // Fall back to the bare project key only when no workspace is known (should not
-  // happen for a real project install); otherwise isolate by workspace identity.
-  if (!workspaceRoot) return `${tool}:project`;
-  return `${tool}:project:${managedMcpWorkspaceId(workspaceRoot)}`;
+/**
+ * Ownership key for the managed-MCP manifest, per tool and scope.
+ *
+ * Each project WORKTREE now has its OWN manifest file (see managedMcpManifestPath),
+ * so the file already isolates ownership by worktree — the key needs no workspace
+ * segment. It is `<tool>:project` for project scope and `<tool>` for user scope.
+ */
+export function managedMcpManifestKey(tool: string, projectScope: boolean): string {
+  return projectScope ? `${tool}:project` : tool;
 }
 
-/** Stable per-worktree identity segment used in project-scope manifest keys (#374). */
+/** Stable per-worktree identity segment; names the worktree's manifest subdirectory (#374). */
 export function managedMcpWorkspaceId(workspaceRoot: string): string {
   return createHash('sha1').update(workspaceRoot).digest('hex').slice(0, 12);
 }
 
-/** Legacy bare project ownership key written before workspace-scoped keys (#374). */
-export function legacyManagedMcpManifestKey(tool: string, projectScope: boolean): string {
-  return projectScope ? `${tool}:project` : tool;
+/**
+ * Path of the managed-MCP manifest.
+ *
+ * user scope keeps ONE global file at `<dataHome>/managed-mcp.json`.
+ *
+ * project scope gets a PER-WORKTREE file at
+ * `<dataHome>/workspaces/<workspaceId>/managed-mcp.json` (#374). The partition data
+ * home is shared by every linked worktree, so a single shared manifest suffered
+ * both cross-worktree ownership bleed AND lost updates under concurrent
+ * read-modify-write. A file per worktree removes both: each reconcile/install
+ * reads and rewrites only its own file, and the key needs no workspace segment.
+ */
+export function managedMcpManifestPath(dataHome: string, workspaceRoot?: string): string {
+  if (workspaceRoot) {
+    return path.join(dataHome, 'workspaces', managedMcpWorkspaceId(workspaceRoot), 'managed-mcp.json');
+  }
+  return path.join(dataHome, 'managed-mcp.json');
 }
 
 /**
- * Resolve the effective ownership entry for a (tool, scope) in a managed-mcp
- * manifest, migrating a pre-#374 bare `<tool>:project` key into the current
- * workspace-scoped key WHEN SAFE.
- *
- * A bare key is ambiguous in a shared partition (it could belong to any worktree),
- * so we only adopt it when `workspaceLocalManifest` is true — i.e. the manifest
- * lives at a legacy `<workspaceRoot>/.teamai` data home, which by construction
- * belonged to exactly this workspace. In the partition case the bare key is left
- * untouched (a later explicit layout migration that knows the source workspace can
- * claim it). Returns the resolved `{ key, records }`; when it migrates, the caller
- * writes back under `key` and the bare key is removed from `manifest`.
+ * Legacy shared manifest path (pre-#374-per-worktree). Older installs wrote all
+ * project ownership into `<dataHome>/managed-mcp.json` (possibly under a bare
+ * `<tool>:project` key, or the interim `<tool>:project:<id>` keys). The migration
+ * on first project reconcile lifts THIS worktree's records out of that file into
+ * its per-worktree file. Same path as the user-scope file, read for compat only.
  */
-export function resolveManagedMcpOwnership(
-  manifest: ManagedMcpManifest,
-  tool: string,
-  projectScope: boolean,
-  workspaceRoot: string | undefined,
-  workspaceLocalManifest: boolean,
-): { key: string; records: ManagedMcpRecord[] } {
-  const key = managedMcpManifestKey(tool, projectScope, workspaceRoot);
-  if (manifest[key]) return { key, records: manifest[key] };
-  if (projectScope && workspaceLocalManifest) {
-    const legacyKey = legacyManagedMcpManifestKey(tool, true);
-    if (legacyKey !== key && manifest[legacyKey]) {
-      // Migrate: adopt the legacy records under the workspace-scoped key and drop
-      // the ambiguous bare key. Safe because this manifest is workspace-local.
-      const records = manifest[legacyKey];
-      manifest[key] = records;
-      delete manifest[legacyKey];
-      return { key, records };
-    }
-  }
-  return { key, records: [] };
-}
-
-/** Path of the managed-MCP manifest within a resolved data home. */
-export function managedMcpManifestPath(dataHome: string): string {
+export function legacyManagedMcpManifestPath(dataHome: string): string {
   return path.join(dataHome, 'managed-mcp.json');
 }
 

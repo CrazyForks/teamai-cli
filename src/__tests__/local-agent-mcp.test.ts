@@ -342,15 +342,14 @@ describe('local-agent: MCP install/uninstall commands', () => {
     expect(mcpConfig.mcpServers['enterprise-search']).toBeDefined();
     expect(mcpConfig.mcpServers['enterprise-search'].url).toBe('https://search.example.com/mcp');
 
-    // 检查 project 级 manifest — key 现按 workspace 身份隔离(#374 P1-2C 修复:
-    // 分区内 manifest 跨 worktree 共享,所有权 key 必须带当前 workspaceRoot)。
-    // 断言存在一个 codebuddy project key(形如 `codebuddy:project:<id>`)持有该 entry。
-    const manifest = await fse.readJson(path.join(wsPath, '.teamai', 'managed-mcp.json'));
-    const projectKeys = Object.keys(manifest).filter((k) => k.startsWith('codebuddy:project'));
-    expect(projectKeys.length).toBe(1);
-    // key 必须带 workspace 身份段(不是裸 `codebuddy:project`),否则跨 worktree 会串所有权。
-    expect(projectKeys[0]).toMatch(/^codebuddy:project:[0-9a-f]{12}$/);
-    expect(manifest[projectKeys[0]]).toEqual(
+    // 检查 project 级 manifest — 现为 PER-WORKTREE 文件(#374:分区内每 worktree 一个
+    // 独立 managed-mcp.json),key 回归普通 `codebuddy:project`。定位 workspaces/ 下唯一文件
+    // (id 由 install 侧解析的 workspacePath 决定,可能经 realpath,故不硬算)。
+    const wsDir = path.join(wsPath, '.teamai', 'workspaces');
+    const ids = await fse.readdir(wsDir);
+    expect(ids.length).toBe(1);
+    const manifest = await fse.readJson(path.join(wsDir, ids[0], 'managed-mcp.json'));
+    expect(manifest['codebuddy:project']).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'enterprise-search' })]),
     );
   });

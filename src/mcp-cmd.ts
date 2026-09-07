@@ -33,8 +33,12 @@ export async function mcpList(_options: GlobalOptions): Promise<void> {
 
   const targets = await resolveMcpTargets(teamConfig, localConfig);
   const vars = await buildVarTable(localConfig);
+  // Project scope reads THIS worktree's own per-worktree manifest; user the global file.
   const manifest = (await readJson<ManagedMcpManifest>(
-    managedMcpManifestPath(getDataHome(localConfig)),
+    managedMcpManifestPath(
+      getDataHome(localConfig),
+      localConfig.scope === 'project' ? localConfig.projectRoot : undefined,
+    ),
   )) ?? {};
 
   console.log(`Team MCP servers — mcp/mcp.yaml (${servers.length}):`);
@@ -53,7 +57,7 @@ export async function mcpList(_options: GlobalOptions): Promise<void> {
     }
 
     const installedIn = targets
-      .filter((t) => (manifest[managedMcpManifestKey(t.tool, t.projectScope, localConfig.projectRoot)] ?? []).some((r) => r.name === s.name))
+      .filter((t) => (manifest[managedMcpManifestKey(t.tool, t.projectScope)] ?? []).some((r) => r.name === s.name))
       .map((t) => t.tool);
     console.log(`    installed: ${installedIn.length > 0 ? installedIn.join(', ') : '(none)'}`);
     console.log('');
