@@ -60,7 +60,7 @@ TeamAI's product is one loop, not three separate products:
 | **Rules** | Markdown-formatted team conventions, automatically merged into AI tool configs |
 | **Docs** | Shared team documentation for the AI to reference |
 | **Env** | Shared team environment variables, automatically injected into the shell |
-| **Packages** | Team-wide npm packages and Claude Code plugins, installed explicitly with `teamai install` |
+| **Packages** | Team-wide npm packages and Claude Code plugins, installed explicitly with `teamai packages` |
 
 ```
 ┌───────────────┐    teamai push (MR)    ┌───────────────────┐
@@ -329,7 +329,7 @@ With role-based skills enabled, `pull`'s skill sync source becomes the contents 
 
 ### Team packages
 
-`teamai install` lets a team declare and restore npm packages and Claude Code plugins through the existing team repository. TeamAI invokes the native `npm` and `claude plugin` CLIs; it does not distribute package contents itself.
+`teamai packages` lets a team declare and restore npm packages and Claude Code plugins through the existing team repository. TeamAI invokes the native `npm` and `claude plugin` CLIs; it does not distribute package contents itself.
 
 **Admin operations:**
 
@@ -337,17 +337,17 @@ Passing a target installs it and adds its declaration to the team repo's `teamai
 
 ```bash
 # npm package (project dependency by default)
-teamai install typescript
+teamai packages install typescript
 
 # Unscoped name@version is ambiguous with plugin@marketplace; identify npm explicitly
-teamai install typescript@5.9.2 --npm
+teamai packages install typescript@5.9.2 --npm
 
 # Global npm CLI from a specific registry
-teamai install eslint@latest --global \
+teamai packages install eslint@latest --global \
   --registry https://registry.npmjs.org/
 
 # Claude plugin
-teamai install code-review@claude-plugins-official
+teamai packages install code-review@claude-plugins-official
 
 # Share the updated teamai.yaml through the normal review flow
 teamai push
@@ -362,8 +362,8 @@ A Claude plugin target uses `plugin@marketplace`. The official `claude-plugins-o
 The existing SessionStart hook runs `teamai pull`. When the `packages` declaration changes, it asks the member to review `teamai.yaml` and install explicitly; it never runs third-party package or plugin code automatically. Pull remains detached so network latency cannot block the IDE. If a declaration arrives after the SessionStart output window, TeamAI safely queues the same notice for the next UserPromptSubmit in that session.
 
 ```bash
-teamai install             # Install every team declaration
-teamai install --dry-run   # Preview native commands without installing or writing files
+teamai packages             # Install every team declaration
+teamai packages --dry-run   # Preview native commands without installing or writing files
 teamai doctor              # Check runtimes and declared package/marketplace/plugin status
 ```
 
@@ -371,7 +371,7 @@ After a successful install, TeamAI writes a local snapshot to `teamai.lock` unde
 
 **Declaration format:**
 
-`teamai install <target>` manages this section automatically:
+`teamai packages install <target>` manages this section automatically:
 
 ```yaml
 packages:
