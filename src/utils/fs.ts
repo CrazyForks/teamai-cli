@@ -86,16 +86,23 @@ export async function writeJson(filePath: string, data: unknown): Promise<void> 
  *
  * @param filePath - Destination path (may use ~).
  * @param data - JSON-serializable value.
+ * @param options.mode - Force permission bits instead of preserving the target.
  */
-export async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+export async function writeJsonAtomic(
+  filePath: string,
+  data: unknown,
+  options?: { mode?: number },
+): Promise<void> {
   const expanded = expandHome(filePath);
   await fse.ensureDir(path.dirname(expanded));
   const content = JSON.stringify(data, null, 2) + '\n';
-  let mode = 0o600;
-  try {
-    mode = (await fse.stat(expanded)).mode & 0o777;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  let mode = options?.mode ?? 0o600;
+  if (options?.mode === undefined) {
+    try {
+      mode = (await fse.stat(expanded)).mode & 0o777;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
   const tmp = `${expanded}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   try {

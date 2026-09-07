@@ -62,7 +62,7 @@ const deliveredModel = {
 };
 
 describe('local-agent: apply_model_config', () => {
-  it('persists a direct model payload for CodeBuddy and Claude, then acks with the task type', async () => {
+  it('persists a direct model payload for CodeBuddy, then acks with the task type', async () => {
     await fse.outputJson(path.join(home, '.codebuddy/models.json'), {
       models: [{ id: 'personal-model', name: 'Personal' }],
       availableModels: ['personal-model'],
@@ -93,15 +93,8 @@ describe('local-agent: apply_model_config', () => {
     ]);
     expect(codebuddy.availableModels).toEqual(['personal-model', 'deepseek-v3-0324']);
 
-    const claude = await fse.readJson(path.join(home, '.claude/settings.json'));
-    expect(claude.env).toMatchObject({
-      ANTHROPIC_BASE_URL: 'https://proxy.example.com',
-      ANTHROPIC_AUTH_TOKEN: 'proxy-token',
-      ANTHROPIC_CUSTOM_MODEL_OPTION: 'deepseek-v3-0324',
-      ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'DeepSeek V3 0324',
-    });
-    const claudeProfile = await fse.readJson(path.join(home, '.claude/teamai-models.json'));
-    expect(claudeProfile.env).toEqual(claude.env);
+    expect(await fse.pathExists(path.join(home, '.claude/settings.json'))).toBe(false);
+    expect(await fse.pathExists(path.join(home, '.claude/teamai-models.json'))).toBe(false);
 
     expect(acks).toContainEqual(expect.objectContaining({
       id: 16,
@@ -109,7 +102,6 @@ describe('local-agent: apply_model_config', () => {
       status: 'success',
     }));
     expect((await fs.promises.stat(path.join(home, '.codebuddy/models.json'))).mode & 0o777).toBe(0o600);
-    expect((await fs.promises.stat(path.join(home, '.claude/teamai-models.json'))).mode & 0o777).toBe(0o600);
   });
 
   it('accepts the documented models wrapper and preserves conflicting user models and Claude gateway settings', async () => {
@@ -138,7 +130,7 @@ describe('local-agent: apply_model_config', () => {
       env: { ANTHROPIC_BASE_URL: 'https://user-gateway.example.com' },
       model: 'sonnet',
     });
-    expect(await fse.pathExists(path.join(home, '.claude/teamai-models.json'))).toBe(true);
+    expect(await fse.pathExists(path.join(home, '.claude/teamai-models.json'))).toBe(false);
     expect(acks[0]?.status).toBe('success');
   });
 
@@ -220,7 +212,7 @@ describe('local-agent: apply_model_config', () => {
     expect(secondAcks[0]?.status).toBe('success');
   });
 
-  it('retains CodeBuddy ownership when Claude reconciliation fails', async () => {
+  it('does not inspect unrelated Claude settings when applying a CodeBuddy model', async () => {
     await fse.outputJson(path.join(home, '.claude/settings.json'), { env: 'invalid' });
     const { reportAndSyncLocalAgent } = await import('../local-agent.js');
     const firstAcks = stubSync({
@@ -229,7 +221,7 @@ describe('local-agent: apply_model_config', () => {
       cmd: JSON.stringify(deliveredModel),
     });
     await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
-    expect(firstAcks[0]?.status).toBe('failed');
+    expect(firstAcks[0]?.status).toBe('success');
 
     await fse.outputJson(path.join(home, '.claude/settings.json'), {});
     const secondAcks = stubSync({
@@ -303,6 +295,122 @@ describe('local-agent: apply_model_config', () => {
 
     expect(acks).toEqual([]);
   });
+
+  it('reports an applied model immediately without waiting for the next session', async () => {
+    const reports: Array<Record<string, unknown>> = [];
+    const command = {
+      id: 26,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes('/local-agent/report')) {
+        reports.push(JSON.parse(init?.body ?? '{}'));
+      }
+      if (url.includes('/local-agent/sync')) {
+        return new Response(JSON.stringify({ ok: true, version: 'v2', cmds: [command] }));
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    }));
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
+
+    expect(reports).toHaveLength(2);
+    expect((reports[1]?.user_level as { models?: unknown[] }).models).toEqual([
+      {
+        provider: 'tokenhub',
+        model_id: 'deepseek-v3-0324',
+        name: 'DeepSeek V3 0324',
+        source: 'enterprise',
+      },
+    ]);
+  });
+
+  it('fails apply_model_config for an unsupported reporting agent', async () => {
+    const acks = stubSync({
+      id: 27,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'workbuddy', status: 'running' });
+
+    expect(acks[0]).toMatchObject({
+      id: 27,
+      type: 'apply_model_config',
+      status: 'failed',
+      error: expect.stringMatching(/unsupported agent/i),
+    });
+    expect(await fse.pathExists(path.join(home, '.codebuddy/models.json'))).toBe(false);
+    expect(await fse.pathExists(path.join(home, '.claude/settings.json'))).toBe(false);
+  });
+
+  it('preserves a symlinked CodeBuddy models file', async () => {
+    const target = path.join(home, 'dotfiles', 'codebuddy-models.json');
+    const link = path.join(home, '.codebuddy', 'models.json');
+    await fse.outputJson(target, { models: [] });
+    await fse.ensureDir(path.dirname(link));
+    await fse.symlink(target, link);
+    const acks = stubSync({
+      id: 28,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
+
+    expect(acks[0]?.status).toBe('success');
+    expect((await fse.lstat(link)).isSymbolicLink()).toBe(true);
+    expect((await fse.readJson(target)).models[0].id).toBe('deepseek-v3-0324');
+  });
+
+  it('preserves a symlinked Claude settings file', async () => {
+    const target = path.join(home, 'dotfiles', 'claude-settings.json');
+    const link = path.join(home, '.claude', 'settings.json');
+    await fse.outputJson(target, { env: {} });
+    await fse.ensureDir(path.dirname(link));
+    await fse.symlink(target, link);
+    const acks = stubSync({
+      id: 29,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    expect(acks[0]?.status).toBe('success');
+    expect((await fse.lstat(link)).isSymbolicLink()).toBe(true);
+    expect((await fse.readJson(target)).env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe('deepseek-v3-0324');
+  });
+
+  it('preserves the whole Claude gateway when one managed field was user-edited', async () => {
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    stubSync({
+      id: 30,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+    const edited = await fse.readJson(settingsPath);
+    edited.env.ANTHROPIC_BASE_URL = 'https://user.example.com';
+    await fse.writeJson(settingsPath, edited);
+    stubSync({
+      id: 31,
+      type: 'apply_model_config',
+      cmd: JSON.stringify({ models: [] }),
+    });
+
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    expect((await fse.readJson(settingsPath)).env).toEqual(edited.env);
+  });
 });
 
 describe('local-agent: report local model inventory', () => {
@@ -344,6 +452,59 @@ describe('local-agent: report local model inventory', () => {
     });
 
     expect(await reportedModels('codebuddy')).toBeUndefined();
+  });
+
+  it('still reports a delivered CodeBuddy model after CodeBuddy adds metadata', async () => {
+    stubSync({ id: 32, type: 'apply_model_config', cmd: JSON.stringify(deliveredModel) });
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
+
+    const configPath = path.join(home, '.codebuddy', 'models.json');
+    const config = await fse.readJson(configPath);
+    config.models[0].supportsImages = false;
+    await fse.writeJson(configPath, config);
+
+    expect(await reportedModels('codebuddy')).toEqual([
+      {
+        provider: 'tokenhub',
+        model_id: 'deepseek-v3-0324',
+        name: 'DeepSeek V3 0324',
+        source: 'enterprise',
+      },
+    ]);
+  });
+
+  it('keeps CodeBuddy report ownership after Claude receives a different full snapshot', async () => {
+    stubSync({
+      id: 33,
+      type: 'apply_model_config',
+      cmd: JSON.stringify({ models: [deliveredModel] }),
+    });
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
+
+    stubSync({
+      id: 34,
+      type: 'apply_model_config',
+      cmd: JSON.stringify({
+        models: [{
+          ...deliveredModel,
+          provider: 'openai',
+          model_id: 'gpt-4o',
+          name: 'GPT-4o',
+        }],
+      }),
+    });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    expect(await reportedModels('codebuddy')).toEqual([
+      {
+        provider: 'tokenhub',
+        model_id: 'deepseek-v3-0324',
+        name: 'DeepSeek V3 0324',
+        source: 'enterprise',
+      },
+    ]);
   });
 
   it('reports the Claude gateway model with the delivered provider restored', async () => {

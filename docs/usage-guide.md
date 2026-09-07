@@ -858,16 +858,20 @@ the documented candidate-set shape and the legacy single-model shape are accepte
   "cmd": "{\"models\":[{\"provider\":\"openai\",\"model_id\":\"gpt-4o\",\"name\":\"GPT-4o\",\"base_url\":\"https://proxy.example.com/v1\",\"api_key\":\"<ProxyToken>\",\"max_tokens\":4096,\"context_window\":128000}]}" }
 ```
 
-The candidate set is merged into CodeBuddy's user-level `~/.codebuddy/models.json`;
-user-owned entries with the same model ID are preserved. For Claude, teamai writes an
-explicit profile at `~/.claude/teamai-models.json` and also adds the gateway environment
-to `~/.claude/settings.json` when it has no conflicting user-owned Anthropic gateway
-configuration. These files are mode `0600`. A successful write is acknowledged with
+The candidate set is applied only to the agent that reported the task. CodeBuddy uses
+its user-level `~/.codebuddy/models.json`; user-owned entries with the same model ID
+are preserved. Claude gets an explicit profile at `~/.claude/teamai-models.json` and
+also receives the gateway environment in `~/.claude/settings.json` when it has no
+conflicting user-owned Anthropic gateway configuration. Unsupported agents acknowledge
+the task as failed instead of writing another agent's config. Symlinked user config
+files remain symlinks. These files are mode `0600`. A successful write is acknowledged with
 `type: "apply_model_config"`; malformed payloads are acknowledged as `failed`. Unknown
 future task types are silently skipped for protocol compatibility.
 
 The reverse direction is reported through the existing `report` call: models that
-TeamAI delivered and that still match on disk are sent as `user_level.models`.
+TeamAI recorded in its model manifest and can still identify by model ID and provider
+on disk are sent as `user_level.models`. Normal agent-added metadata does not suppress
+the report. A successful apply triggers this report immediately in the same sync run.
 User-owned models are omitted because the backend cannot resolve them. The server
 requires both `provider` and `model_id`. Like skills and rules, the field is omitted
 entirely when nothing qualifies, because a present array is treated as a full

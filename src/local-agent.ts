@@ -245,6 +245,14 @@ interface ModelConfigManifest {
    * so this is the only way to report back the provider the server sent.
    */
   providers?: Record<string, string>;
+  providersByAgent?: Record<string, Record<string, string>>;
+}
+
+function modelAgentKind(tool: string | undefined): 'codebuddy' | 'claude' | undefined {
+  const normalized = normalizeAgentType(tool ?? '');
+  if (normalized === 'codebuddy' || normalized === 'codebuddy-internal') return 'codebuddy';
+  if (normalized === 'claude') return 'claude';
+  return undefined;
 }
 
 /**
@@ -1257,9 +1265,10 @@ interface ReportedModel {
  */
 async function scanModelsFromDisk(tool: string): Promise<ReportedModel[]> {
   const manifest = (await readJson<ModelConfigManifest>(getModelManifestPath())) ?? {};
-  const providers = manifest.providers ?? {};
+  const agentKind = modelAgentKind(tool);
+  const providers = (agentKind && manifest.providersByAgent?.[agentKind]) ?? manifest.providers ?? {};
 
-  if (tool === 'codebuddy' || tool === 'codebuddy-internal') {
+  if (agentKind === 'codebuddy') {
     const doc = await readJson<{ models?: unknown }>(
       path.join(getUserHome(), '.codebuddy', 'models.json'),
     );
@@ -1271,7 +1280,10 @@ async function scanModelsFromDisk(tool: string): Promise<ReportedModel[]> {
       const { id, vendor, name } = entry as Record<string, unknown>;
       if (typeof id !== 'string' || !id) continue;
       if (typeof vendor !== 'string' || !vendor) continue;
-      if (owned[id] === undefined || entryHash(entry) !== owned[id]) continue;
+      // CodeBuddy may normalize a model entry by adding capability metadata.
+      // The manifest's model id is the durable proof that TeamAI delivered it;
+      // requiring an exact object hash would incorrectly hide such entries.
+      if (owned[id] === undefined || providers[id] !== vendor) continue;
       results.push({
         provider: vendor,
         model_id: id,
@@ -1282,7 +1294,7 @@ async function scanModelsFromDisk(tool: string): Promise<ReportedModel[]> {
     return results;
   }
 
-  if (tool === 'claude' || tool === 'claude-internal') {
+  if (agentKind === 'claude') {
     const settings = await readJson<{ env?: unknown }>(
       path.join(getUserHome(), '.claude', 'settings.json'),
     );
@@ -2090,6 +2102,21 @@ async function readJsonObject(filePath: string): Promise<Record<string, unknown>
   }
 }
 
+/** Atomically update a model dotfile without replacing a user-managed symlink. */
+async function writeModelJson(filePath: string, data: unknown): Promise<void> {
+  let targetPath = filePath;
+  try {
+    if ((await fs.promises.lstat(filePath)).isSymbolicLink()) {
+      targetPath = await fs.promises.realpath(filePath);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  // Set the temp file's mode before the atomic rename. A post-rename chmod
+  // would introduce a symlink-following TOCTOU window.
+  await writeJsonAtomic(targetPath, data, { mode: 0o600 });
+}
+
 async function reconcileCodebuddyModels(
   models: DeliveredModel[],
   fullSnapshot: boolean,
@@ -2144,8 +2171,7 @@ async function reconcileCodebuddyModels(
     doc.availableModels = available;
   }
 
-  await writeJsonAtomic(targetFile, doc);
-  await fs.promises.chmod(targetFile, 0o600);
+  await writeModelJson(targetFile, doc);
   manifest.codebuddy = nextManaged;
 }
 
@@ -2174,13 +2200,13 @@ async function reconcileClaudeModels(
   const env = { ...(rawEnv as Record<string, unknown>) };
 
   if (models.length === 0) {
-    for (const [key, hash] of Object.entries(previousHashes)) {
-      if (entryHash(env[key]) === hash) delete env[key];
-    }
-    settings.env = env;
-    if (Object.keys(previousHashes).length > 0) {
-      await writeJsonAtomic(settingsPath, settings);
-      await fs.promises.chmod(settingsPath, 0o600);
+    const canRemoveGateway = Object.entries(previousHashes).every(
+      ([key, hash]) => entryHash(env[key]) === hash,
+    );
+    if (canRemoveGateway && Object.keys(previousHashes).length > 0) {
+      for (const key of Object.keys(previousHashes)) delete env[key];
+      settings.env = env;
+      await writeModelJson(settingsPath, settings);
     }
     await remove(profilePath);
     manifest.claudeEnv = {};
@@ -2191,8 +2217,7 @@ async function reconcileClaudeModels(
   // seeds that gateway; other candidates remain discoverable from its
   // /v1/models endpoint when the gateway implements model discovery.
   const desired = claudeEnvForModel(models[0]);
-  await writeJsonAtomic(profilePath, { env: desired });
-  await fs.promises.chmod(profilePath, 0o600);
+  await writeModelJson(profilePath, { env: desired });
 
   const conflictKeys = new Set([
     ...Object.keys(desired),
@@ -2212,26 +2237,33 @@ async function reconcileClaudeModels(
   }
   Object.assign(env, desired);
   settings.env = env;
-  await writeJsonAtomic(settingsPath, settings);
-  await fs.promises.chmod(settingsPath, 0o600);
+  await writeModelJson(settingsPath, settings);
   manifest.claudeEnv = Object.fromEntries(
     Object.entries(desired).map(([key, value]) => [key, entryHash(value)]),
   );
 }
 
-async function applyModelConfig(command: LocalAgentCommand): Promise<void> {
+async function applyModelConfig(command: LocalAgentCommand, tool: string | undefined): Promise<void> {
   const { models, fullSnapshot } = parseDeliveredModels(command.cmd);
   const manifest = (await readJson<ModelConfigManifest>(getModelManifestPath())) ?? {};
-  manifest.providers = {
-    ...(fullSnapshot ? {} : manifest.providers),
+  const agentKind = modelAgentKind(tool);
+  if (!agentKind) {
+    throw new Error(`apply_model_config: unsupported agent "${tool ?? ''}"`);
+  }
+  const previousProviders = manifest.providersByAgent?.[agentKind] ?? manifest.providers ?? {};
+  const providers = {
+    ...(fullSnapshot ? {} : previousProviders),
     ...Object.fromEntries(models.map((model) => [model.model_id, model.provider])),
   };
-  await reconcileCodebuddyModels(models, fullSnapshot, manifest);
-  // Persist CodeBuddy ownership before touching Claude. If Claude settings are
-  // malformed and the task is retried, the already-written CodeBuddy entries
-  // must still be recognized as managed rather than mistaken for user config.
-  await writeJsonAtomic(getModelManifestPath(), manifest);
-  await reconcileClaudeModels(models, manifest);
+  manifest.providersByAgent = {
+    ...manifest.providersByAgent,
+    [agentKind]: providers,
+  };
+  if (agentKind === 'codebuddy') {
+    await reconcileCodebuddyModels(models, fullSnapshot, manifest);
+  } else {
+    await reconcileClaudeModels(models, manifest);
+  }
   await writeJsonAtomic(getModelManifestPath(), manifest);
 }
 
@@ -2676,7 +2708,7 @@ async function executeCommand(
   context: LocalAgentContext,
 ): Promise<string | undefined> {
   if (command.type === 'apply_model_config') {
-    await applyModelConfig(command);
+    await applyModelConfig(command, context.tool);
     return;
   }
   // uninstall_teamai (clawpro three-phase: cmd = "teamai uninstall --force
@@ -2718,8 +2750,9 @@ async function processCommands(
   config: LocalAgentConfig,
   commands: LocalAgentCommand[],
   context: LocalAgentContext,
-): Promise<void> {
+): Promise<boolean> {
   const tag = localAgentTag(context);
+  let modelConfigApplied = false;
   for (const command of commands) {
     // Keep these special types aligned with executeCommand's direct branches.
     // Resource commands are recognized generically by commandKind/action;
@@ -2739,11 +2772,12 @@ async function processCommands(
     try {
       const version = await executeCommand(config, command, context);
       await ackCommand(config, tag, command, 'success', version);
+      if (command.type === 'apply_model_config') modelConfigApplied = true;
       log.debug(`${tag} command ${command.id} (${command.type ?? ''}) succeeded`);
       // Uninstall succeeded — skip remaining commands; the hook process exits naturally.
       if (command.type === 'uninstall_teamai') {
         log.debug(`${tag} uninstall_teamai completed — remaining commands skipped`);
-        return;
+        return modelConfigApplied;
       }
     } catch (e) {
       const error = (e as Error).message;
@@ -2755,6 +2789,7 @@ async function processCommands(
       }
     }
   }
+  return modelConfigApplied;
 }
 
 export async function reportAndSyncLocalAgent(context: LocalAgentContext): Promise<boolean> {
@@ -2849,7 +2884,15 @@ export async function reportAndSyncLocalAgent(context: LocalAgentContext): Promi
     const commands = cmds && cmds.length > 0 ? cmds : (syncResponse.commands ?? []);
     if (commands.length > 0) {
       log.debug(`${tag} sync returned ${commands.length} command(s): ${commands.map((c) => `${c.type}#${c.id}`).join(', ')}`);
-      await processCommands(config, commands, context);
+      const modelConfigApplied = await processCommands(config, commands, context);
+      if (modelConfigApplied && !skipReport) {
+        const reportPayload = await buildReportPayload(config, context);
+        await localAgentFetch(config, tag, 'report', {
+          method: 'POST',
+          body: JSON.stringify(reportPayload),
+        });
+        log.debug(`${tag} model config report OK`);
+      }
     }
     log.debug(`${tag} sync OK (${commands.length} command(s))`);
   } catch (e) {
