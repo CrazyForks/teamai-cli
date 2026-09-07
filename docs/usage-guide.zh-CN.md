@@ -140,7 +140,47 @@ teamai init <group>/TeamAi-<team> --scope project --role hai_dev --force
 | `--inherit-user-scope` | 仅 project scope：同时同步安全的 user 资源并检索 user 知识 |
 | `--no-inherit-user-scope` | 关闭当前项目先前配置的 user scope 继承 |
 | `--role <id>` | 直接指定 primaryRole，跳过角色交互选择 |
+| `--project <ids>` | 从 `manifest/projects.yaml` 激活的逻辑项目（逗号分隔）。决定本目录同步哪些项目的资源与 learnings。详见下方 [多项目](#多项目project-作为与-role-正交的维度) |
 | `--force` | 覆盖已有配置，跳过确认提示 |
+
+#### 多项目：`project` 作为与 `role` 正交的维度
+
+当一个团队仓库承载多个项目时，`project` 是与 `role` 平级的第二个分发维度，由
+admin 在 `manifest/projects.yaml` 中声明。`role` 回答「我的职能是什么」，`project`
+回答「这个目录属于哪个项目」。两者正交且相加 —— 成员得到的是其 role namespace
+与激活 project namespace 的**并集**（两者之间没有覆盖关系）。
+
+项目身份跟着工作目录走，与 `--role` 完全同一个模式：
+
+```bash
+cd ~/work/hai-inference && teamai init <team-repo> --project hai-inference
+cd ~/work/billing       && teamai init <team-repo> --project billing
+```
+
+此后每个目录只同步自己项目的 skills/rules/CLAUDE.md 与 learnings。要点：
+
+- **learnings 隔离。** 仓库 `learnings/` 根目录对全团队共享；项目私有经验放在
+  `learnings/<project-id>/` 子目录下，只对该项目成员的 `teamai recall` 可见。
+  未激活任何项目的目录只能看到共享的根目录。
+- **不自动激活。** 与「唯一 role 会被自动选中」不同，唯一的 project 不会自动选中
+  —— 成员可以不属于任何项目（仍能获得 `common` 与共享的 learnings 根）。
+- **向后兼容。** 没有 `manifest/projects.yaml` 的仓库行为与之前完全一致；现存扁平
+  的 `learnings/*.md` 继续对所有人共享（零迁移）。
+- **`teamai contribute`** 在恰好激活一个项目时，把经验落到该项目子目录，否则落到
+  共享的根目录。
+
+`manifest/projects.yaml` 示例：
+
+```yaml
+version: 1
+projects:
+  - id: hai-inference
+    name: HAI Inference
+    resources:
+      knowledge: [hai-inference]
+      skills:    [hai-inference]
+      learnings: [hai-inference]
+```
 
 本地配置示例：
 
@@ -323,7 +363,7 @@ teamai pull --dry-run    # 试运行，不实际修改
 
 > Project scope 默认与 user scope 隔离。当前工作目录包含 project scope 的 `.teamai/config.yaml` 时，`pull` 会处理该项目并跳过 user scope；仅当本地配置包含 `inheritUserScope: true` 时，才会先刷新安全的 user 资源通道。当前目录没有 project 配置时，`pull` 处理 user scope。project 模式下，user 的 `env`、MCP 定义、sources、reporting 和写入行为仍保持隔离。hooks 是唯一例外：project scope 的 hooks 会注入到你的 **HOME** 工具设置（`~/.claude/settings.json` 等），而非 `<projectRoot>`——因为内置 hooks 依据传给 `hook-dispatch` 的 `cwd` 门控，且 `~/.claude` 恒存在、能通过「已安装工具」门槛（详见 Hooks 章节）。self 单仓模式则把 hooks 保留在业务仓库里，随 clone 传播。
 
-启用角色化 skills 后，`pull` 的 skills 同步来源会变成 `skills/<namespace>/` 中的内容，按 `primaryRole + additionalRoles` 展开对应的 namespace，拍平安装到本地各 AI 工具 skills 目录。`rules/`、`docs/`、`learnings/` 仍然保持原有全局同步逻辑。
+启用角色化 skills 后，`pull` 的 skills 同步来源会变成 `skills/<namespace>/` 中的内容，按 `primaryRole + additionalRoles` 展开对应的 namespace，拍平安装到本地各 AI 工具 skills 目录。`rules/`、`docs/` 仍然保持原有同步逻辑。`learnings/` 根目录对所有人共享，而 `learnings/<project-id>/` 子目录只对本目录激活的项目同步（见 [多项目](#多项目project-作为与-role-正交的维度)）。
 
 ### 团队包
 
