@@ -1067,7 +1067,7 @@ teamai dashboard --port 8080
 |------|------|----------|
 | `interrupt` | 用户在 agent 执行中途按 ESC 打断 | transcript 中被中断的 turn |
 | `toolReject` | 用户拒绝某个工具调用（permission deny） | transcript 中标记拒绝的 tool_result |
-| `correction` | agent stop 后 60s 内用户追加含「不对 / 重来 / 错了 / wrong / redo」等纠偏词的 prompt | stop → prompt_submit 事件模式 |
+| `correction` | agent stop 后 60s 内用户追加含「不对 / 重来 / 错了 / wrong / redo / 違う / やり直し」等纠偏词（中、英、日）的 prompt | stop → prompt_submit 事件模式 |
 
 > 隐私：只统计**次数**，不落地任何 prompt 或 transcript 原文。
 

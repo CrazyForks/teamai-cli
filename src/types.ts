@@ -914,6 +914,8 @@ export const CORRECTION_WINDOW_MS = 60 * 1000;
 export const CORRECTION_KEYWORDS = [
   '不对', '不是', '错了', '错误', '重来', '重新', '撤销', '回退', '别这样', '不要',
   'wrong', 'redo', 'undo', 'revert', 'mistake', 'instead', "don't", "that's not", 'not what',
+  // Japanese: "that's wrong" / "not that" / "redo" / "you got it wrong" / "on your own" / "put it back".
+  '違う', 'ちがう', 'そうじゃな', 'そうではな', 'やり直', 'やりなおし', '間違って', '間違え', '勝手に', '戻して',
 ];
 /** Max bytes to scan from a transcript when counting interventions (guards huge files). */
 export const INTERVENTION_SCAN_MAX_BYTES = 50 * 1024 * 1024;
