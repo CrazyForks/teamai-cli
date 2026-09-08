@@ -1299,9 +1299,16 @@ function collectManifestSlugs(manifest: LocalAgentManifest): { skills: Set<strin
  * Scan the managed-mcp manifest for a given scope and return MCP servers as
  * ReportedResource entries. Only servers tracked in managed-mcp.json (i.e.
  * installed via HTTP distribution) are reported with source = 'enterprise'.
+ *
+ * Results are scoped to the current `tool` so a report never leaks another
+ * tool's MCP inventory. The manifest is keyed by the same key the installer
+ * writes under (see `installMcpServer`): `tool` at user scope, `${tool}:project`
+ * at project scope. `tool` is the raw hook-context value (not run through
+ * normalizeAgentType), matching how the installer keys the manifest.
  */
 async function scanMcpFromManifest(
   scope: 'user' | 'project',
+  tool: string,
   projectRoot?: string,
 ): Promise<ReportedResource[]> {
   const { resolveDataHomeForScope } = await import('./config.js');
@@ -1319,15 +1326,16 @@ async function scanMcpFromManifest(
     manifest = (await readJson<ManagedMcpManifest>(managedMcpManifestPath(dataHome))) ?? {};
   }
 
+  const manifestKey = `${tool}${scope === 'project' ? ':project' : ''}`;
+  const records = manifest[manifestKey];
+  if (!Array.isArray(records)) return [];
+
   const seen = new Set<string>();
   const results: ReportedResource[] = [];
-  for (const records of Object.values(manifest)) {
-    if (!Array.isArray(records)) continue;
-    for (const rec of records) {
-      if (!rec.name || seen.has(rec.name)) continue;
-      seen.add(rec.name);
-      results.push({ slug: rec.name, source: 'enterprise' });
-    }
+  for (const rec of records) {
+    if (!rec.name || seen.has(rec.name)) continue;
+    seen.add(rec.name);
+    results.push({ slug: rec.name, source: 'enterprise' });
   }
   return results.sort((a, b) => a.slug.localeCompare(b.slug));
 }
@@ -1513,7 +1521,7 @@ export async function buildReportPayload(
   const userLevel: Record<string, unknown> = { group_id: config.userGroupId };
   if (userScope.skills.length > 0) userLevel.skills = userScope.skills;
   if (userScope.rules.length > 0) userLevel.rules = userScope.rules;
-  const userMcps = await scanMcpFromManifest('user');
+  const userMcps = await scanMcpFromManifest('user', tool);
   if (userMcps.length > 0) userLevel.mcps = userMcps;
   // Omitted when empty for the same full-sync reason as skills/rules: the
   // server treats a present array as a snapshot, so [] would wipe the models.
@@ -1551,7 +1559,7 @@ export async function buildReportPayload(
         };
         if (wsScope.skills.length > 0) workspace.skills = wsScope.skills;
         if (wsScope.rules.length > 0) workspace.rules = wsScope.rules;
-        const wsMcps = await scanMcpFromManifest('project', wsPath);
+        const wsMcps = await scanMcpFromManifest('project', tool, wsPath);
         if (wsMcps.length > 0) workspace.mcps = wsMcps;
         return workspace;
       }),

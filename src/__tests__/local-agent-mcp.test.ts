@@ -481,4 +481,43 @@ describe('local-agent: MCP install/uninstall commands', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'clawpro' })]),
     );
   });
+
+  // ─── issue #427: MCP inventory 按工具隔离，不跨工具合并 ────────────
+  it('buildReportPayload does not leak another tool\'s MCPs (issue #427)', async () => {
+    // 仅为 codebuddy 安装 MCP（runResponse 默认 tool=codebuddy）
+    await runResponse({
+      cmds: [{
+        id: 9050,
+        type: 'install_mcp',
+        scope: 'user',
+        slug: 'codebuddy-only-mcp',
+        version: '1.0.0',
+        mcp_config: { transport: 'http', url: 'https://cb.example.com/mcp' },
+      }],
+    });
+
+    // manifest 里只有 codebuddy 拥有该 MCP
+    const manifest = await fse.readJson(path.join(tmpDir, '.teamai', 'managed-mcp.json'));
+    expect(manifest.codebuddy).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'codebuddy-only-mcp' })]),
+    );
+
+    const { buildReportPayload, loadLocalAgentConfig } = await import('../local-agent.js');
+    const config = await loadLocalAgentConfig();
+
+    // workbuddy 的 report 不应包含 codebuddy 的 MCP
+    const wbPayload = await buildReportPayload(config!, { cwd: tmpDir, tool: 'workbuddy', status: 'running' });
+    const wbUserLevel = wbPayload.user_level as Record<string, unknown>;
+    expect(wbUserLevel.mcps).toBeUndefined();
+
+    // codebuddy 自身的 report 仍应包含它
+    const cbPayload = await buildReportPayload(config!, { cwd: tmpDir, tool: 'codebuddy', status: 'running' });
+    const cbUserLevel = cbPayload.user_level as Record<string, unknown>;
+    const cbMcps = cbUserLevel.mcps as Array<{ slug: string; source: string }>;
+    expect(cbMcps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slug: 'codebuddy-only-mcp', source: 'enterprise' }),
+      ]),
+    );
+  });
 });
