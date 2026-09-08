@@ -161,8 +161,16 @@ leaves data half-in-both-places:
 3. Atomic switch: fse.rename(staging → partition)  (same-filesystem, atomic).
 4. Write <partition>/anchor with the projectAnchor path — the slug is a one-way
    sha256, so this file is the only reverse lookup; it lives off the workspace.
-5. Release the lock, then fse.rename(legacyDir → legacyDir.bak). The backup is NEVER
-   auto-deleted: it is the manual rollback path.
+5. Release the lock, then retire the source:
+   a. Drop a self-contained `.gitignore` (`*`) INTO legacyDir first. An old
+      install's `.teamai/` was often protected only by a repo-root rule matching
+      `.teamai/`, which does NOT match `.teamai.bak/` — so without this the rename
+      would expose the plaintext env/token to the next `git add`. Written before
+      the rename so the credentials are never in a non-ignored directory.
+   b. Rename legacyDir → the first FREE `.teamai.bak[.N]` name. An existing backup
+      (a prior migration's, or the user's own) is NEVER removed — it may hold
+      irreplaceable data — so we pick `.teamai.bak`, else `.teamai.bak.1`, …
+   The backup is NEVER auto-deleted: it is the manual rollback path.
 ```
 
 Interrupt recovery: staging is a separate sibling dir, so a crash before step 3 leaves

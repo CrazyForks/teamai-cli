@@ -34,6 +34,10 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
 }
 
+function gitOut(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, stdio: 'pipe' }).toString();
+}
+
 let base: string;
 let repoRoot: string;
 let homeDir: string;
@@ -283,6 +287,43 @@ describe('runMigration', () => {
     expect(await fse.pathExists(`${legacyDir}.bak`)).toBe(false);
     expect(await fse.pathExists(projectDataHome(repoRoot))).toBe(false);
     expect(await fse.pathExists(`${projectDataHome(repoRoot)}.staging`)).toBe(false);
+  });
+
+  it('never overwrites an existing .teamai.bak — picks a fresh name instead (no data loss)', async () => {
+    await seedLegacyLayout();
+    // The user (or a prior migration) already has a .teamai.bak with data.
+    const existingBak = `${legacyDir}.bak`;
+    await fse.ensureDir(existingBak);
+    await fse.writeFile(path.join(existingBak, 'only-copy.txt'), 'irreplaceable');
+
+    await runMigration((await planMigration(repoRoot))!);
+
+    // The pre-existing backup is untouched...
+    expect(await fse.readFile(path.join(existingBak, 'only-copy.txt'), 'utf-8')).toBe('irreplaceable');
+    // ...and the migration's own backup went to a fresh name.
+    expect(await fse.pathExists(path.join(`${legacyDir}.bak.1`, 'config.yaml'))).toBe(true);
+  });
+
+  it('keeps the retired backup git-ignored so a `git add -A` cannot leak its secrets', async () => {
+    // Precondition that makes this dangerous: the legacy .teamai is protected
+    // ONLY by a repo-root `.gitignore` rule for `.teamai/`, which does not match
+    // `.teamai.bak/`. Without an in-dir .gitignore the rename would expose the
+    // plaintext env/token to the next commit.
+    await fse.writeFile(path.join(repoRoot, '.gitignore'), '.teamai/\n');
+    await seedLegacyLayout();
+    await fse.writeFile(path.join(legacyDir, 'token'), 'api-key-xyz\n');
+    // sanity: env IS ignored pre-migration
+    expect(gitOut(repoRoot, 'status', '--porcelain', '--ignored')).toContain('.teamai/');
+
+    await runMigration((await planMigration(repoRoot))!);
+
+    git(repoRoot, 'add', '-A');
+    const staged = gitOut(repoRoot, 'diff', '--cached', '--name-only');
+    expect(staged.split('\n').filter((l) => l.includes('.teamai.bak'))).toHaveLength(0);
+    // The secrets are unreadable via git but still on disk (rollback intact).
+    expect(() => git(repoRoot, 'show', ':.teamai.bak/env')).toThrow();
+    expect(() => git(repoRoot, 'show', ':.teamai.bak/token')).toThrow();
+    expect(await fse.pathExists(path.join(`${legacyDir}.bak`, 'env'))).toBe(true);
   });
 
   it('migrates an http-mode install (no team-repo clone)', async () => {

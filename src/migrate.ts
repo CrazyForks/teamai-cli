@@ -307,10 +307,29 @@ async function rebasePath(
  * Retire the source dir to a `.bak` sibling (same-fs → atomic rename). Never
  * auto-deleted: it is the manual rollback path (downgrading to an older teamai
  * is not supported — see release notes / design doc R6). Returns the backup path.
+ *
+ * Two safety measures beyond a plain rename:
+ *  - **Never overwrite an existing backup.** A pre-existing `.teamai.bak/` (from a
+ *    prior migration, or the user's own) may hold irreplaceable data, so we pick
+ *    the first FREE name (`.teamai.bak`, `.teamai.bak.1`, …) instead of removing
+ *    whatever is there.
+ *  - **Keep the backup git-ignored.** An old install's `.teamai/` was often
+ *    protected only by a repo-root `.gitignore` rule matching `.teamai/`, which
+ *    does NOT match `.teamai.bak/` — so after the rename a `git add -A` would
+ *    stage the plaintext `env`/`token` in the backup. We drop a self-contained
+ *    `.gitignore` (`*`) INTO the dir BEFORE renaming, so the backup ignores its
+ *    own contents regardless of its final name or the repo's ignore rules.
  */
 async function retireLegacy(legacyDir: string): Promise<string> {
-  const backup = `${legacyDir}.bak`;
-  await remove(backup);
+  // Make the backup ignore everything it contains, independent of repo rules and
+  // the backup's eventual name. Written before the rename so there is never a
+  // window in which the credentials sit in a non-ignored directory.
+  await writeFile(path.join(legacyDir, '.gitignore'), '# teamai migration backup — ignore everything\n*\n');
+
+  let backup = `${legacyDir}.bak`;
+  for (let n = 1; await pathExists(backup); n++) {
+    backup = `${legacyDir}.bak.${n}`;
+  }
   await fse.rename(legacyDir, backup);
   return backup;
 }
