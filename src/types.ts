@@ -688,8 +688,9 @@ export interface UserInterventionStats {
 
 /**
  * Token usage breakdown for a session/user. Claude Code and CodeBuddy usage is
- * summed per request; Codex uses the latest cumulative transcript snapshot. All
- * fields are cumulative token counts; tools without token records leave these at zero.
+ * summed per request. Codex uses a thread-level cumulative snapshot when available;
+ * legacy rollout-scoped snapshots are summed once per transcript. All fields are
+ * cumulative token counts; tools without token records leave these at zero.
  */
 export interface TokenUsage {
   /** Sum of usage.input_tokens. */
@@ -701,6 +702,9 @@ export interface TokenUsage {
   /** Sum of usage.cache_creation_input_tokens. */
   cacheCreation: number;
 }
+
+/** Scope of a cumulative token snapshot captured from an agent transcript. */
+export type TokenSnapshotScope = 'session' | 'transcript';
 
 /** A fresh zeroed TokenUsage. */
 export function emptyTokenUsage(): TokenUsage {
@@ -733,7 +737,7 @@ export interface SessionMetrics {
   correction: number;
   /** Number of human conversation turns (UserPromptSubmit events). */
   prompts: number;
-  /** Cumulative token usage (latest Stop snapshot). */
+  /** Cumulative token usage across the logical session. */
   tokens: TokenUsage;
 }
 
@@ -777,12 +781,17 @@ export interface DashboardEvent {
    */
   interventions?: { interrupt: number; toolReject: number; toolError?: number };
   /**
-   * Cumulative token usage scanned from the transcript at Stop time. Full snapshot
-   * (idempotent): each Stop carries the running total for the whole session, so a
-   * later Stop overrides an earlier one in rebuildSessions. Absent for tools with
-   * no transcript (e.g. Cursor) and for sessions with no recorded usage.
+   * Cumulative token usage scanned from the transcript at Stop time. Absent for
+   * tools with no transcript (e.g. Cursor) and for sessions with no recorded usage.
    */
   tokens?: TokenUsage;
+  /**
+   * Scope of `tokens` when the producer exposes it. Codex `token_usage_record`
+   * snapshots cover the logical session, while legacy `event_msg.token_count`
+   * snapshots cover one rollout/transcript file. Older events and other agents omit
+   * this field and retain the historical latest-Stop behavior.
+   */
+  tokenScope?: TokenSnapshotScope;
   /**
    * Cumulative count of human prompt turns scanned from the transcript at Stop time.
    * Full snapshot (idempotent), sourced from the non-compactable transcript so the
