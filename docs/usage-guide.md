@@ -1072,7 +1072,7 @@ Each session card shows a `⚠ N` badge, counting the **number of human interven
 |------|------|----------|
 | `interrupt` | User pressed ESC to interrupt the agent mid-execution | An interrupted turn in the transcript |
 | `toolReject` | User rejected a tool call (permission deny) | A tool_result marked as rejected in the transcript |
-| `correction` | Within 60s after the agent stops, the user submits a follow-up prompt containing a correction keyword ("not right" / "redo" / "wrong" / etc.) | The stop → prompt_submit event pattern |
+| `correction` | Within 60s after the agent stops, the user submits a follow-up prompt containing a correction keyword ("not right" / "redo" / "wrong" / 「違う」 / 「やり直し」 / etc. — Chinese, English and Japanese) | The stop → prompt_submit event pattern |
 
 > Privacy: only counts are tracked — no prompt or transcript text is ever stored.
 

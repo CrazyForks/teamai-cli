@@ -699,6 +699,26 @@ describe('rebuildSessions interventions', () => {
     expect(sessions[0].interventions.correction).toBe(0);
   });
 
+  it('counts a Japanese correction prompt within the window', () => {
+    const t0 = new Date();
+    const sessions = rebuildSessions([
+      { type: 'session_start', timestamp: t0.toISOString(), sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'stop', timestamp: t0.toISOString(), sessionId: 's1', tool: 'claude' },
+      { type: 'prompt_submit', timestamp: new Date(t0.getTime() + 10_000).toISOString(), sessionId: 's1', tool: 'claude', promptSummary: '違う、そうじゃない。やり直して' },
+    ]);
+    expect(sessions[0].interventions.correction).toBe(1);
+  });
+
+  it('does not count a Japanese follow-up task as correction', () => {
+    const t0 = new Date();
+    const sessions = rebuildSessions([
+      { type: 'session_start', timestamp: t0.toISOString(), sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'stop', timestamp: t0.toISOString(), sessionId: 's1', tool: 'claude' },
+      { type: 'prompt_submit', timestamp: new Date(t0.getTime() + 5_000).toISOString(), sessionId: 's1', tool: 'claude', promptSummary: '次はテスト環境へデプロイして' },
+    ]);
+    expect(sessions[0].interventions.correction).toBe(0);
+  });
+
   it('does not count a correction-keyword prompt outside the time window', () => {
     const t0 = new Date();
     const sessions = rebuildSessions([
