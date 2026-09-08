@@ -287,3 +287,13 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 ## 贡献
 
 欢迎提交 PR！请先阅读 [CONTRIBUTING.md](.github/CONTRIBUTING.md)。
+
+## 贡献者
+
+感谢每一位为 TeamAI 贡献代码的伙伴！
+
+<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
+</a>
+
+由 [contrib.rocks](https://contrib.rocks) 生成。
