@@ -128,6 +128,6 @@ is a P1 concern. This keeps P0 independently reviewable (issue R7).
 
 ### Explicitly out of scope
 
-`teamai migrate` / `gc` / `--revert` commands; cross-project shared team-repo clone;
-Codex `.agents/skills` landing (separate issue). Downgrade to an older teamai after
+`teamai migrate` / `gc` / `--revert` commands; cross-project shared team-repo clone.
+Downgrade to an older teamai after
 P1 migration is not supported (`.teamai.bak/` is the manual rollback path).

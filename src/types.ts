@@ -203,6 +203,8 @@ export interface SourceInstallManifest {
   lastPull: string;
   /** Skill names currently deployed from this source. */
   installedSkills: string[];
+  /** Per-skill deployment paths, relative to the configured scope root. */
+  installedPaths?: Record<string, string[]>;
 }
 
 /** TTL for source repo pull: don't re-pull within this duration (ms). */
