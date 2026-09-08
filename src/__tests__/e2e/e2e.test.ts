@@ -83,9 +83,19 @@ describe('CLI basics', () => {
 
   it('--help should list core commands', async () => {
     const { output } = await runCLI(['--help']);
-    for (const cmd of ['init', 'pull', 'push', 'status', 'members', 'tags', 'uninstall']) {
+    for (const cmd of ['init', 'pull', 'push', 'status', 'members', 'tags', 'packages', 'uninstall']) {
       expect(output).toContain(cmd);
     }
+  });
+
+  it('teamai packages exposes an install subcommand', async () => {
+    const pkgHelp = await runCLI(['packages', '--help']);
+    const installHelp = await runCLI(['packages', 'install', '--help']);
+    expect(pkgHelp.code).toBe(0);
+    expect(installHelp.code).toBe(0);
+    // Parent lists the install subcommand; the subcommand is reachable.
+    expect(pkgHelp.output).toContain('install');
+    expect(installHelp.output).toContain('Install team npm packages and Claude plugins');
   });
 });
 

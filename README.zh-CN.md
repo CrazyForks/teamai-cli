@@ -168,11 +168,11 @@ teamai source remove other-team
 共享并一键恢复团队的 npm 包和 Claude Code 插件：
 
 ```bash
-teamai install typescript
-teamai install typescript@5.9.2 --npm
-teamai install code-review@claude-plugins-official
+teamai packages install typescript
+teamai packages install typescript@5.9.2 --npm
+teamai packages install code-review@claude-plugins-official
 teamai push       # 分享团队声明
-teamai install    # 安装团队声明的全部包
+teamai packages    # 安装团队声明的全部包
 ```
 
 完整工作流和配置见[使用指南](docs/usage-guide.zh-CN.md#团队包)。
@@ -259,7 +259,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | `teamai init` | 初始化：OAuth 登录、关联仓库、注册成员、注入 hooks |
 | `teamai pull` | 拉取团队资源并注入到本地 AI 工具 |
 | `teamai push` | 推送本地资源到分支并创建合并请求 |
-| `teamai install [target]` | 安装团队 npm 包和 Claude 插件；带 target 时同步更新声明 |
+| `teamai packages [install] [target]` | 安装团队 npm 包和 Claude 插件。裸 `teamai packages` 安装全部；`teamai packages install <target>` 添加单个并更新声明 |
 | `teamai status` | 显示本地与团队仓库的差异 |
 | `teamai contribute` | 将 session 经验分享到团队仓库 |
 | `teamai recall <query>` | 搜索团队知识库（BM25 + 图谱增强） |

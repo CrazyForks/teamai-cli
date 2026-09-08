@@ -32,7 +32,7 @@ export function buildPackageHintMessage(
   ].filter(Boolean).join(' and ');
   return [
     `[teamai:pkg-hint] Team package declarations changed (${summary}).`,
-    'Review the packages section, then run `teamai install` to apply it.',
+    'Review the packages section, then run `teamai packages` to apply it.',
     'TeamAI never installs third-party package or plugin code automatically at SessionStart.',
   ].join('\n');
 }

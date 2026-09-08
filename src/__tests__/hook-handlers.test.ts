@@ -321,7 +321,7 @@ describe('hook-handlers registry', () => {
   });
 
   it('delivers a post-pull package hint on prompt-submit for Claude', async () => {
-    mockTakePendingPackageHint.mockResolvedValue('Run `teamai install`');
+    mockTakePendingPackageHint.mockResolvedValue('Run `teamai packages`');
     const handler = buildHandlerRegistry().find(
       (r) => r.event === 'prompt-submit' && r.handler.name === 'package-pending-hint',
     )!.handler;
@@ -329,7 +329,7 @@ describe('hook-handlers registry', () => {
     const output = await handler.execute({ session_id: 's6', cwd: '/x' }, 'claude');
 
     expect(JSON.parse(output!).hookSpecificOutput.additionalContext)
-      .toBe('Run `teamai install`');
+      .toBe('Run `teamai packages`');
   });
 
   it('post-tool-use wildcard has dashboard-report', () => {

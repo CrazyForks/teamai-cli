@@ -70,7 +70,7 @@ describe('package SessionStart hint', () => {
     const output = await computePackageHintOutput(cwd);
     expect(output).not.toBeNull();
     const parsed = JSON.parse(output!);
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('teamai install');
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('teamai packages');
     expect(parsed.hookSpecificOutput.additionalContext).toContain('never installs');
   });
 
@@ -105,7 +105,7 @@ describe('package SessionStart hint', () => {
 
     try {
       expect(await computePackageHintOutput(cwd)).toBeNull();
-      expect(await computePackageHintOutput(otherProject)).toContain('teamai install');
+      expect(await computePackageHintOutput(otherProject)).toContain('teamai packages');
     } finally {
       fs.rmSync(otherProject, { recursive: true, force: true });
     }
@@ -128,7 +128,7 @@ describe('package SessionStart hint', () => {
     await stashPackageHintAfterPull(cwd, 'session-1', beforeHash);
 
     expect(await claimPackageHintOutput(cwd, 'session-1')).toBeNull();
-    expect(await takePendingPackageHint('session-1')).toContain('teamai install');
+    expect(await takePendingPackageHint('session-1')).toContain('teamai packages');
     expect(await takePendingPackageHint('session-1')).toBeNull();
   });
 });

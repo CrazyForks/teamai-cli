@@ -168,11 +168,11 @@ The add/remove change takes effect locally right away, and subscribed skills syn
 Share and restore the team's npm packages and Claude Code plugins:
 
 ```bash
-teamai install typescript
-teamai install typescript@5.9.2 --npm
-teamai install code-review@claude-plugins-official
+teamai packages install typescript
+teamai packages install typescript@5.9.2 --npm
+teamai packages install code-review@claude-plugins-official
 teamai push       # Share the declarations
-teamai install    # Install everything declared by the team
+teamai packages    # Install everything declared by the team
 ```
 
 See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
@@ -259,7 +259,7 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 | `teamai init` | Initialize: OAuth login, link repo, register member, inject hooks |
 | `teamai pull` | Pull team resources and inject into local AI tools |
 | `teamai push` | Push local resources to a branch and open a Merge Request |
-| `teamai install [target]` | Install declared npm packages and Claude plugins; with a target, also update `teamai.yaml` |
+| `teamai packages [install] [target]` | Install declared npm packages and Claude plugins; with a target, also update `teamai.yaml`. Bare `teamai packages` installs everything; `teamai packages install <target>` adds one |
 | `teamai status` | Show local vs team repo diff |
 | `teamai contribute` | Share session experience to team repo |
 | `teamai recall <query>` | Search the team knowledge base (BM25 + graph-boost) |

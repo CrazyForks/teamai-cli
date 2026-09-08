@@ -233,7 +233,7 @@ describe('team package distribution flow', () => {
       { cwd: teammateProject },
       'claude',
     );
-    expect(hint).toContain('teamai install');
+    expect(hint).toContain('teamai packages');
 
     mocks.npmInstall.mockClear();
     await pkgInstall(undefined, {});

@@ -59,7 +59,7 @@ TeamAI 的产品是一条闭环，而不是三个独立产品：
 | **Rules** | Markdown 格式的团队规范，自动合并到 AI 工具配置中 |
 | **Docs** | 团队共享文档，供 AI 参考 |
 | **Env** | 团队共享环境变量，自动注入 shell |
-| **Packages** | 全团队统一的 npm 包和 Claude Code 插件，通过 `teamai install` 主动安装 |
+| **Packages** | 全团队统一的 npm 包和 Claude Code 插件，通过 `teamai packages` 主动安装 |
 
 ```
 ┌───────────────┐    teamai push (MR)    ┌───────────────────┐
@@ -327,7 +327,7 @@ teamai pull --dry-run    # 试运行，不实际修改
 
 ### 团队包
 
-`teamai install` 通过现有团队仓库统一声明和恢复 npm 包与 Claude Code 插件。TeamAI 调用原生 `npm` 和 `claude plugin` CLI，不自行分发包内容。
+`teamai packages` 通过现有团队仓库统一声明和恢复 npm 包与 Claude Code 插件。TeamAI 调用原生 `npm` 和 `claude plugin` CLI，不自行分发包内容。
 
 **管理员操作：**
 
@@ -335,17 +335,17 @@ teamai pull --dry-run    # 试运行，不实际修改
 
 ```bash
 # npm 包（默认安装为项目依赖）
-teamai install typescript
+teamai packages install typescript
 
 # 未带 scope 的 name@version 与 plugin@marketplace 有歧义，需显式指定 npm
-teamai install typescript@5.9.2 --npm
+teamai packages install typescript@5.9.2 --npm
 
 # 从指定 registry 安装全局 npm CLI
-teamai install eslint@latest --global \
+teamai packages install eslint@latest --global \
   --registry https://registry.npmjs.org/
 
 # Claude 插件
-teamai install code-review@claude-plugins-official
+teamai packages install code-review@claude-plugins-official
 
 # 通过现有评审流程分享更新后的 teamai.yaml
 teamai push
@@ -360,8 +360,8 @@ Claude 插件 target 使用 `plugin@marketplace` 格式。`claude-plugins-offici
 现有 SessionStart hook 会执行 `teamai pull`。当 `packages` 声明发生变化时，它只会提示成员检查 `teamai.yaml` 并主动安装，不会自动执行第三方包或插件代码。pull 继续在后台运行，避免网络延迟阻塞 IDE；如果声明在 SessionStart 输出窗口结束后才拉取完成，TeamAI 会把同一条提示安全地排队，并在本会话下一次 UserPromptSubmit 时投递。
 
 ```bash
-teamai install             # 安装团队声明的全部包和插件
-teamai install --dry-run   # 预览底层命令，不安装也不写文件
+teamai packages             # 安装团队声明的全部包和插件
+teamai packages --dry-run   # 预览底层命令，不安装也不写文件
 teamai doctor              # 检查运行环境及声明的包、marketplace、插件状态
 ```
 
@@ -369,7 +369,7 @@ teamai doctor              # 检查运行环境及声明的包、marketplace、�
 
 **声明格式：**
 
-以下内容由 `teamai install <target>` 自动维护：
+以下内容由 `teamai packages install <target>` 自动维护：
 
 ```yaml
 packages:

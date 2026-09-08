@@ -201,7 +201,7 @@ export async function pkgInstall(
   if (!target && (options.global || options.registry || options.npm || options.claude)) {
     throw new Error('--global, --registry, --npm, and --claude require a package target');
   }
-  if (target) assertNotReadOnly(localConfig, 'teamai install <target>');
+  if (target) assertNotReadOnly(localConfig, 'teamai packages install <target>');
   const added = target ? await addTarget(target, manifest, claude, options) : undefined;
   if (!hasPackageDeclarations(manifest)) {
     log.info('No packages are declared in teamai.yaml');
@@ -355,6 +355,6 @@ export async function pkgDoctorReport(
       if (!ok) allPassed = false;
     }
   }
-  if (!allPassed) lines.push('    → Run `teamai install`');
+  if (!allPassed) lines.push('    → Run `teamai packages`');
   return { lines, allPassed };
 }
