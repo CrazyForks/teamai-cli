@@ -151,10 +151,13 @@ export async function sourceAdd(repoUrl: string, options: { name?: string } & Gl
     return;
   }
 
-  // Read source's teamai.yaml to verify it's a valid teamai repo
+  // Warn up front when the source cannot share anything. `pull` opts in on a
+  // source's `publicSkills` declaration, so a repo without a teamai.yaml (or
+  // with an empty publicSkills list) syncs 0 skills. Say so here, at add time,
+  // instead of letting pull skip it silently later.
   const sourceConfig = await loadTeamConfig(cloneResult);
-  if (!sourceConfig) {
-    log.warn(`Source repo has no teamai.yaml. It can still be used, but no publicSkills are declared.`);
+  for (const line of sourceSyncWarnings(name, sourceConfig)) {
+    log.warn(line);
   }
 
   if (options.dryRun) {
@@ -513,6 +516,29 @@ async function pullSingleSource(
 }
 
 // ─── Helpers ─────────────────────────────────────────────
+
+/**
+ * Explain, at `source add` time, why a source would sync 0 skills. `pull`
+ * deploys only skills a source opts into via its teamai.yaml `publicSkills`
+ * list, so a missing teamai.yaml or an empty publicSkills list means nothing
+ * is shared. Returns the warning lines to print (empty when the source is
+ * ready to share). `null` config = no teamai.yaml (or an unparseable one).
+ */
+export function sourceSyncWarnings(name: string, sourceConfig: TeamaiConfig | null): string[] {
+  if (!sourceConfig) {
+    return [
+      `Source repo "${name}" has no teamai.yaml, so it declares no public skills.`,
+      `This source will sync 0 skills until the source team adds a teamai.yaml with a publicSkills list.`,
+    ];
+  }
+  if ((sourceConfig.publicSkills?.length ?? 0) === 0) {
+    return [
+      `Source repo "${name}" has a teamai.yaml but declares no publicSkills.`,
+      `This source will sync 0 skills until the source team adds a publicSkills list to its teamai.yaml.`,
+    ];
+  }
+  return [];
+}
 
 /**
  * Derive a source name from a git remote URL.
