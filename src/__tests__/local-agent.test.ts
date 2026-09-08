@@ -1812,3 +1812,81 @@ describe('local-agent: cmds[] migration', () => {
     expect(acks.find((a) => a.id === 9)?.status).toBe('success');
   });
 });
+
+describe('local-agent: per-worktree claudemd isolation (issue #374 P1-2C)', () => {
+  it('worktree B\'s CLAUDE.md never merges worktree A\'s instructions', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { realpathSync } = await import('node:fs');
+
+    // Real git repo + linked worktree → shared partition data home. The resource
+    // cache used to be shared, so syncClaudemd merged A's + B's fragments.
+    const repo = realpathSync(await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-cmd-wt-')));
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 't@e'); git(repo, 'config', 'user.name', 'T');
+    git(repo, 'commit', '--allow-empty', '-q', '-m', 'init');
+    const wtB = path.join(repo, '..', path.basename(repo) + '-B');
+    git(repo, 'worktree', 'add', '-q', wtB, 'HEAD');
+    const wtBReal = realpathSync(wtB);
+    // codebuddy is the "installed" tool in each worktree.
+    for (const wt of [repo, wtBReal]) await fse.ensureDir(path.join(wt, '.codebuddy', 'skills'));
+
+    // A partition config so both worktrees resolve to the shared partition.
+    const YAML = (await import('yaml')).default;
+    const { projectDataHome } = await import('../utils/partition.js');
+    const partition = projectDataHome(repo);
+    await fse.ensureDir(partition);
+    await fse.writeFile(path.join(partition, 'config.yaml'), YAML.stringify({
+      repo: { localPath: path.join(partition, 'team-repo'), remote: 'https://example.com/x.git', kind: 'git' },
+      username: 'u', scope: 'project', projectRoot: repo, additionalRoles: [],
+    }));
+
+    await fse.ensureDir(path.join(tmpDir, '.teamai', 'local-agent'));
+    await fse.writeJson(path.join(tmpDir, '.teamai', 'local-agent', 'config.json'), {
+      endpoint: 'https://test.example.com/api', token: 't', localAgentId: 'id',
+      createdAt: '2026-01-01T00:00:00.000Z', workspaceBindings: {},
+    });
+
+    // fetch stub: distinct claudemd body per URL; sync returns a workspace-scoped
+    // install_prompt command for the requested worktree.
+    const install = (ws: string, slug: string) => ({
+      ok: true,
+      cmds: [{
+        id: slug === 'a-doc' ? 101 : 102,
+        type: 'install_prompt_rule', handle_type: 'prompt', slug,
+        version: '1.0.0', download_url: `http://127.0.0.1:42100/${slug}.md`,
+        scope: 'workspace', workspace_path: ws,
+      }],
+    });
+    let syncFor: { ws: string; slug: string } | null = null;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith('a-doc.md')) return new Response('INSTRUCTION-FROM-A');
+      if (url.endsWith('b-doc.md')) return new Response('INSTRUCTION-FROM-B');
+      if (url.includes('/local-agent/sync') && syncFor) return new Response(JSON.stringify(install(syncFor.ws, syncFor.slug)));
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    // Install A-only instruction from worktree A, then B-only from worktree B.
+    syncFor = { ws: repo, slug: 'a-doc' };
+    await reportAndSyncLocalAgent({ cwd: repo, tool: 'codebuddy', status: 'running' });
+    syncFor = { ws: wtBReal, slug: 'b-doc' };
+    await reportAndSyncLocalAgent({ cwd: wtBReal, tool: 'codebuddy', status: 'running' });
+
+    // B's injected claudemd (.codebuddy/CODEBUDDY.md) must contain ONLY B's
+    // instruction (the pre-fix shared cache made syncClaudemd merge A's in too).
+    const readTxt = async (p: string) => (await fse.pathExists(p)) ? fse.readFile(p, 'utf-8') : '';
+    const bClaudemd = await readTxt(path.join(wtBReal, '.codebuddy', 'CODEBUDDY.md'));
+    expect(bClaudemd).toContain('INSTRUCTION-FROM-B');
+    expect(bClaudemd).not.toContain('INSTRUCTION-FROM-A');
+    // A keeps only A's.
+    const aClaudemd = await readTxt(path.join(repo, '.codebuddy', 'CODEBUDDY.md'));
+    expect(aClaudemd).toContain('INSTRUCTION-FROM-A');
+    expect(aClaudemd).not.toContain('INSTRUCTION-FROM-B');
+
+    await fse.remove(repo).catch(() => {});
+    await fse.remove(wtBReal).catch(() => {});
+  });
+});

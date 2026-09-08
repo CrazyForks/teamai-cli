@@ -722,6 +722,50 @@ servers:
       expect((mf['claude:project'] ?? []).some((r: { name: string }) => r.name === 'shared')).toBe(false);
     }
   });
+
+  it('migrates ownership from the TRUE old path <workspace>/.teamai/managed-mcp.json (partition install)', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // A PARTITION install whose pre-#374 MCP manifest was written to the ORIGINAL
+    // workspace path (not the partition). Data home is the partition, but the old
+    // ownership lives at <projectRoot>/.teamai/managed-mcp.json.
+    const partition = path.join(tmpDir, 'p1-partition');
+    const projectRoot = path.join(tmpDir, 'p1-proj');
+    for (const d of ['.claude', '.cursor', '.codebuddy']) {
+      await fse.ensureDir(path.join(projectRoot, d, 'skills'));
+    }
+    await fse.ensureDir(partition);
+    const cfg = { ...localConfig, scope: 'project', projectRoot, dataHome: partition } as unknown as LocalConfig;
+
+    // Old on-disk state: injected v1 in .mcp.json + ownership at the REAL old path.
+    await fse.writeJson(path.join(projectRoot, '.mcp.json'), {
+      mcpServers: { shared: { type: 'http', url: 'https://team-v1.example/mcp' } },
+    });
+    await fse.outputJson(path.join(projectRoot, '.teamai', 'managed-mcp.json'), {
+      'claude:project': [{ name: 'shared', hash: 'stale' }],
+    });
+    // The partition shared file has nothing — the bug read only here.
+    await fse.outputJson(path.join(partition, 'managed-mcp.json'), {});
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v2.example/mcp
+`);
+    const { changes } = await reconcileMcpForConfig(teamConfig, cfg);
+
+    // Ownership recognized → the team server is UPDATED (not skipped as unmanaged).
+    expect((await fse.readJson(path.join(projectRoot, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v2.example/mcp');
+    expect(changes.find((c) => c.tool === 'claude' && c.server === 'shared')?.action).toBe('updated');
+
+    // Ownership migrated into this worktree's per-worktree file under the partition.
+    const wt = await fse.readJson(managedMcpManifestPath(partition, projectRoot));
+    expect(wt['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    // The true old path no longer owns it.
+    const oldFile = await fse.readJson(path.join(projectRoot, '.teamai', 'managed-mcp.json'));
+    expect(oldFile['claude:project']).toBeUndefined();
+  });
 });
 
 describe('MCP reconcile — OpenCode', () => {

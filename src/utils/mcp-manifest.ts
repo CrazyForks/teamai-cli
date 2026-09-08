@@ -50,31 +50,59 @@ export async function loadProjectMcpManifest(
   const existing = (await readJson<ManagedMcpManifest>(expandHome(manifestPath))) ?? null;
   if (existing) return { manifestPath, manifest: existing };
 
-  // No per-worktree file yet — attempt one-time migration from the shared file.
+  // No per-worktree file yet — attempt one-time migration from any legacy source.
+  // Two legacy locations must both be checked:
+  //  1. `<dataHome>/managed-mcp.json` — the interim shared partition file (rounds
+  //     before the per-worktree split), keyed `<tool>:project:<id>` or bare.
+  //  2. `<workspaceRoot>/.teamai/managed-mcp.json` — the ORIGINAL pre-partition
+  //     path. Even a partition install (data home under ~/.teamai) wrote the MCP
+  //     manifest into the workspace's .teamai before this PR, so a plain
+  //     `<dataHome>/managed-mcp.json` read misses it and the old ownership is
+  //     lost on upgrade (uninstall then leaves the injected server behind).
+  // When the two paths are the same file (legacy workspace-local data home) we
+  // read it once.
   const manifest: ManagedMcpManifest = {};
-  const sharedPath = legacyManagedMcpManifestPath(dataHome);
-  const workspaceLocal = dataHome === path.join(workspaceRoot, '.teamai');
-  const shared = (await readJson<ManagedMcpManifest>(expandHome(sharedPath))) ?? null;
-  if (shared) {
+  const sources: Array<{ path: string; workspaceLocal: boolean }> = [];
+  const partitionShared = expandHome(legacyManagedMcpManifestPath(dataHome));
+  const workspaceShared = expandHome(path.join(workspaceRoot, '.teamai', 'managed-mcp.json'));
+  sources.push({ path: partitionShared, workspaceLocal: dataHome === path.join(workspaceRoot, '.teamai') });
+  if (workspaceShared !== partitionShared) {
+    // The original workspace-local path belongs unambiguously to THIS worktree.
+    sources.push({ path: workspaceShared, workspaceLocal: true });
+  }
+
+  for (const src of sources) {
+    const shared = (await readJson<ManagedMcpManifest>(src.path)) ?? null;
+    if (!shared) continue;
     const migratedFrom: string[] = [];
     for (const [key, records] of Object.entries(shared)) {
       if (!Array.isArray(records)) continue;
-      if (claimsThisWorkspace(key, workspaceRoot, workspaceLocal)) {
+      if (claimsThisWorkspace(key, workspaceRoot, src.workspaceLocal)) {
         const tool = key.split(':')[0];
-        manifest[`${tool}:project`] = records;
+        // Merge (a worktree could have records split across both sources).
+        const destKey = `${tool}:project`;
+        manifest[destKey] = mergeRecords(manifest[destKey], records);
         migratedFrom.push(key);
       }
     }
     if (migratedFrom.length > 0 && !options.dryRun) {
       // Durable order: write the destination FIRST, then drop the claimed keys
-      // from the shared file. A crash in between leaves the records in both files
-      // (harmless — the per-worktree file wins), never in neither.
+      // from this source. A crash in between leaves the records readable in both
+      // files (the per-worktree file wins), never in neither.
       await writeJsonAtomic(expandHome(manifestPath), manifest);
       for (const key of migratedFrom) delete shared[key];
-      await writeJsonAtomic(expandHome(sharedPath), shared).catch(() => {});
+      await writeJsonAtomic(src.path, shared).catch(() => {});
     }
   }
   return { manifestPath, manifest };
+}
+
+/** Merge two record lists by name (later wins), keeping ownership de-duplicated. */
+function mergeRecords(a: ManagedMcpRecord[] | undefined, b: ManagedMcpRecord[]): ManagedMcpRecord[] {
+  const byName = new Map<string, ManagedMcpRecord>();
+  for (const r of a ?? []) byName.set(r.name, r);
+  for (const r of b) byName.set(r.name, r);
+  return Array.from(byName.values());
 }
 
 /** True when a shared-file key belongs to this worktree (see loadProjectMcpManifest). */

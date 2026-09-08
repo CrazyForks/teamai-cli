@@ -56,6 +56,7 @@ import {
   TeamaiConfigSchema,
   managedMcpManifestPath,
   managedMcpManifestKey,
+  managedMcpWorkspaceId,
   type DashboardEvent,
   type LocalConfig,
   type ManagedMcpManifest,
@@ -623,12 +624,15 @@ function createResourceLocalConfig(
 
 async function getResourceRepoPath(scope: LocalAgentScope, workspacePath?: string): Promise<string> {
   if (scope === 'project' && workspacePath) {
-    // Project resource cache is A1 (per-project): it lives in the machine-data
-    // home so a partitioned install keeps it out of the business workspace. Same
-    // resolver as detection/reconcile so the path never diverges.
+    // Project resource cache is A1 (per-project) AND per-worktree: the resource
+    // cache (claudemd/skills/rules fragments) is what each worktree installs
+    // independently, and syncClaudemd merges EVERY file in this dir. The partition
+    // data home is shared by all linked worktrees, so the cache must live in a
+    // per-worktree subdir — otherwise worktree B's CLAUDE.md would merge in
+    // worktree A's instructions. Mirror managed-mcp's per-worktree layout.
     const { resolveDataHomeForScope } = await import('./config.js');
     const dataHome = await resolveDataHomeForScope('project', workspacePath);
-    return path.join(dataHome, LOCAL_AGENT_DIR, 'resources');
+    return path.join(dataHome, 'workspaces', managedMcpWorkspaceId(workspacePath), LOCAL_AGENT_DIR, 'resources');
   }
   return path.join(getLocalAgentHome(), 'resources', scope);
 }
