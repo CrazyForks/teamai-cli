@@ -83,6 +83,131 @@ describe('scanTranscriptStop — token usage', () => {
     expect(tokens).toEqual({ input: 0, output: 7, cacheRead: 0, cacheCreation: 0 });
   });
 
+  it('uses the latest cumulative Codex token_usage_record without double counting', async () => {
+    const record = (threadUsage: Record<string, number>, responseId: string) => JSON.stringify({
+      type: 'token_usage_record',
+      payload: {
+        response_id: responseId,
+        // Per-response usage must not be added when a cumulative thread snapshot exists.
+        usage: { input_tokens: 999999, output_tokens: 999999 },
+        thread_token_usage: threadUsage,
+      },
+    });
+    const p = writeTranscript([
+      record({
+        input_tokens: 1000,
+        cached_input_tokens: 300,
+        cache_write_input_tokens: 100,
+        output_tokens: 50,
+        reasoning_output_tokens: 20,
+        total_tokens: 1050,
+      }, 'resp_1'),
+      record({
+        input_tokens: 1600,
+        cached_input_tokens: 400,
+        cache_write_input_tokens: 100,
+        output_tokens: 80,
+        reasoning_output_tokens: 30,
+        total_tokens: 1680,
+      }, 'resp_2'),
+    ]);
+
+    const { tokens, tokenScope } = await scanTranscriptStop(p);
+    // input_tokens includes both cache buckets and output_tokens includes reasoning.
+    expect(tokens).toEqual({ input: 1100, output: 80, cacheRead: 400, cacheCreation: 100 });
+    expect(tokenScope).toBe('session');
+  });
+
+  it('uses the latest cumulative legacy Codex event_msg/token_count snapshot', async () => {
+    const tokenCount = (usage: Record<string, number>) => JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { total_token_usage: usage, last_token_usage: { input_tokens: 9999 } },
+      },
+    });
+    const p = writeTranscript([
+      tokenCount({ input_tokens: 500, cached_input_tokens: 200, output_tokens: 25 }),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'done' } }),
+      tokenCount({ input_tokens: 900, cached_input_tokens: 350, output_tokens: 45 }),
+    ]);
+
+    const { tokens, tokenScope } = await scanTranscriptStop(p);
+    expect(tokens).toEqual({ input: 550, output: 45, cacheRead: 350, cacheCreation: 0 });
+    expect(tokenScope).toBe('transcript');
+  });
+
+  it('prefers a thread-level Codex snapshot when both record formats are present', async () => {
+    const p = writeTranscript([
+      JSON.stringify({
+        type: 'token_usage_record',
+        payload: {
+          thread_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: 300,
+            cache_write_input_tokens: 100,
+            output_tokens: 50,
+          },
+        },
+      }),
+      // A later legacy record is only rollout-scoped and must not replace the
+      // authoritative thread-level total above.
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 200,
+              cached_input_tokens: 50,
+              output_tokens: 10,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const { tokens, tokenScope } = await scanTranscriptStop(p);
+    expect(tokens).toEqual({ input: 600, output: 50, cacheRead: 300, cacheCreation: 100 });
+    expect(tokenScope).toBe('session');
+  });
+
+  it('waits for a newer Codex cumulative snapshot flushed after Stop', async () => {
+    const p = writeTranscript([
+      JSON.stringify({
+        type: 'token_usage_record',
+        payload: {
+          response_id: 'resp_old',
+          thread_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 40,
+            cache_write_input_tokens: 10,
+            output_tokens: 20,
+          },
+        },
+      }),
+    ]);
+    const timer = setTimeout(() => {
+      fs.appendFileSync(p, JSON.stringify({
+        type: 'token_usage_record',
+        payload: {
+          response_id: 'resp_new',
+          thread_token_usage: {
+            input_tokens: 400,
+            cached_input_tokens: 100,
+            cache_write_input_tokens: 20,
+            output_tokens: 60,
+          },
+        },
+      }) + '\n');
+    }, 300);
+
+    const { tokens, tokenScope } = await scanTranscriptStop(p, { tool: 'codex' });
+    clearTimeout(timer);
+    expect(tokens).toEqual({ input: 280, output: 60, cacheRead: 100, cacheCreation: 20 });
+    expect(tokenScope).toBe('session');
+  });
+
   it('parses CodeBuddy index.json (requests[].usage + user messages)', async () => {
     // CodeBuddy persists a single index.json, not Claude JSONL. Tokens live in
     // requests[].usage.{inputTokens,outputTokens}; prompts = user messages.
@@ -201,6 +326,69 @@ describe('aggregateSessionMetrics', () => {
     ];
     const m = aggregateSessionMetrics(events).get('s1')!;
     expect(m.tokens).toEqual({ input: 30, output: 4, cacheRead: 2, cacheCreation: 1 });
+  });
+
+  it('sums legacy Codex snapshots per rollout path across same-session resume', () => {
+    const firstPartialTokens = { input: 100_000, output: 1_000, cacheRead: 300_000, cacheCreation: 0 };
+    const firstTokens = { input: 283_144, output: 27_733, cacheRead: 8_339_712, cacheCreation: 0 };
+    const resumedTokens = { input: 29_828, output: 2_936, cacheRead: 2_490_368, cacheCreation: 0 };
+    const firstPartialStop: DashboardEvent = {
+      type: 'stop', timestamp: '2026-09-01T12:40:11.785Z', sessionId: 'same-session', tool: 'codex',
+      transcriptPath: '/rollouts/rollout-a.jsonl', tokenScope: 'transcript', tokens: firstPartialTokens,
+    };
+    const firstStop: DashboardEvent = {
+      type: 'stop', timestamp: '2026-09-01T13:26:15.211Z', sessionId: 'same-session', tool: 'codex',
+      transcriptPath: '/rollouts/rollout-a.jsonl', tokenScope: 'transcript', tokens: firstTokens,
+    };
+    const resumedStop: DashboardEvent = {
+      type: 'stop', timestamp: '2026-09-01T13:27:33.513Z', sessionId: 'same-session', tool: 'codex',
+      transcriptPath: '/rollouts/rollout-b.jsonl', tokenScope: 'transcript', tokens: resumedTokens,
+    };
+
+    const firstMetrics = aggregateSessionMetrics([firstPartialStop, firstStop]);
+    const firstReport = computePromptTokenDelta(firstMetrics, {});
+    expect(firstReport.delta.tokens).toEqual(firstTokens);
+
+    // Re-scanning either rollout replaces that path's snapshot. It must not replace
+    // the other rollout or add the same segment twice. Put the older partial scan
+    // last to model background Stop handlers appending out of chronological order.
+    const resumedMetrics = aggregateSessionMetrics([
+      firstStop, resumedStop, { ...resumedStop }, firstPartialStop,
+    ]);
+    expect(resumedMetrics.get('same-session')!.tokens).toEqual({
+      input: firstTokens.input + resumedTokens.input,
+      output: firstTokens.output + resumedTokens.output,
+      cacheRead: firstTokens.cacheRead + resumedTokens.cacheRead,
+      cacheCreation: 0,
+    });
+
+    const resumedReport = computePromptTokenDelta(resumedMetrics, firstReport.nextReported);
+    expect(resumedReport.delta.tokens).toEqual(resumedTokens);
+    expect(computePromptTokenDelta(resumedMetrics, resumedReport.nextReported).delta.tokens)
+      .toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
+  });
+
+  it('does not add transcript-scoped Codex totals to a session-scoped snapshot', () => {
+    const events: DashboardEvent[] = [
+      {
+        type: 'stop', timestamp: '2026-09-01T13:00:00Z', sessionId: 's1', tool: 'codex',
+        transcriptPath: '/rollouts/a.jsonl', tokenScope: 'transcript',
+        tokens: { input: 100, output: 10, cacheRead: 20, cacheCreation: 0 },
+      },
+      {
+        type: 'stop', timestamp: '2026-09-01T13:01:00Z', sessionId: 's1', tool: 'codex',
+        transcriptPath: '/rollouts/b.jsonl', tokenScope: 'session',
+        tokens: { input: 160, output: 16, cacheRead: 30, cacheCreation: 0 },
+      },
+      {
+        type: 'stop', timestamp: '2026-09-01T13:02:00Z', sessionId: 's1', tool: 'codex',
+        transcriptPath: '/rollouts/b.jsonl', tokenScope: 'transcript',
+        tokens: { input: 40, output: 4, cacheRead: 10, cacheCreation: 0 },
+      },
+    ];
+
+    expect(aggregateSessionMetrics(events).get('s1')!.tokens)
+      .toEqual({ input: 160, output: 16, cacheRead: 30, cacheCreation: 0 });
   });
 
   it('prefers the Stop prompt snapshot over the live submit count (max)', () => {

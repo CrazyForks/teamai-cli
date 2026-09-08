@@ -28,6 +28,7 @@ import {
   type DashboardSession,
   type DashboardSessionStatus,
   type TokenUsage,
+  type TokenSnapshotScope,
   type SessionMetrics,
 } from './types.js';
 import { getUserHome } from './utils/home.js';
@@ -131,6 +132,8 @@ export interface TranscriptScanResult {
    */
   toolError: number;
   tokens: TokenUsage;
+  /** Scope of a Codex cumulative snapshot; absent for other transcript formats. */
+  tokenScope?: TokenSnapshotScope;
   /**
    * Cumulative count of genuine human prompt turns in the transcript. Sourced here
    * (not from compactable prompt_submit events) so the reported baseline stays
@@ -144,10 +147,10 @@ export interface TranscriptScanResult {
  * snapshots of:
  * - interrupt:  user message whose text starts with "[Request interrupted by user"
  * - toolReject: tool_result with is_error=true marked as a user rejection
- * - tokens:     usage.{input,output,cache_*}_tokens summed across assistant messages,
- *               deduplicated by `message.id` (falling back to top-level `requestId`)
- *               because Claude Code repeats the same usage on every content-block
- *               line of a single turn, so naive summing would massively over-count.
+ * - tokens:     Claude usage summed across deduplicated assistant messages, or the
+ *               latest cumulative Codex token snapshot. Modern
+ *               `token_usage_record` is session-scoped; legacy
+ *               `event_msg/token_count` is scoped to one transcript/rollout file.
  * - prompts:    genuine human prompt turns (user entries with real text, excluding
  *               interrupts, tool_results, and meta/sidechain entries).
  *
@@ -157,37 +160,68 @@ export interface TranscriptScanResult {
  * Set `opts.frictionOnly` to true for low-latency foreground callers (e.g.
  * contribute-check) that only need friction signals. On the CodeBuddy index.json
  * path this skips the token-flush retry loop — friction comes from a single blob
- * scan that completes before the retry, so no token wait is required. The Claude
- * JSONL path is a single streaming scan with no retry, so the flag is a no-op there.
+ * scan that completes before the retry, so no token wait is required. It also
+ * skips the Codex post-Stop flush wait. The Claude JSONL path is a single streaming
+ * scan with no retry, so the flag is a no-op there.
  */
 export async function scanTranscriptStop(
   transcriptPath: string,
-  opts?: { frictionOnly?: boolean },
+  opts?: { frictionOnly?: boolean; tool?: string },
 ): Promise<TranscriptScanResult> {
-  let interrupt = 0;
-  let toolReject = 0;
-  let toolError = 0;
-  let prompts = 0;
-  const tokens = emptyTokenUsage();
-  // Dedup assistant usage per message (one turn spans many JSONL lines that repeat
-  // the same usage). Prefer message.id; fall back to the top-level requestId.
-  const countedUsageKeys = new Set<string>();
-
   // CodeBuddy persists its transcript as a single `index.json` document (a JSON
-  // object with `requests[].usage` + `messages[]`), NOT the Claude Code JSONL
-  // schema the streaming scanner below expects. Detect and parse that shape
-  // separately — otherwise every line fails JSON.parse and tokens stay 0.
+  // object with `requests[].usage` + `messages[]`), NOT the JSONL schema used by
+  // Claude and Codex. Detect and parse that shape separately.
   if (path.basename(transcriptPath) === 'index.json') {
     const cb = await scanCodebuddyIndex(transcriptPath, opts?.frictionOnly ?? false);
     if (cb) return cb;
   }
 
+  const initial = await scanJsonlTranscriptOnce(transcriptPath);
+  if (opts?.frictionOnly || !isCodexTool(opts?.tool)) return initial.result;
+
+  // Codex can append the final cumulative usage record shortly after firing Stop.
+  // Keep the full-scan friction/prompt result, but poll only a small file tail for
+  // a newer token snapshot so a previous turn's non-zero total is not mistaken for
+  // the just-finished turn. This is bounded to ~1.75s and never loads the whole file
+  // repeatedly.
+  const flushedSnapshot = await waitForCodexUsageFlush(transcriptPath, initial.codexSnapshot);
+  return flushedSnapshot
+    ? { ...initial.result, tokens: flushedSnapshot.tokens, tokenScope: flushedSnapshot.scope }
+    : initial.result;
+}
+
+interface CodexTokenSnapshot {
+  tokens: TokenUsage;
+  scope: TokenSnapshotScope;
+}
+
+interface JsonlTranscriptScan {
+  result: TranscriptScanResult;
+  /** Preferred cumulative Codex snapshot encountered, if this is a Codex transcript. */
+  codexSnapshot: CodexTokenSnapshot | null;
+}
+
+/** Scan the Claude/Codex JSONL transcript once. */
+async function scanJsonlTranscriptOnce(transcriptPath: string): Promise<JsonlTranscriptScan> {
+  let interrupt = 0;
+  let toolReject = 0;
+  let toolError = 0;
+  let prompts = 0;
+  const tokens = emptyTokenUsage();
+  let codexSessionSnapshot: CodexTokenSnapshot | null = null;
+  let codexTranscriptSnapshot: CodexTokenSnapshot | null = null;
+  // Dedup assistant usage per message (one turn spans many JSONL lines that repeat
+  // the same usage). Prefer message.id; fall back to the top-level requestId.
+  const countedUsageKeys = new Set<string>();
+
   try {
     const stat = await fs.promises.stat(transcriptPath);
-    if (stat.size === 0) return { interrupt, toolReject, toolError, tokens, prompts };
+    if (stat.size === 0) {
+      return { result: { interrupt, toolReject, toolError, tokens, prompts }, codexSnapshot: null };
+    }
     if (stat.size > INTERVENTION_SCAN_MAX_BYTES) {
       log.warn(`dashboard: transcript too large to scan (${stat.size} bytes)`);
-      return { interrupt, toolReject, toolError, tokens, prompts };
+      return { result: { interrupt, toolReject, toolError, tokens, prompts }, codexSnapshot: null };
     }
 
     const rl = readline.createInterface({
@@ -197,20 +231,38 @@ export async function scanTranscriptStop(
 
     for await (const line of rl) {
       const trimmed = line.trim();
-      // Cheap pre-filter: we only care about `user` entries (interventions/prompts)
-      // and `assistant` entries (token usage); skip JSON.parse on anything else.
-      if (!trimmed || (!trimmed.includes('"user"') && !trimmed.includes('"assistant"'))) continue;
+      // Cheap pre-filter: Claude uses user/assistant records; modern Codex emits
+      // token_usage_record and legacy Codex emits event_msg/token_count records.
+      if (
+        !trimmed || (
+          !trimmed.includes('"user"') &&
+          !trimmed.includes('"assistant"') &&
+          !trimmed.includes('"token_usage_record"') &&
+          !trimmed.includes('"token_count"')
+        )
+      ) continue;
 
       let entry: {
         type?: string;
         isMeta?: unknown;
         isSidechain?: unknown;
         requestId?: unknown;
+        payload?: unknown;
         message?: { content?: unknown; id?: unknown; usage?: Record<string, unknown> };
       };
       try {
         entry = JSON.parse(trimmed);
       } catch {
+        continue;
+      }
+
+      const codexUsage = parseCodexCumulativeUsage(entry);
+      if (codexUsage) {
+        // Replace within the matching scope. A session-scoped thread record is
+        // authoritative when both formats are present; the legacy transcript-scoped
+        // counter must not be added to it.
+        if (codexUsage.scope === 'session') codexSessionSnapshot = codexUsage;
+        else codexTranscriptSnapshot = codexUsage;
         continue;
       }
 
@@ -283,7 +335,139 @@ export async function scanTranscriptStop(
     log.warn(`dashboard: failed to scan transcript: ${(e as Error).message}`);
   }
 
-  return { interrupt, toolReject, toolError, tokens, prompts };
+  const codexSnapshot = codexSessionSnapshot ?? codexTranscriptSnapshot;
+  const result: TranscriptScanResult = {
+    interrupt,
+    toolReject,
+    toolError,
+    tokens: codexSnapshot?.tokens ?? tokens,
+    prompts,
+    ...(codexSnapshot ? { tokenScope: codexSnapshot.scope } : {}),
+  };
+  return { result, codexSnapshot };
+}
+
+/** Narrow an unknown JSON value to an object record. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+/**
+ * Convert Codex's inclusive input token count into TeamAI's disjoint buckets.
+ * Codex input_tokens includes cached/cache-write tokens; output_tokens already
+ * includes reasoning output, so neither subset may be added a second time.
+ */
+function codexUsageToTokenUsage(usage: Record<string, unknown>): TokenUsage {
+  const inclusiveInput = toNum(usage.input_tokens);
+  const cacheRead = toNum(usage.cached_input_tokens);
+  const cacheCreation = toNum(usage.cache_write_input_tokens);
+  return {
+    input: Math.max(0, inclusiveInput - cacheRead - cacheCreation),
+    output: toNum(usage.output_tokens),
+    cacheRead,
+    cacheCreation,
+  };
+}
+
+/** Parse one cumulative Codex usage record (modern or legacy), if present. */
+function parseCodexCumulativeUsage(entry: { type?: string; payload?: unknown }): CodexTokenSnapshot | null {
+  const payload = asRecord(entry.payload);
+
+  if (entry.type === 'token_usage_record') {
+    const usage = asRecord(payload?.thread_token_usage);
+    return usage ? { tokens: codexUsageToTokenUsage(usage), scope: 'session' } : null;
+  }
+
+  if (entry.type === 'event_msg' && payload?.type === 'token_count') {
+    const usage = asRecord(asRecord(payload.info)?.total_token_usage);
+    return usage ? { tokens: codexUsageToTokenUsage(usage), scope: 'transcript' } : null;
+  }
+
+  return null;
+}
+
+const CODEX_USAGE_TAIL_BYTES = 256 * 1024;
+const CODEX_USAGE_MAX_ATTEMPTS = 8;
+const CODEX_USAGE_RETRY_MS = 250;
+
+function isCodexTool(tool: string | undefined): boolean {
+  return typeof tool === 'string' && tool.toLowerCase().includes('codex');
+}
+
+function codexSnapshotEquals(a: CodexTokenSnapshot | null, b: CodexTokenSnapshot): boolean {
+  return a !== null && a.scope === b.scope
+    && a.tokens.input === b.tokens.input && a.tokens.output === b.tokens.output
+    && a.tokens.cacheRead === b.tokens.cacheRead
+    && a.tokens.cacheCreation === b.tokens.cacheCreation;
+}
+
+/** Prefer session-scoped records; otherwise keep the latest record in the same scope. */
+function preferCodexSnapshot(
+  current: CodexTokenSnapshot | null,
+  observed: CodexTokenSnapshot,
+): CodexTokenSnapshot {
+  if (current?.scope === 'session' && observed.scope === 'transcript') return current;
+  return observed;
+}
+
+/** Read only the transcript tail and return its latest cumulative Codex snapshot. */
+async function readLatestCodexUsageFromTail(transcriptPath: string): Promise<CodexTokenSnapshot | null> {
+  try {
+    const stat = await fs.promises.stat(transcriptPath);
+    if (stat.size === 0) return null;
+    const readSize = Math.min(stat.size, CODEX_USAGE_TAIL_BYTES);
+    const offset = stat.size - readSize;
+    const fh = await fs.promises.open(transcriptPath, 'r');
+    try {
+      const buffer = Buffer.alloc(readSize);
+      await fh.read(buffer, 0, readSize, offset);
+      const lines = buffer.toString('utf-8').split('\n');
+      // When reading a tail slice, the first line may start in the middle of JSON.
+      if (offset > 0) lines.shift();
+      let latestSession: CodexTokenSnapshot | null = null;
+      let latestTranscript: CodexTokenSnapshot | null = null;
+      for (const line of lines) {
+        if (!line.includes('"token_usage_record"') && !line.includes('"token_count"')) continue;
+        try {
+          const parsed = JSON.parse(line) as { type?: string; payload?: unknown };
+          const snapshot = parseCodexCumulativeUsage(parsed);
+          if (snapshot?.scope === 'session') latestSession = snapshot;
+          else if (snapshot) latestTranscript = snapshot;
+        } catch {
+          // The final line can be mid-write; a later retry will see it completed.
+        }
+      }
+      return latestSession ?? latestTranscript;
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Wait for Codex's post-Stop cumulative token record without rescanning the file. */
+async function waitForCodexUsageFlush(
+  transcriptPath: string,
+  initial: CodexTokenSnapshot | null,
+): Promise<CodexTokenSnapshot | null> {
+  let latest = initial;
+  for (let attempt = 1; attempt < CODEX_USAGE_MAX_ATTEMPTS; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, CODEX_USAGE_RETRY_MS));
+    const observed = await readLatestCodexUsageFromTail(transcriptPath);
+    if (!observed) continue;
+    latest = preferCodexSnapshot(latest, observed);
+
+    // A changed cumulative snapshot is the record for the turn that just stopped.
+    // For a first-turn session, the transition from no record to non-zero is enough.
+    if (!codexSnapshotEquals(initial, latest)
+      && (initial !== null || totalTokenCount(latest.tokens) > 0)) {
+      return latest;
+    }
+  }
+  return latest;
 }
 
 /**
@@ -666,7 +850,7 @@ export async function parseHookEvent(
     }
     // Full-transcript snapshot of interrupt/tool_reject counts + token usage +
     // human prompt count (all idempotent, sourced from the non-compactable transcript).
-    const scan = await scanTranscriptStop(hookData.transcript_path);
+    const scan = await scanTranscriptStop(hookData.transcript_path, { tool });
     if (scan.interrupt > 0 || scan.toolReject > 0 || scan.toolError > 0) {
       event.interventions = {
         interrupt: scan.interrupt,
@@ -677,6 +861,7 @@ export async function parseHookEvent(
     if (scan.tokens.input > 0 || scan.tokens.output > 0
       || scan.tokens.cacheRead > 0 || scan.tokens.cacheCreation > 0) {
       event.tokens = scan.tokens;
+      if (scan.tokenScope) event.tokenScope = scan.tokenScope;
     }
     if (scan.prompts > 0) {
       event.prompts = scan.prompts;
@@ -889,12 +1074,37 @@ export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
   return result;
 }
 
+interface TimedTokenSnapshot {
+  timestamp: string;
+  tokens: TokenUsage;
+}
+
+/**
+ * Keep the chronologically latest snapshot. Stop handlers run in the background,
+ * so append order can differ from hook/event order when two scans overlap.
+ */
+function setLatestTokenSnapshot(
+  snapshots: Map<string, TimedTokenSnapshot>,
+  key: string,
+  event: DashboardEvent,
+): void {
+  if (!event.tokens) return;
+  const current = snapshots.get(key);
+  const candidateTime = Date.parse(event.timestamp);
+  const currentTime = current ? Date.parse(current.timestamp) : Number.NaN;
+  if (!current || !Number.isFinite(candidateTime) || !Number.isFinite(currentTime)
+    || candidateTime >= currentTime) {
+    snapshots.set(key, { timestamp: event.timestamp, tokens: event.tokens });
+  }
+}
+
 /**
  * Aggregate per-session metrics from raw events (no timeout filtering).
  *
- * - interrupt / toolReject / tokens: taken from the latest Stop event's snapshot
- *   (idempotent — a later Stop overrides an earlier one, so re-scanning never
- *   double-counts).
+ * - interrupt / toolReject: taken from the latest Stop event's snapshot.
+ * - tokens: unscoped and session-scoped snapshots use latest-wins. Legacy Codex
+ *   transcript-scoped snapshots use latest-wins per transcript path, then sum the
+ *   distinct rollout segments for the logical session.
  * - correction: a prompt_submit arriving within CORRECTION_WINDOW_MS of a Stop AND
  *   matching a correction keyword. Each Stop is consumed by the next prompt only once.
  * - prompts: total number of prompt_submit events (human conversation turns).
@@ -911,6 +1121,9 @@ export function aggregateSessionMetrics(
   // - stopPrompts: latest Stop transcript snapshot (compaction/resume-proof).
   const submitCount = new Map<string, number>();
   const stopPrompts = new Map<string, number>();
+  const unscopedTokens = new Map<string, TimedTokenSnapshot>();
+  const sessionTokens = new Map<string, TimedTokenSnapshot>();
+  const transcriptTokens = new Map<string, Map<string, TimedTokenSnapshot>>();
 
   for (const event of events) {
     let m = map.get(event.sessionId);
@@ -924,9 +1137,23 @@ export function aggregateSessionMetrics(
         m.interrupt = event.interventions.interrupt;
         m.toolReject = event.interventions.toolReject;
       }
-      // Token + prompt snapshots are full cumulative totals — latest wins.
       if (event.tokens) {
-        m.tokens = { ...event.tokens };
+        if (event.tokenScope === 'session') {
+          setLatestTokenSnapshot(sessionTokens, event.sessionId, event);
+        } else if (event.tokenScope === 'transcript' && event.transcriptPath) {
+          let segments = transcriptTokens.get(event.sessionId);
+          if (!segments) {
+            segments = new Map<string, TimedTokenSnapshot>();
+            transcriptTokens.set(event.sessionId, segments);
+          }
+          // A rollout's counter is cumulative within that file. Repeated Stop scans
+          // replace the same segment; a resumed rollout has a distinct path and adds
+          // one new segment to the logical session total.
+          setLatestTokenSnapshot(segments, event.transcriptPath, event);
+        } else {
+          // Claude, CodeBuddy, and pre-existing events retain latest-Stop semantics.
+          setLatestTokenSnapshot(unscopedTokens, event.sessionId, event);
+        }
       }
       if (typeof event.prompts === 'number') {
         stopPrompts.set(event.sessionId, event.prompts);
@@ -950,6 +1177,19 @@ export function aggregateSessionMetrics(
   // (survives compaction + resume); live submit events cover the period before the
   // first Stop. max() keeps the count monotonic across both.
   for (const [sid, m] of map) {
+    const sessionSnapshot = sessionTokens.get(sid);
+    const segments = transcriptTokens.get(sid);
+    if (sessionSnapshot) {
+      // The newer thread-level counter already spans rollout files.
+      m.tokens = { ...sessionSnapshot.tokens };
+    } else if (segments && segments.size > 0) {
+      let total = emptyTokenUsage();
+      for (const segment of segments.values()) total = addTokenUsage(total, segment.tokens);
+      m.tokens = total;
+    } else {
+      const unscoped = unscopedTokens.get(sid);
+      if (unscoped) m.tokens = { ...unscoped.tokens };
+    }
     m.prompts = Math.max(submitCount.get(sid) ?? 0, stopPrompts.get(sid) ?? 0);
   }
 
