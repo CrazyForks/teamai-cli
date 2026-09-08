@@ -91,3 +91,86 @@ describe('reportUsageToTeam — intervention reporting', () => {
     expect(fs.existsSync(path.join(repoDir, 'stats', 'me.yaml'))).toBe(false);
   });
 });
+
+describe('reportUsageToTeam — preserve fields across partial reports (Issue #425)', () => {
+  it('keeps interventions when a follow-up report is tokens-only', async () => {
+    const ts = new Date().toISOString();
+    // Report 1: interventions + prompts/tokens together
+    writeDashboardEvents([
+      { type: 'session_start', timestamp: ts, sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'prompt_submit', timestamp: ts, sessionId: 's1', tool: 'claude', promptSummary: 'hi' },
+      {
+        type: 'stop', timestamp: ts, sessionId: 's1', tool: 'claude',
+        interventions: { interrupt: 2, toolReject: 1 },
+        tokens: { input: 10, output: 5, cacheRead: 0, cacheCreation: 0 },
+      },
+    ]);
+    await reportUsageToTeam(repoDir, 'me');
+
+    const statsPath = path.join(repoDir, 'stats', 'me.yaml');
+    let stats = YAML.parse(fs.readFileSync(statsPath, 'utf-8'));
+    expect(stats.interventions).toEqual({ sessions: 1, interrupt: 2, toolReject: 1, correction: 0 });
+    expect(stats.prompts).toBe(1);
+    expect(stats.tokens).toEqual({ input: 10, output: 5, cacheRead: 0, cacheCreation: 0 });
+
+    // Report 2: tokens/prompts advance only — same intervention counts (no intervention delta)
+    writeDashboardEvents([
+      { type: 'session_start', timestamp: ts, sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'prompt_submit', timestamp: ts, sessionId: 's1', tool: 'claude', promptSummary: 'hi' },
+      { type: 'prompt_submit', timestamp: ts, sessionId: 's1', tool: 'claude', promptSummary: 'more' },
+      {
+        type: 'stop', timestamp: ts, sessionId: 's1', tool: 'claude',
+        interventions: { interrupt: 2, toolReject: 1 },
+        tokens: { input: 50, output: 20, cacheRead: 0, cacheCreation: 0 },
+      },
+    ]);
+    pushRepoDirectly.mockClear();
+    await reportUsageToTeam(repoDir, 'me');
+
+    stats = YAML.parse(fs.readFileSync(statsPath, 'utf-8'));
+    // Must still have interventions after a tokens-only report
+    expect(stats.interventions).toEqual({ sessions: 1, interrupt: 2, toolReject: 1, correction: 0 });
+    expect(stats.prompts).toBe(2);
+    expect(stats.tokens).toEqual({ input: 50, output: 20, cacheRead: 0, cacheCreation: 0 });
+    expect(pushRepoDirectly).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps prompts/tokens when a follow-up report is intervention-only', async () => {
+    const ts = new Date().toISOString();
+    // Report 1: prompts/tokens only (no intervention counts yet)
+    writeDashboardEvents([
+      { type: 'session_start', timestamp: ts, sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'prompt_submit', timestamp: ts, sessionId: 's1', tool: 'claude', promptSummary: 'hi' },
+      {
+        type: 'stop', timestamp: ts, sessionId: 's1', tool: 'claude',
+        tokens: { input: 10, output: 5, cacheRead: 0, cacheCreation: 0 },
+      },
+    ]);
+    await reportUsageToTeam(repoDir, 'me');
+
+    const statsPath = path.join(repoDir, 'stats', 'me.yaml');
+    let stats = YAML.parse(fs.readFileSync(statsPath, 'utf-8'));
+    expect(stats.prompts).toBe(1);
+    expect(stats.tokens).toEqual({ input: 10, output: 5, cacheRead: 0, cacheCreation: 0 });
+
+    // Report 2: interventions only — same prompts/tokens (no prompt/token delta)
+    writeDashboardEvents([
+      { type: 'session_start', timestamp: ts, sessionId: 's1', tool: 'claude', cwd: '/p' },
+      { type: 'prompt_submit', timestamp: ts, sessionId: 's1', tool: 'claude', promptSummary: 'hi' },
+      {
+        type: 'stop', timestamp: ts, sessionId: 's1', tool: 'claude',
+        interventions: { interrupt: 1, toolReject: 0 },
+        tokens: { input: 10, output: 5, cacheRead: 0, cacheCreation: 0 },
+      },
+    ]);
+    pushRepoDirectly.mockClear();
+    await reportUsageToTeam(repoDir, 'me');
+
+    stats = YAML.parse(fs.readFileSync(statsPath, 'utf-8'));
+    expect(stats.interventions).toEqual({ sessions: 1, interrupt: 1, toolReject: 0, correction: 0 });
+    // Must still have prompts/tokens after an intervention-only report
+    expect(stats.prompts).toBe(1);
+    expect(stats.tokens).toEqual({ input: 10, output: 5, cacheRead: 0, cacheCreation: 0 });
+    expect(pushRepoDirectly).toHaveBeenCalledTimes(1);
+  });
+});

@@ -109,6 +109,12 @@ export function mergeStats(
     username,
     updatedAt: new Date().toISOString(),
     skills,
+    // Preserve session metrics across partial reports (Issue #425).
+    // mergeStats only refreshes skills/username/updatedAt; callers overwrite
+    // interventions/prompts/tokens when that report carries a non-empty delta.
+    ...(existing?.interventions !== undefined ? { interventions: existing.interventions } : {}),
+    ...(existing?.prompts !== undefined ? { prompts: existing.prompts } : {}),
+    ...(existing?.tokens !== undefined ? { tokens: existing.tokens } : {}),
   };
 }
 
@@ -413,7 +419,8 @@ export async function reportUsageToTeam(
       const statsPath = path.join(statsDir, `${username}.yaml`);
 
       // See also: stats.ts mergeLocalAndReported() — same merge logic for display.
-      // mergeStats with [] preserves existing skills while refreshing username/updatedAt.
+      // mergeStats with [] preserves existing skills while refreshing username/updatedAt,
+      // and carries interventions/prompts/tokens so partial reports do not clobber them (#425).
       const existing = await readExistingStats(statsPath);
       const newStats = hasUsage ? aggregateUsage(events) : [];
       const merged = mergeStats(existing, username, newStats);

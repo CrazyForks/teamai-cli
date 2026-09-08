@@ -848,6 +848,25 @@ describe('mergeStats', () => {
     const result = mergeStats(existing, 'alice', []);
     expect(result.skills.tdd.count).toBe(10);
   });
+
+  it('preserves interventions/prompts/tokens when only skills are refreshed (Issue #425)', () => {
+    const existing: UserStats = {
+      username: 'alice',
+      updatedAt: '2026-03-19T10:00:00Z',
+      skills: {
+        tdd: { count: 10, lastUsed: '2026-03-18T10:00:00Z' },
+      },
+      interventions: { sessions: 2, interrupt: 3, toolReject: 1, correction: 0 },
+      prompts: 7,
+      tokens: { input: 100, output: 20, cacheRead: 5, cacheCreation: 1 },
+    };
+
+    const result = mergeStats(existing, 'alice', []);
+    expect(result.skills.tdd.count).toBe(10);
+    expect(result.interventions).toEqual(existing.interventions);
+    expect(result.prompts).toBe(7);
+    expect(result.tokens).toEqual(existing.tokens);
+  });
 });
 
 // ─── trackSlashCommand tests ──────────────────────────
