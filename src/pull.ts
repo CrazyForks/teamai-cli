@@ -5,7 +5,7 @@ import { requireInit, loadState, saveState, detectProjectConfig, loadLocalConfig
 import { pullRepo, getHeadRev } from './utils/git.js';
 import { flushPendingLearnings } from './utils/pending-learnings.js';
 import { log, spinner } from './utils/logger.js';
-import { pathExists, remove, listFiles, listDirs, listFilesRecursive, readFileSafe } from './utils/fs.js';
+import { pathExists, remove, listFiles, listDirs, listFilesRecursive, readFileSafe, dirContentEqual, hasVcsMetadataRecursive } from './utils/fs.js';
 import { injectClaudeMdSection } from './utils/claudemd.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
 import { ResourceHandler } from './resources/base.js';
@@ -40,6 +40,13 @@ interface RolePullContext {
   activeNamespaces: ResourceNamespaces;
   activeSkillNames: Set<string>;
   inactiveSkillNames: Set<string>;
+  /**
+   * Map of inactive skill name → its team-repo source directory
+   * (`<clone>/skills/<namespace>/<name>`). Cleanup compares the deployed copy
+   * against this source and only deletes when they are byte-identical, so a
+   * user's local edits or unpushed files are never silently destroyed.
+   */
+  inactiveSkillSources: Map<string, string>;
 }
 
 /**
@@ -120,12 +127,27 @@ async function refreshTeamRepo(
   return { label: result, version, reportingOnly: false };
 }
 
-async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {
+export async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {
   const activeProjects = localConfig.projects ?? [];
   const hasRole = !!localConfig.primaryRole;
   const hasProjects = activeProjects.length > 0;
-  // No role and no active project → nothing to filter by (unchanged behavior).
-  if (!hasRole && !hasProjects) return null;
+
+  // Load the projects manifest up front: its mere existence means this team uses
+  // project partitioning, which changes the "no active filter" semantics below.
+  const projectsManifest = await loadProjectsManifest(localConfig.repo.localPath);
+  const teamHasProjects = !!projectsManifest && projectsManifest.projects.length > 0;
+
+  // When there is nothing to filter by AND the team does not use project
+  // partitioning, keep the legacy unfiltered behavior (null = sync everything).
+  //
+  // But if the team HAS a projects manifest, a directory with no active project
+  // is NOT the same as a pre-project legacy config: deactivating projects (via
+  // `teamai projects set` with no ids) must scope down to role-only + shared
+  // resources and CLEAN UP the resources of the projects it left — never fall
+  // through to an unfiltered sync that reinstalls every project's skills/rules.
+  // So we return a real (possibly empty-active) context and let the cleanup path
+  // below prune the now-inactive project namespaces.
+  if (!hasRole && !hasProjects && !teamHasProjects) return null;
 
   // ── Role namespaces (optional) ──
   let roleNamespaces: ResourceNamespaces = { knowledge: [], skills: [], learnings: [] };
@@ -149,32 +171,35 @@ async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullC
       } catch {
         log.warn(`Role "${localConfig.primaryRole}" not found in manifest. Falling back to unfiltered sync.`);
         log.warn('Run `teamai roles set <role>` to pick a valid role.');
-        // A misconfigured role with no active project means we can't filter safely.
-        if (!hasProjects) return null;
+        // A misconfigured role, with nothing else to scope by, can't filter safely.
+        if (!hasProjects && !teamHasProjects) return null;
       }
-    } else if (!hasProjects) {
+    } else if (!hasProjects && !teamHasProjects) {
       return null;
     }
   }
 
-  // ── Project namespaces (optional) ──
+  // ── Project namespaces ──
+  // Populate the full set of project skill namespaces from the manifest whenever
+  // the team defines projects — even with none active — so every non-selected
+  // project namespace is treated as inactive and cleaned up below. The ACTIVE
+  // namespaces come only from the projects this directory selected.
   let projectNamespaces = { knowledge: [] as string[], skills: [] as string[], learnings: [] as string[] };
   let allProjectSkillNamespaces = new Set<string>();
-  if (hasProjects) {
-    const projectsManifest = await loadProjectsManifest(localConfig.repo.localPath);
-    if (!projectsManifest) {
-      log.warn('Active projects configured but no projects manifest found. Skipping project-based filtering.');
-    } else {
+  if (projectsManifest) {
+    allProjectSkillNamespaces = new Set(projectsManifest.projects.flatMap((p) => p.resources.skills));
+    if (hasProjects) {
       try {
         projectNamespaces = resolveProjectResourceNamespaces({
           manifest: projectsManifest,
           activeProjects,
         });
-        allProjectSkillNamespaces = new Set(projectsManifest.projects.flatMap((p) => p.resources.skills));
       } catch (e) {
         log.warn(`${(e as Error).message} Falling back to role-only filtering.`);
       }
     }
+  } else if (hasProjects) {
+    log.warn('Active projects configured but no projects manifest found. Skipping project-based filtering.');
   }
 
   const activeNamespaces = mergeNamespaces(roleNamespaces, projectNamespaces);
@@ -185,6 +210,7 @@ async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullC
   const inactiveSkillNamespaces = [...allSkillNamespaces].filter((namespace) => !activeNamespaces.skills.includes(namespace));
   const activeSkillNames = new Set<string>();
   const inactiveSkillNames = new Set<string>();
+  const inactiveSkillSources = new Map<string, string>();
 
   for (const namespace of activeNamespaces.skills) {
     const namespaceDir = path.join(localConfig.repo.localPath, 'skills', namespace);
@@ -199,10 +225,17 @@ async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullC
     const names = await listDirs(namespaceDir);
     for (const name of names) {
       inactiveSkillNames.add(name);
+      // Record the source dir so cleanup can verify the deployed copy is
+      // unmodified before deleting it. (If a name lives in multiple inactive
+      // namespaces, keeping the first is fine — cleanup only needs one source to
+      // compare against; a mismatch always errs toward keeping the local copy.)
+      if (!inactiveSkillSources.has(name)) {
+        inactiveSkillSources.set(name, path.join(namespaceDir, name));
+      }
     }
   }
 
-  return { activeNamespaces, activeSkillNames, inactiveSkillNames };
+  return { activeNamespaces, activeSkillNames, inactiveSkillNames, inactiveSkillSources };
 }
 
 /**
@@ -253,11 +286,49 @@ export async function scanRoleAwareSkills(localConfig: LocalConfig, namespaces: 
   return [...items.values()];
 }
 
+// Deployment adds a CONTRIBUTORS file that the team source may not have; ignore it
+// when checking whether a deployed skill still matches its source (same file as
+// resources/skills.ts and pre-push-sync.ts use for modification detection).
+const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
+
+/**
+ * Data-safety gate for deleting a deployed skill during cleanup. A deployed skill
+ * is safe to remove only when its content matches its team-repo source exactly
+ * (ignoring the deployment-added CONTRIBUTORS file). That means:
+ *   - every team file is present and unchanged (no local edits), AND
+ *   - there are NO extra files (no unpushed work like a user's own scripts).
+ * `dirContentEqual` enforces both directions (same file set + same content), which
+ * is what protects unpushed files — a team-subset check would wrongly ignore them.
+ * `ensureSkillFrontmatter` is idempotent for a source that already has complete
+ * frontmatter (the normal case), so a cleanly-deployed skill compares equal.
+ * If the source is unknown/missing (can't verify) or anything differs, it is NOT
+ * safe: keep it and let the caller warn. Prevents silent loss of uncommitted work.
+ *
+ * Known conservative edge: if a team source skill lacks frontmatter, deploy
+ * injects it, so the deployed copy never compares equal and the skill is kept
+ * rather than auto-pruned. That errs on the safe side (no data loss); the user
+ * can delete it manually. Real team skills carry frontmatter, so this is rare.
+ *
+ * Local VCS metadata: a deployed skill that contains its own version-control
+ * directory (`.git`/`.hg`/`.svn`) is ALWAYS kept. `dirContentEqual` skips these
+ * (see IGNORED_NAMES), so a byte-identical working tree can still hide unpushed
+ * commits, stashes, or reflog history inside `.git` — deleting the dir would lose
+ * them silently. Their presence can't be proven safe by a file compare, so keep.
+ */
+async function skillSafeToRemove(deployedDir: string, source: string | undefined): Promise<boolean> {
+  if (!source || !await pathExists(source)) return false;
+  // Recursive: a git repo nested anywhere under the skill (e.g. scripts/.git)
+  // can hide stashes/unpushed history too, and dirContentEqual skips every .git.
+  if (await hasVcsMetadataRecursive(deployedDir)) return false;
+  return dirContentEqual(deployedDir, source, [CONTRIBUTORS_FILE]);
+}
+
 export async function cleanupInactiveNamespaceSkills(
   teamConfig: TeamaiConfig,
   localConfig: LocalConfig,
   retainedSkillNames: Set<string>,
   inactiveSkillNames: Set<string>,
+  inactiveSkillSources?: Map<string, string>,
 ): Promise<void> {
   const baseDir = resolveBaseDir(localConfig);
 
@@ -274,6 +345,17 @@ export async function cleanupInactiveNamespaceSkills(
       if (!inactiveSkillNames.has(skillName)) continue;
 
       const localSkillDir = path.join(baseDir, toolPath.skills, skillName);
+
+      // Data-safety guard: only delete a deployed skill when it is byte-identical
+      // to its team-repo source. If the user modified SKILL.md or added unpushed
+      // files (e.g. scripts) in the deployed dir, deleting would silently lose
+      // that work — so keep it and warn instead. If we cannot locate the source
+      // to compare against, err on the side of NOT deleting.
+      if (!await skillSafeToRemove(localSkillDir, inactiveSkillSources?.get(skillName))) {
+        log.warn(`[${localConfig.scope}] Kept skill "${skillName}" (${tool}): it has local changes or unpushed files not in the team repo (or could not be verified). Push or back them up, then delete it manually.`);
+        continue;
+      }
+
       await remove(localSkillDir);
       log.debug(`[${localConfig.scope}] Removed inactive role-scoped skill ${skillName} from ${tool}`);
     }
@@ -485,6 +567,8 @@ async function pullForScope(
   let totalSynced = 0;
   let desiredSkillNames: Set<string> | null = null;
   let knownRepoSkillNames: Set<string> | null = null;
+  // name → team-repo source dir, for the data-safety check in Step 3b cleanup.
+  let knownRepoSkillSources: Map<string, string> | null = null;
 
   for (const type of resourceTypes) {
     const handler = getHandler(type);
@@ -552,6 +636,7 @@ async function pullForScope(
       }
       desiredSkillNames = new Set(items.map((i) => i.name));
       knownRepoSkillNames = new Set(allTeamSkills.map((i) => i.name));
+      knownRepoSkillSources = new Map(allTeamSkills.map((i) => [i.name, i.sourcePath]));
     } else {
       items = await handler.scanTeamForPull(freshConfig, localConfig);
     }
@@ -658,6 +743,13 @@ async function pullForScope(
           for (const extension of extensions) {
             const localPath = path.join(baseDir, dir, extension ? `${name}${extension}` : name);
             if (await pathExists(localPath)) {
+              // Even an upstream (tombstone) removal must not blow away a local
+              // git repo's stash/unpushed history inside a skill directory. Keep
+              // + warn; the user can delete it manually once backed up.
+              if (type === 'skills' && await hasVcsMetadataRecursive(localPath)) {
+                log.warn(`[${scopeLabel}] Kept tombstoned skill "${name}" (${tool}): it has local VCS metadata (.git) that may hold unpushed history. Back it up, then delete it manually.`);
+                continue;
+              }
               await remove(localPath);
               log.debug(`[${scopeLabel}] Cleaned up tombstoned ${type} ${name} from ${dir}`);
             }
@@ -672,6 +764,7 @@ async function pullForScope(
         localConfig,
         desiredSkillNames ?? roleContext.activeSkillNames,
         roleContext.inactiveSkillNames,
+        roleContext.inactiveSkillSources,
       );
     }
   }
@@ -693,6 +786,13 @@ async function pullForScope(
         if (desiredSkillNames.has(dir)) continue;
         if (!knownRepoSkillNames.has(dir)) continue;
         const skillDir = path.join(skillsDir, dir);
+        // Same data-safety gate as cleanupInactiveNamespaceSkills: never delete a
+        // deployed skill that differs from its team-repo source (local edits or
+        // unpushed files). Keep + warn instead of silently destroying work.
+        if (!await skillSafeToRemove(skillDir, knownRepoSkillSources?.get(dir))) {
+          log.warn(`[${scopeLabel}] Kept skill "${dir}" (${tool}): it has local changes or unpushed files not in the team repo (or could not be verified). Push or back them up, then delete it manually.`);
+          continue;
+        }
         await remove(skillDir);
         log.debug(`Removed excluded skill ${dir} from ${tool}`);
       }

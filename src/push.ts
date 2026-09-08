@@ -257,10 +257,45 @@ async function pushGroup(args: {
   }
 }
 
-export async function push(options: GlobalOptions & { all?: boolean; role?: string }): Promise<void> {
+export async function push(options: GlobalOptions & { all?: boolean; role?: string; project?: string }): Promise<void> {
   // Auto-detect scope: project scope if cwd has project config, else user scope
   const { localConfig, teamConfig } = await autoDetectInit();
   assertNotReadOnly(localConfig, 'teamai push');
+
+  // --project is a destination override expressed as a logical project: resolve
+  // it to the project's skills namespace (from manifest/projects.yaml) and reuse
+  // the --role landing logic below. Deliberately manifest-resolved, not the raw
+  // project id, so it agrees with what pull syncs (issue #375 P2 lesson).
+  if (options.project) {
+    if (options.role) {
+      log.error('Use either --role or --project, not both.');
+      process.exitCode = 2;
+      return;
+    }
+    const { loadProjectsManifest, resolveProjectResourceNamespaces } = await import('./projects.js');
+    const manifest = await loadProjectsManifest(localConfig.repo.localPath);
+    if (!manifest) {
+      log.error('This team repo defines no projects (no manifest/projects.yaml).');
+      process.exitCode = 2;
+      return;
+    }
+    let skillNamespaces: string[];
+    try {
+      skillNamespaces = resolveProjectResourceNamespaces({ manifest, activeProjects: [options.project] }).skills;
+    } catch (e) {
+      log.error((e as Error).message);
+      process.exitCode = 2;
+      return;
+    }
+    if (skillNamespaces.length !== 1) {
+      log.error(skillNamespaces.length === 0
+        ? `Project "${options.project}" declares no skills namespace; use --role <ns> to target one explicitly.`
+        : `Project "${options.project}" maps to multiple skills namespaces (${skillNamespaces.join(', ')}); use --role <ns> to pick one.`);
+      process.exitCode = 2;
+      return;
+    }
+    options.role = skillNamespaces[0];
+  }
   try {
     const configContent = await readFileSafe(path.join(localConfig.repo.localPath, 'teamai.yaml'));
     const rawConfig = configContent === null ? null : YAML.parse(configContent);

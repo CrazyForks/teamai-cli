@@ -189,6 +189,36 @@ async function _walkFiles(base: string, prefix: string, results: string[]): Prom
   }
 }
 
+const VCS_METADATA_NAMES = new Set(['.git', '.hg', '.svn']);
+
+/**
+ * Recursively detect local version-control metadata (`.git`/`.hg`/`.svn`) at ANY
+ * depth under `dir`. Deliberately does NOT reuse the file-walk helpers above:
+ * they skip `.git` via IGNORED_NAMES, which is exactly what would hide a nested
+ * repo. `.git` is matched whether it is a directory or a file (submodule/worktree
+ * links store it as a file). `node_modules` is skipped — its VCS metadata is
+ * dependency noise, not the user's own unpushed work. Used to keep a deployed
+ * skill that embeds a git repo (root OR nested) from being auto-deleted, since
+ * such a repo can hide stashes / unpushed history a content compare cannot see.
+ */
+export async function hasVcsMetadataRecursive(dir: string): Promise<boolean> {
+  const expanded = expandHome(dir);
+  if (!await fse.pathExists(expanded)) return false;
+  let entries;
+  try {
+    entries = await fse.readdir(expanded, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (VCS_METADATA_NAMES.has(entry.name)) return true; // dir or file (submodule link)
+    if (entry.isDirectory() && entry.name !== 'node_modules') {
+      if (await hasVcsMetadataRecursive(path.join(expanded, entry.name))) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Check if a path exists
  */

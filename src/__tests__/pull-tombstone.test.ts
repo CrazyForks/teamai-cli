@@ -294,16 +294,20 @@ describe('pull role-aware sync and cleanup', () => {
       '',
     ].join('\n'));
     await fse.ensureDir(path.join(homeDir, '.claude/skills', 'beta-tag-wanted'));
-    await fse.writeFile(path.join(homeDir, '.claude/skills', 'beta-tag-wanted', 'SKILL.md'), '# Previously synced');
+    // Byte-identical to the team-repo source so the data-safety gate allows cleanup.
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'beta-tag-wanted', 'SKILL.md'), '# Wanted');
 
     await pull({ force: true });
 
     expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'beta-tag-wanted'))).toBe(false);
   });
 
-  it('removes stale skills from namespaces that are no longer active', async () => {
+  it('removes stale skills from namespaces that are no longer active (unmodified copy)', async () => {
+    // Deployed copy is byte-identical to the team-repo source → safe to delete.
     await fse.ensureDir(path.join(homeDir, '.claude/skills', 'pm-skill'));
     await fse.writeFile(path.join(homeDir, '.claude/skills', 'pm-skill', 'SKILL.md'), '# PM');
+    await fse.ensureDir(path.join(repoPath, 'skills', 'pm', 'pm-skill'));
+    await fse.writeFile(path.join(repoPath, 'skills', 'pm', 'pm-skill', 'SKILL.md'), '# PM');
     const teamConfig = vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
     const localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
@@ -320,9 +324,116 @@ describe('pull role-aware sync and cleanup', () => {
       await localConfig,
       new Set(['shared-skill', 'hai-skill']),
       new Set(['pm-skill']),
+      new Map([['pm-skill', path.join(repoPath, 'skills', 'pm', 'pm-skill')]]),
     );
 
     expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'pm-skill'))).toBe(false);
+  });
+
+  it('KEEPS a stale skill with local edits instead of deleting (data-loss guard, PR #444)', async () => {
+    // Deployed copy has a modified SKILL.md + an unpushed file → must NOT delete.
+    await fse.ensureDir(path.join(homeDir, '.claude/skills', 'pm-skill'));
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'pm-skill', 'SKILL.md'), '# PM edited locally');
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'pm-skill', 'unpublished.py'), 'print("wip")');
+    await fse.ensureDir(path.join(repoPath, 'skills', 'pm', 'pm-skill'));
+    await fse.writeFile(path.join(repoPath, 'skills', 'pm', 'pm-skill', 'SKILL.md'), '# PM');
+    const teamConfig = vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
+    const localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser', updatePolicy: 'auto' as const,
+      primaryRole: 'hai', additionalRoles: [], resourceProfileVersion: 1, scope: 'user' as const,
+    };
+
+    await cleanupInactiveNamespaceSkills(
+      await teamConfig, await localConfig,
+      new Set(['shared-skill', 'hai-skill']),
+      new Set(['pm-skill']),
+      new Map([['pm-skill', path.join(repoPath, 'skills', 'pm', 'pm-skill')]]),
+    );
+
+    // Skill dir AND the unpushed file survive.
+    expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'pm-skill', 'unpublished.py'))).toBe(true);
+    expect(await fse.readFile(path.join(homeDir, '.claude/skills', 'pm-skill', 'SKILL.md'), 'utf-8')).toBe('# PM edited locally');
+  });
+
+  it('KEEPS a stale skill when its team-repo source is gone (cannot verify → no delete)', async () => {
+    await fse.ensureDir(path.join(homeDir, '.claude/skills', 'orphan-skill'));
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'orphan-skill', 'SKILL.md'), '# orphan');
+    const teamConfig = vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
+    const localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser', updatePolicy: 'auto' as const,
+      primaryRole: 'hai', additionalRoles: [], resourceProfileVersion: 1, scope: 'user' as const,
+    };
+
+    await cleanupInactiveNamespaceSkills(
+      await teamConfig, await localConfig,
+      new Set(['shared-skill', 'hai-skill']),
+      new Set(['orphan-skill']),
+      new Map(), // no source recorded
+    );
+
+    expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'orphan-skill'))).toBe(true);
+  });
+
+  it('KEEPS a stale skill that contains a local .git dir even if its files match (stash/history guard, PR #444)', async () => {
+    // Deployed working tree is byte-identical to source, BUT the skill dir holds a
+    // local git repo — its .git may carry stashes / unpushed commits that a file
+    // compare (which skips .git) cannot see. Must NOT delete.
+    await fse.ensureDir(path.join(homeDir, '.claude/skills', 'vcs-skill'));
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'vcs-skill', 'SKILL.md'), '# VCS');
+    await fse.ensureDir(path.join(homeDir, '.claude/skills', 'vcs-skill', '.git'));
+    await fse.writeFile(path.join(homeDir, '.claude/skills', 'vcs-skill', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    await fse.ensureDir(path.join(repoPath, 'skills', 'pm', 'vcs-skill'));
+    await fse.writeFile(path.join(repoPath, 'skills', 'pm', 'vcs-skill', 'SKILL.md'), '# VCS');
+    const teamConfig = vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
+    const localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser', updatePolicy: 'auto' as const,
+      primaryRole: 'hai', additionalRoles: [], resourceProfileVersion: 1, scope: 'user' as const,
+    };
+
+    await cleanupInactiveNamespaceSkills(
+      await teamConfig, await localConfig,
+      new Set(['shared-skill', 'hai-skill']),
+      new Set(['vcs-skill']),
+      new Map([['vcs-skill', path.join(repoPath, 'skills', 'pm', 'vcs-skill')]]),
+    );
+
+    // Skill dir AND its .git survive.
+    expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'vcs-skill', '.git', 'HEAD'))).toBe(true);
+  });
+
+  it('KEEPS a stale skill with a NESTED git repo (scripts/.git), files matching (PR #444)', async () => {
+    // The git repo is in a subdirectory, not the skill root. dirContentEqual skips
+    // every .git at any depth, so only a recursive VCS scan catches this.
+    const sk = path.join(homeDir, '.claude/skills', 'nested-vcs');
+    await fse.ensureDir(path.join(sk, 'scripts'));
+    await fse.writeFile(path.join(sk, 'SKILL.md'), '# Nested');
+    await fse.writeFile(path.join(sk, 'scripts', 'runner.py'), 'print("run")');
+    await fse.ensureDir(path.join(sk, 'scripts', '.git'));
+    await fse.writeFile(path.join(sk, 'scripts', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    // Source has the same working-tree files (the nested .git is invisible to compare).
+    const src = path.join(repoPath, 'skills', 'pm', 'nested-vcs');
+    await fse.ensureDir(path.join(src, 'scripts'));
+    await fse.writeFile(path.join(src, 'SKILL.md'), '# Nested');
+    await fse.writeFile(path.join(src, 'scripts', 'runner.py'), 'print("run")');
+    const teamConfig = vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
+    const localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser', updatePolicy: 'auto' as const,
+      primaryRole: 'hai', additionalRoles: [], resourceProfileVersion: 1, scope: 'user' as const,
+    };
+
+    await cleanupInactiveNamespaceSkills(
+      await teamConfig, await localConfig,
+      new Set(['shared-skill', 'hai-skill']),
+      new Set(['nested-vcs']),
+      new Map([['nested-vcs', src]]),
+    );
+
+    // Nested .git (and the whole skill) survives.
+    expect(await fse.pathExists(path.join(sk, 'scripts', '.git', 'HEAD'))).toBe(true);
   });
 
   it('gracefully degrades when the roles manifest is malformed', async () => {
@@ -360,13 +471,15 @@ describe('pull role-aware sync and cleanup', () => {
   });
 
   it('cleans up stale skills after role change (full pull cycle)', async () => {
-    // Setup: create skills in all namespaces
+    // Setup: create skills in all namespaces. Real team skills carry complete
+    // frontmatter, so ensureSkillFrontmatter is idempotent on deploy and the
+    // deployed copy compares equal to its source (needed for safe cleanup).
     await fse.ensureDir(path.join(repoPath, 'skills', 'common', 'shared-skill'));
-    await fse.writeFile(path.join(repoPath, 'skills', 'common', 'shared-skill', 'SKILL.md'), '# Shared');
+    await fse.writeFile(path.join(repoPath, 'skills', 'common', 'shared-skill', 'SKILL.md'), '---\nname: shared-skill\ndescription: shared\n---\n# Shared');
     await fse.ensureDir(path.join(repoPath, 'skills', 'hai', 'hai-only'));
-    await fse.writeFile(path.join(repoPath, 'skills', 'hai', 'hai-only', 'SKILL.md'), '# HAI Only');
+    await fse.writeFile(path.join(repoPath, 'skills', 'hai', 'hai-only', 'SKILL.md'), '---\nname: hai-only\ndescription: hai\n---\n# HAI Only');
     await fse.ensureDir(path.join(repoPath, 'skills', 'pm', 'pm-only'));
-    await fse.writeFile(path.join(repoPath, 'skills', 'pm', 'pm-only', 'SKILL.md'), '# PM Only');
+    await fse.writeFile(path.join(repoPath, 'skills', 'pm', 'pm-only', 'SKILL.md'), '---\nname: pm-only\ndescription: pm\n---\n# PM Only');
 
     // Step 1: Pull as hai role — should get common + hai skills
     await pull({});

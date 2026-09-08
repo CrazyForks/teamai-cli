@@ -51,6 +51,7 @@ program
   .option('--all', 'Push all without confirmation')
   .option('--skill <path>', 'Push a specific skill by path (e.g., ~/.claude/skills/hai/my-skill or skills/hai_dev/my-skill)')
   .option('--role <id>', 'Target role namespace for pushed project skills')
+  .option('--project <id>', 'Target a project: push skills into the project\'s skills namespace (from manifest/projects.yaml)')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { push } = await import('./push.js');
@@ -262,6 +263,45 @@ rolesCmd
     const globalOpts = program.opts() as GlobalOptions;
     const { rolesUpdate } = await import('./roles-cmd.js');
     await rolesUpdate(id, { ...globalOpts, ...cmdOpts });
+  });
+
+// ─── Projects subcommand ──────────────────────────────────
+
+const projectsCmd = program
+  .command('projects')
+  .description('Manage multi-project resource distribution (orthogonal to roles)')
+  .action(async () => {
+    // Default action: list projects
+    const globalOpts = program.opts() as GlobalOptions;
+    const { projectsList } = await import('./projects-cmd.js');
+    await projectsList(globalOpts);
+  });
+
+projectsCmd
+  .command('list')
+  .description('List defined projects and the ones active in this directory')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { projectsList } = await import('./projects-cmd.js');
+    await projectsList(globalOpts);
+  });
+
+projectsCmd
+  .command('set [ids...]')
+  .description('Set the projects active in this directory (comma-separated or repeated; empty to clear)')
+  .action(async (ids: string[] = [], _cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { projectsSet } = await import('./projects-cmd.js');
+    await projectsSet(ids, globalOpts);
+  });
+
+projectsCmd
+  .command('members <id>')
+  .description('List members registered for a project')
+  .action(async (id: string) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { projectsMembers } = await import('./projects-cmd.js');
+    await projectsMembers(id, globalOpts);
   });
 
 // ─── Tags subcommand ──────────────────────────────────────
