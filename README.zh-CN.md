@@ -226,6 +226,7 @@ Matched: conflict | Missing: port
 ```bash
 teamai import --from-repo https://github.com/org/repo
 teamai import --from-org myorg              # 批量导入所有仓库
+teamai codebase --extract /path/to/repo     # 本地提取到 teamwiki/
 teamai codebase --lint                      # 健康检查
 ```
 
@@ -267,6 +268,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | `teamai recall promote [learningId]` | 将高置信度 learning 晋升为正式知识（skills/rules/docs） |
 | `teamai recall maintenance` | 维护知识库健康：清理低置信度 learnings、回写置信度、标记过时条目 |
 | `teamai import` | 导入知识（`--dir`、`--from-repo`、`--from-org`、`--from-repo-list`、`--from-mr`） |
+| `teamai codebase --extract [path]` | 提取代码事实并在 `teamwiki/` 下构建本地图谱 |
 | `teamai codebase --lint` | 知识图谱健康检查 |
 | `teamai ci extract-mr --url <url>` | CI：从 MR 提取知识、发评论、合并后写入 |
 | `teamai members` | 查看团队成员 |
