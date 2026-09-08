@@ -643,6 +643,18 @@ teamai contribute --file /tmp/session.md
 teamai contribute --file /tmp/session.md --scope project
 ```
 
+#### 关闭提醒
+
+如果团队通过自己的评审流程沉淀知识（例如个人复盘后提交普通 PR），可以只关闭这条提醒，Stop hook 的其余功能（更新检查、votes 同步、dashboard 上报）照常运行。配置方式与 recall 相同，分两层：
+
+| 层级 | 配置文件 | 字段 | 说明 |
+|------|----------|------|------|
+| 团队默认 | `teamai.yaml` | `sharing.contributeHint.enabled` | `true`（默认）/ `false` |
+| 用户覆盖 | `~/.teamai/config.yaml` | `contributeHintEnabled` | `true` / `false`，优先级高于团队默认 |
+| 环境变量 | shell | `TEAMAI_CONTRIBUTE_HINT_DISABLED=1` | 强制关闭提醒（紧急开关） |
+
+只影响提醒本身：摩擦评分、`teamai contribute --file` 和手动调用 `/teamai-share-learnings` 不受影响。
+
 ### 搜索知识
 
 ```bash
@@ -1322,6 +1334,8 @@ sharing:
     injectShellProfile: true
   coAuthor:
     enabled: false             # 可选，为全团队去除 AI 工具提交尾注
+  contributeHint:
+    enabled: true              # 可选，false = 高摩擦 session 结束后不再提示 /teamai-share-learnings
 ```
 
 ### config.yaml（本地配置）
@@ -1336,6 +1350,7 @@ scope: project                 # project（init 默认）或 user
 projectRoot: /path/to/project  # 仅 project scope
 inheritUserScope: true         # 可选，仅 project scope，默认 false
 coAuthorEnabled: true          # 可选，每机器的 co-author 覆盖
+contributeHintEnabled: false   # 可选，每机器覆盖 sharing.contributeHint.enabled
 ```
 
 ---

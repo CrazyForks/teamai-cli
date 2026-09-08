@@ -190,9 +190,28 @@ const trackSlashHandler: HookHandler = {
   },
 };
 
+/**
+ * Whether the share-learnings hint may be emitted at all. Resolved lazily per
+ * hook run so a team can switch it off via teamai.yaml (or a member via local
+ * config) without re-injecting hooks. Falls back to enabled when config can't
+ * be read, preserving pre-toggle behavior for half-initialized installs.
+ */
+async function contributeHintAllowed(): Promise<boolean> {
+  const { isContributeHintEnabled } = await import('./types.js');
+  try {
+    const { autoDetectInit } = await import('./config.js');
+    const { localConfig, teamConfig } = await autoDetectInit();
+    return isContributeHintEnabled(localConfig, teamConfig);
+  } catch {
+    return isContributeHintEnabled({}, {});
+  }
+}
+
 const contributeCheckHandler: HookHandler = {
   name: 'contribute-check',
   async execute(stdin, tool) {
+    if (!(await contributeHintAllowed())) return null;
+
     const { contributeCheckForSession } = await import('./contribute-check.js');
     const { formatStopHookOutput } = await import('./utils/hook-output.js');
     const { STOP_STDOUT_UNSUPPORTED_TOOLS } = await import('./utils/tool-names.js');
@@ -228,7 +247,10 @@ const pendingHintHandler: HookHandler = {
     // differ across the two hook processes and orphan the stash (best-effort).
     const sessionId = deriveSessionId(stdin, { includeCwd: true });
     const pending = await import('./contribute-check.js');
-    const hint = await pending.takePendingHint(sessionId);
+    // Always consume the stash so a hint stashed before the team turned the
+    // feature off is not delivered later when it is turned back on.
+    const stashed = await pending.takePendingHint(sessionId);
+    const hint = (await contributeHintAllowed()) ? stashed : null;
     const votesHint = await pending.takePendingVotesHint(sessionId);
 
     const combined = [hint, votesHint].filter(Boolean).join('\n');

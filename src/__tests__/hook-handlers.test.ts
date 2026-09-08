@@ -58,11 +58,13 @@ vi.mock('../update.js', () => ({
   checkForUpdate: vi.fn().mockResolvedValue({ available: false, current: '1.0.0' }),
 }));
 
+const mockAutoDetectInit = vi.fn().mockResolvedValue({
+  localConfig: { repo: { localPath: '/tmp', remote: '' }, username: 'test', scope: 'user' },
+  teamConfig: { team: 'test', repo: '', toolPaths: {} },
+});
+
 vi.mock('../config.js', () => ({
-  autoDetectInit: vi.fn().mockResolvedValue({
-    localConfig: { repo: { localPath: '/tmp', remote: '' }, username: 'test', scope: 'user' },
-    teamConfig: { team: 'test', repo: '', toolPaths: {} },
-  }),
+  autoDetectInit: mockAutoDetectInit,
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -279,6 +281,87 @@ describe('hook-handlers registry', () => {
     expect(result).toContain('do share');
     // claude is not a stash tool: called with stash=false.
     expect(mockContributeCheckForSession).toHaveBeenCalledWith('s2', '/x', undefined, false);
+  });
+
+  it('contribute-check handler stays silent when the team turned the hint off', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'stop' && r.handler.name === 'contribute-check',
+    )!.handler;
+    mockAutoDetectInit.mockResolvedValueOnce({
+      localConfig: { repo: { localPath: '/tmp', remote: '' }, username: 'test', scope: 'user' },
+      teamConfig: { team: 'test', repo: '', toolPaths: {}, sharing: { contributeHint: { enabled: false } } },
+    });
+    mockContributeCheckForSession.mockClear();
+
+    const result = await handler.execute({ session_id: 's3', cwd: '/x' }, 'claude');
+    expect(result).toBeNull();
+    expect(mockContributeCheckForSession).not.toHaveBeenCalled();
+  });
+
+  it('contribute-check handler honors a member override that re-enables the hint', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'stop' && r.handler.name === 'contribute-check',
+    )!.handler;
+    mockAutoDetectInit.mockResolvedValueOnce({
+      localConfig: { repo: { localPath: '/tmp', remote: '' }, username: 'test', scope: 'user', contributeHintEnabled: true },
+      teamConfig: { team: 'test', repo: '', toolPaths: {}, sharing: { contributeHint: { enabled: false } } },
+    });
+    mockContributeCheckForSession.mockResolvedValueOnce({ hint: '[teamai] do share' });
+
+    const result = await handler.execute({ session_id: 's4', cwd: '/x' }, 'claude');
+    expect(result).toContain('do share');
+  });
+
+  it('contribute-check handler keeps hinting when config cannot be loaded', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'stop' && r.handler.name === 'contribute-check',
+    )!.handler;
+    mockAutoDetectInit.mockRejectedValueOnce(new Error('not initialized'));
+    mockContributeCheckForSession.mockResolvedValueOnce({ hint: '[teamai] do share' });
+
+    const result = await handler.execute({ session_id: 's5', cwd: '/x' }, 'claude');
+    expect(result).toContain('do share');
+  });
+
+  it('contribute-check handler obeys TEAMAI_CONTRIBUTE_HINT_DISABLED=1', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'stop' && r.handler.name === 'contribute-check',
+    )!.handler;
+    const previous = process.env.TEAMAI_CONTRIBUTE_HINT_DISABLED;
+    process.env.TEAMAI_CONTRIBUTE_HINT_DISABLED = '1';
+    mockContributeCheckForSession.mockClear();
+    try {
+      const result = await handler.execute({ session_id: 's6', cwd: '/x' }, 'claude');
+      expect(result).toBeNull();
+      expect(mockContributeCheckForSession).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.TEAMAI_CONTRIBUTE_HINT_DISABLED;
+      else process.env.TEAMAI_CONTRIBUTE_HINT_DISABLED = previous;
+    }
+  });
+
+  it('pending-hint handler drops a stashed hint when the team turned the hint off but still delivers votes hints', async () => {
+    const registry = buildHandlerRegistry();
+    const handler = registry.find(
+      (r) => r.event === 'prompt-submit' && r.handler.name === 'pending-hint',
+    )!.handler;
+    mockAutoDetectInit.mockResolvedValueOnce({
+      localConfig: { repo: { localPath: '/tmp', remote: '' }, username: 'test', scope: 'user' },
+      teamConfig: { team: 'test', repo: '', toolPaths: {}, sharing: { contributeHint: { enabled: false } } },
+    });
+    mockTakePendingHint.mockResolvedValueOnce('[teamai] stashed');
+    mockTakePendingVotesHint.mockResolvedValueOnce('[teamai] votes nudge');
+
+    const result = await handler.execute({ session_id: 's7', cwd: '/x' }, 'codebuddy');
+    // The stash is consumed (so it is not delivered later) but not shown.
+    expect(mockTakePendingHint).toHaveBeenCalledWith(expect.any(String));
+    expect(result).not.toBeNull();
+    expect(result).not.toContain('stashed');
+    expect(result).toContain('votes nudge');
   });
 
   it('pending-hint handler injects stashed hint for codebuddy on prompt-submit', async () => {

@@ -645,6 +645,18 @@ teamai contribute --file /tmp/session.md
 teamai contribute --file /tmp/session.md --scope project
 ```
 
+#### Turning the hint off
+
+Teams that route knowledge sharing through their own review flow (for example, a personal retrospective that opens ordinary PRs) can switch the hint off without touching the rest of the Stop hook — update checks, votes sync, and dashboard reporting keep running. Same two-tier pattern as recall:
+
+| Tier | Config file | Field | Description |
+|------|----------|------|------|
+| Team default | `teamai.yaml` | `sharing.contributeHint.enabled` | `true` (default) / `false` |
+| User override | `~/.teamai/config.yaml` | `contributeHintEnabled` | `true` / `false`, takes priority over the team default |
+| Environment variable | shell | `TEAMAI_CONTRIBUTE_HINT_DISABLED=1` | Force-disables the hint (emergency kill switch) |
+
+Only the nudge is affected: friction scoring, `teamai contribute --file`, and `/teamai-share-learnings` keep working when invoked manually.
+
 ### Searching knowledge
 
 ```bash
@@ -1327,6 +1339,8 @@ sharing:
     injectShellProfile: true
   coAuthor:
     enabled: false             # optional; strip AI-tool commit trailers team-wide
+  contributeHint:
+    enabled: true              # optional; false = no /teamai-share-learnings nudge after high-friction sessions
 ```
 
 ### config.yaml (local config)
@@ -1341,6 +1355,7 @@ scope: project                 # project (default from init) or user
 projectRoot: /path/to/project  # project scope only
 inheritUserScope: true         # optional; project scope only, defaults to false
 coAuthorEnabled: true          # optional; per-machine co-author override
+contributeHintEnabled: false   # optional; per-machine override of sharing.contributeHint.enabled
 ```
 
 ---

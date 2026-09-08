@@ -68,6 +68,16 @@ export const SharingConfigSchema = z.object({
   recall: z.object({
     enabled: z.boolean().default(false),
   }).optional(),
+  // Optional (not .default) so existing TeamaiConfig literals stay valid; use
+  // isContributeHintEnabled() for the resolved view.
+  contributeHint: z.object({
+    /** Team default: whether the Stop hook nudges members to run
+     *  /teamai-share-learnings after a high-friction session. Teams that route
+     *  knowledge sharing through their own review flow can turn the nudge off
+     *  without disabling the rest of the Stop hook (update check, votes sync,
+     *  dashboard reporting). */
+    enabled: z.boolean().default(true),
+  }).optional(),
   // Optional (not .default) so existing TeamaiConfig literals stay valid, AND so
   // "team has no opinion" (block absent) stays distinct from "team says off"
   // (enabled: false). Only the former is a no-op; see resolveCoAuthor().
@@ -128,6 +138,20 @@ export function isRecallEnabled(
 ): boolean {
   if (localConfig.recallEnabled !== undefined) return localConfig.recallEnabled;
   return getRecallSharing(teamConfig).enabled;
+}
+
+/**
+ * Resolve whether the share-learnings hint is enabled: env kill switch >
+ * user override > team config > default (true).
+ */
+export function isContributeHintEnabled(
+  localConfig: { contributeHintEnabled?: boolean },
+  teamConfig: { sharing?: { contributeHint?: { enabled?: boolean } } },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.TEAMAI_CONTRIBUTE_HINT_DISABLED === '1') return false;
+  if (localConfig.contributeHintEnabled !== undefined) return localConfig.contributeHintEnabled;
+  return teamConfig.sharing?.contributeHint?.enabled ?? true;
 }
 
 /**
@@ -327,6 +351,8 @@ export const LocalConfigSchema = z.object({
   excludedSkills: z.array(z.string()).optional(),
   /** User-level override for recall feature. When set, takes precedence over team config. */
   recallEnabled: z.boolean().optional(),
+  /** User-level override for the share-learnings hint. When set, takes precedence over team config. */
+  contributeHintEnabled: z.boolean().optional(),
   /** Per-machine override for the co-author trailer in AI-tool commits. When set,
    *  takes precedence over the team `sharing.coAuthor` default. Undefined means
    *  "defer to the team" (see resolveCoAuthor). */
