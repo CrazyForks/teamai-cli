@@ -536,6 +536,236 @@ servers:
     expect(changes[0]).toMatchObject({ action: 'skipped' });
     expect(changes[0].reason).toContain('allowedHosts');
   });
+
+  // issue #374 P1-2C: the partition is shared by every linked worktree, so each
+  // worktree now gets its OWN managed-mcp.json under
+  // <partition>/workspaces/<id>/. One worktree's reconcile can never see or
+  // overwrite another worktree's ownership.
+  it('reconciling from worktree B does not claim/overwrite B\'s own same-name MCP that A manages', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    const sharedDataHome = path.join(tmpDir, 'partition');
+    await fse.ensureDir(sharedDataHome);
+    const wtA = path.join(tmpDir, 'wtA');
+    const wtB = path.join(tmpDir, 'wtB');
+    for (const wt of [wtA, wtB]) {
+      for (const d of ['.claude', '.cursor', '.codebuddy']) {
+        await fse.ensureDir(path.join(wt, d, 'skills'));
+      }
+    }
+    const cfgA = { ...localConfig, scope: 'project', projectRoot: wtA, dataHome: sharedDataHome } as unknown as LocalConfig;
+    const cfgB = { ...localConfig, scope: 'project', projectRoot: wtB, dataHome: sharedDataHome } as unknown as LocalConfig;
+
+    // 1. Team defines `shared`; worktree A reconciles → A owns it in ITS OWN file.
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v1.example/mcp
+`);
+    await reconcileMcpForConfig(teamConfig, cfgA);
+    expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v1.example/mcp');
+
+    // 2. Worktree B independently has a USER-OWNED same-name `shared`.
+    await fse.writeJson(path.join(wtB, '.mcp.json'), {
+      mcpServers: { shared: { type: 'http', url: 'https://mine.example/mcp' } },
+    });
+
+    // 3. Reconcile FROM worktree B (team def v2). B reads its OWN (empty) manifest,
+    //    so `shared` is unmanaged from B's view → left untouched, reported skipped.
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v2.example/mcp
+`);
+    const { changes } = await reconcileMcpForConfig(teamConfig, cfgB);
+
+    expect((await fse.readJson(path.join(wtB, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://mine.example/mcp');
+    const claudeShared = changes.find((c) => c.tool === 'claude' && c.server === 'shared');
+    expect(claudeShared?.action).toBe('skipped');
+    expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v1.example/mcp');
+
+    // Each worktree has its OWN manifest file; A's owns `shared`, B's does not.
+    const aManifest = await fse.readJson(managedMcpManifestPath(sharedDataHome, wtA));
+    expect(aManifest['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    const bPath = managedMcpManifestPath(sharedDataHome, wtB);
+    const bManifest = (await fse.pathExists(bPath)) ? await fse.readJson(bPath) : {};
+    expect((bManifest['claude:project'] ?? []).some((r: { name: string }) => r.name === 'shared')).toBe(false);
+    // The two files are at distinct per-worktree paths.
+    expect(managedMcpManifestPath(sharedDataHome, wtA)).not.toBe(bPath);
+  });
+
+  it('migrates a legacy shared `<tool>:project` manifest into this worktree\'s own file', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // Legacy layout: data home IS <projectRoot>/.teamai, ownership under the bare
+    // `claude:project` key in the SHARED file written by an old CLI.
+    const projectRoot = path.join(tmpDir, 'legacyproj');
+    for (const d of ['.claude', '.cursor', '.codebuddy']) {
+      await fse.ensureDir(path.join(projectRoot, d, 'skills'));
+    }
+    const legacyDataHome = path.join(projectRoot, '.teamai');
+    await fse.ensureDir(legacyDataHome);
+    const cfg = { ...localConfig, scope: 'project', projectRoot, dataHome: legacyDataHome } as unknown as LocalConfig;
+
+    await fse.writeJson(path.join(projectRoot, '.mcp.json'), {
+      mcpServers: { shared: { type: 'http', url: 'https://team-v1.example/mcp' } },
+    });
+    // Old shared file at <dataHome>/managed-mcp.json.
+    await fse.writeJson(path.join(legacyDataHome, 'managed-mcp.json'), {
+      'claude:project': [{ name: 'shared', hash: 'stale' }],
+    });
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v2.example/mcp
+`);
+    const { changes } = await reconcileMcpForConfig(teamConfig, cfg);
+
+    expect((await fse.readJson(path.join(projectRoot, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v2.example/mcp');
+    const claudeShared = changes.find((c) => c.tool === 'claude' && c.server === 'shared');
+    expect(claudeShared?.action).toBe('updated');
+
+    // Ownership migrated INTO this worktree's own file, under the bare key.
+    const wtManifest = await fse.readJson(managedMcpManifestPath(legacyDataHome, projectRoot));
+    expect(wtManifest['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    // The legacy shared file no longer owns it (claimed key removed).
+    const shared = await fse.readJson(path.join(legacyDataHome, 'managed-mcp.json'));
+    expect(shared['claude:project']).toBeUndefined();
+  });
+
+  it('concurrent reconcile of two worktrees keeps BOTH ownership records (no lost update)', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // Two worktrees sharing one partition data home — the exact concurrency the
+    // reviewer flagged. Per-worktree files mean simultaneous reconciles touch
+    // disjoint files, so neither can clobber the other's ownership record.
+    const sharedDataHome = path.join(tmpDir, 'cc-partition');
+    await fse.ensureDir(sharedDataHome);
+    const wtA = path.join(tmpDir, 'ccA');
+    const wtB = path.join(tmpDir, 'ccB');
+    for (const wt of [wtA, wtB]) {
+      for (const d of ['.claude', '.cursor', '.codebuddy']) {
+        await fse.ensureDir(path.join(wt, d, 'skills'));
+      }
+    }
+    const cfgA = { ...localConfig, scope: 'project', projectRoot: wtA, dataHome: sharedDataHome } as unknown as LocalConfig;
+    const cfgB = { ...localConfig, scope: 'project', projectRoot: wtB, dataHome: sharedDataHome } as unknown as LocalConfig;
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team.example/mcp
+`);
+
+    // Reconcile both worktrees simultaneously.
+    await Promise.all([
+      reconcileMcpForConfig(teamConfig, cfgA),
+      reconcileMcpForConfig(teamConfig, cfgB),
+    ]);
+
+    // BOTH ownership records survive — each in its own per-worktree file.
+    const aManifest = await fse.readJson(managedMcpManifestPath(sharedDataHome, wtA));
+    const bManifest = await fse.readJson(managedMcpManifestPath(sharedDataHome, wtB));
+    expect(aManifest['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    expect(bManifest['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    // And both workspace files got the server.
+    expect((await fse.readJson(path.join(wtA, '.mcp.json'))).mcpServers.shared).toBeDefined();
+    expect((await fse.readJson(path.join(wtB, '.mcp.json'))).mcpServers.shared).toBeDefined();
+  });
+
+  it('project-wide uninstall clears every worktree — no sibling left "server present, ownership missing"', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // Two worktrees sharing one partition, both with `shared` installed. This is
+    // what `teamai uninstall` (project scope) must handle: it now runs a
+    // removeAll reconcile for EVERY worktree before deleting the shared partition,
+    // so no sibling is left with an injected server whose ownership record is gone.
+    const sharedDataHome = path.join(tmpDir, 'un-partition');
+    await fse.ensureDir(sharedDataHome);
+    const wtA = path.join(tmpDir, 'unA');
+    const wtB = path.join(tmpDir, 'unB');
+    for (const wt of [wtA, wtB]) {
+      for (const d of ['.claude', '.cursor', '.codebuddy']) {
+        await fse.ensureDir(path.join(wt, d, 'skills'));
+      }
+    }
+    const cfgA = { ...localConfig, scope: 'project', projectRoot: wtA, dataHome: sharedDataHome } as unknown as LocalConfig;
+    const cfgB = { ...localConfig, scope: 'project', projectRoot: wtB, dataHome: sharedDataHome } as unknown as LocalConfig;
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team.example/mcp
+`);
+    await reconcileMcpForConfig(teamConfig, cfgA);
+    await reconcileMcpForConfig(teamConfig, cfgB);
+
+    // Project-wide uninstall: removeAll reconcile for BOTH worktrees (mirrors the
+    // loop uninstall now runs before deleting the partition).
+    await reconcileMcpForConfig(teamConfig, cfgA, { removeAll: true });
+    await reconcileMcpForConfig(teamConfig, cfgB, { removeAll: true });
+
+    // Neither worktree ends in the invalid "server present, ownership missing"
+    // state: the server is gone from both .mcp.json files.
+    for (const [wt, cfg] of [[wtA, cfgA], [wtB, cfgB]] as const) {
+      const doc = await fse.readJson(path.join(wt, '.mcp.json'));
+      expect(doc.mcpServers?.shared).toBeUndefined();
+      // ownership record also cleared for each worktree's own manifest.
+      const mfPath = managedMcpManifestPath(sharedDataHome, cfg.projectRoot);
+      const mf = (await fse.pathExists(mfPath)) ? await fse.readJson(mfPath) : {};
+      expect((mf['claude:project'] ?? []).some((r: { name: string }) => r.name === 'shared')).toBe(false);
+    }
+  });
+
+  it('migrates ownership from the TRUE old path <workspace>/.teamai/managed-mcp.json (partition install)', async () => {
+    const { managedMcpManifestPath } = await import('../types.js');
+    // A PARTITION install whose pre-#374 MCP manifest was written to the ORIGINAL
+    // workspace path (not the partition). Data home is the partition, but the old
+    // ownership lives at <projectRoot>/.teamai/managed-mcp.json.
+    const partition = path.join(tmpDir, 'p1-partition');
+    const projectRoot = path.join(tmpDir, 'p1-proj');
+    for (const d of ['.claude', '.cursor', '.codebuddy']) {
+      await fse.ensureDir(path.join(projectRoot, d, 'skills'));
+    }
+    await fse.ensureDir(partition);
+    const cfg = { ...localConfig, scope: 'project', projectRoot, dataHome: partition } as unknown as LocalConfig;
+
+    // Old on-disk state: injected v1 in .mcp.json + ownership at the REAL old path.
+    await fse.writeJson(path.join(projectRoot, '.mcp.json'), {
+      mcpServers: { shared: { type: 'http', url: 'https://team-v1.example/mcp' } },
+    });
+    await fse.outputJson(path.join(projectRoot, '.teamai', 'managed-mcp.json'), {
+      'claude:project': [{ name: 'shared', hash: 'stale' }],
+    });
+    // The partition shared file has nothing — the bug read only here.
+    await fse.outputJson(path.join(partition, 'managed-mcp.json'), {});
+
+    await writeMcpYaml(`
+servers:
+  - name: shared
+    transport: http
+    url: https://team-v2.example/mcp
+`);
+    const { changes } = await reconcileMcpForConfig(teamConfig, cfg);
+
+    // Ownership recognized → the team server is UPDATED (not skipped as unmanaged).
+    expect((await fse.readJson(path.join(projectRoot, '.mcp.json'))).mcpServers.shared.url)
+      .toBe('https://team-v2.example/mcp');
+    expect(changes.find((c) => c.tool === 'claude' && c.server === 'shared')?.action).toBe('updated');
+
+    // Ownership migrated into this worktree's per-worktree file under the partition.
+    const wt = await fse.readJson(managedMcpManifestPath(partition, projectRoot));
+    expect(wt['claude:project'].some((r: { name: string }) => r.name === 'shared')).toBe(true);
+    // The true old path no longer owns it.
+    const oldFile = await fse.readJson(path.join(projectRoot, '.teamai', 'managed-mcp.json'));
+    expect(oldFile['claude:project']).toBeUndefined();
+  });
 });
 
 describe('MCP reconcile — OpenCode', () => {

@@ -55,6 +55,8 @@ import {
   TEAMAI_CLAUDEMD_END,
   TeamaiConfigSchema,
   managedMcpManifestPath,
+  managedMcpManifestKey,
+  managedMcpWorkspaceId,
   type DashboardEvent,
   type LocalConfig,
   type ManagedMcpManifest,
@@ -620,9 +622,17 @@ function createResourceLocalConfig(
   };
 }
 
-function getResourceRepoPath(scope: LocalAgentScope, workspacePath?: string): string {
+async function getResourceRepoPath(scope: LocalAgentScope, workspacePath?: string): Promise<string> {
   if (scope === 'project' && workspacePath) {
-    return path.join(workspacePath, '.teamai', LOCAL_AGENT_DIR, 'resources');
+    // Project resource cache is A1 (per-project) AND per-worktree: the resource
+    // cache (claudemd/skills/rules fragments) is what each worktree installs
+    // independently, and syncClaudemd merges EVERY file in this dir. The partition
+    // data home is shared by all linked worktrees, so the cache must live in a
+    // per-worktree subdir — otherwise worktree B's CLAUDE.md would merge in
+    // worktree A's instructions. Mirror managed-mcp's per-worktree layout.
+    const { resolveDataHomeForScope } = await import('./config.js');
+    const dataHome = await resolveDataHomeForScope('project', workspacePath);
+    return path.join(dataHome, 'workspaces', managedMcpWorkspaceId(workspacePath), LOCAL_AGENT_DIR, 'resources');
   }
   return path.join(getLocalAgentHome(), 'resources', scope);
 }
@@ -1260,12 +1270,20 @@ async function scanMcpFromManifest(
   scope: 'user' | 'project',
   projectRoot?: string,
 ): Promise<ReportedResource[]> {
-  const manifestPath = managedMcpManifestPath(
-    scope === 'project' ? 'project' : 'user',
-    projectRoot,
-  );
-  const manifest = await readJson<ManagedMcpManifest>(manifestPath);
-  if (!manifest || typeof manifest !== 'object') return [];
+  const { resolveDataHomeForScope } = await import('./config.js');
+  const dataHome = await resolveDataHomeForScope(scope, projectRoot);
+
+  // Project scope reads THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope reads the
+  // single global file. Either way every record in the loaded file belongs to this
+  // scope, so no key filtering is needed.
+  let manifest: ManagedMcpManifest;
+  if (scope === 'project' && projectRoot) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifest } = await loadProjectMcpManifest(dataHome, projectRoot));
+  } else {
+    manifest = (await readJson<ManagedMcpManifest>(managedMcpManifestPath(dataHome))) ?? {};
+  }
 
   const seen = new Set<string>();
   const results: ReportedResource[] = [];
@@ -1697,8 +1715,12 @@ async function installDownloadedResource(input: {
     throw new Error(`Missing download_url for ${input.command.type ?? 'install_skill'}`);
   }
 
-  const repoPath = getResourceRepoPath(input.scope, input.workspacePath);
-  if (input.scope === 'project' && input.workspacePath) {
+  const repoPath = await getResourceRepoPath(input.scope, input.workspacePath);
+  if (input.scope === 'project' && input.workspacePath
+      && repoPath.startsWith(path.join(input.workspacePath, '.teamai') + path.sep)) {
+    // Only gitignore when the cache actually lands inside the workspace (a legacy,
+    // un-migrated install). A partitioned install keeps it under ~/.teamai, so
+    // there is nothing in the workspace to ignore.
     await ensureProjectGitignore(input.workspacePath);
   }
   await ensureDir(repoPath);
@@ -1801,7 +1823,7 @@ async function uninstallResource(input: {
   workspacePath?: string;
   tool?: string;
 }): Promise<void> {
-  const repoPath = getResourceRepoPath(input.scope, input.workspacePath);
+  const repoPath = await getResourceRepoPath(input.scope, input.workspacePath);
   const fullTeamConfig = createLocalAgentTeamConfig(input.config.endpoint);
   const tool = input.tool ?? 'workbuddy';
   const toolPath = fullTeamConfig.toolPaths[tool];
@@ -2265,12 +2287,21 @@ async function installMcpServer(
   const baseDir = projectScope && workspacePath ? workspacePath : getUserHome();
   const targetFile = path.join(baseDir, mcpRel);
 
-  const manifestPath = managedMcpManifestPath(
-    projectScope ? 'project' : 'user',
-    projectScope ? workspacePath : undefined,
-  );
-  const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  const manifestKey = `${tool}${projectScope ? ':project' : ''}`;
+  const { resolveDataHomeForScope } = await import('./config.js');
+  const dataHome = await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined);
+  // Project scope uses THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope uses the
+  // single global file. The ownership key needs no workspace segment.
+  let manifestPath: string;
+  let manifest: ManagedMcpManifest;
+  if (projectScope && workspacePath) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, workspacePath));
+  } else {
+    manifestPath = managedMcpManifestPath(dataHome);
+    manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
+  }
+  const manifestKey = managedMcpManifestKey(tool, projectScope);
   const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 
@@ -2328,12 +2359,21 @@ async function uninstallMcpServer(
   const baseDir = projectScope && workspacePath ? workspacePath : getUserHome();
   const targetFile = path.join(baseDir, mcpRel);
 
-  const manifestPath = managedMcpManifestPath(
-    projectScope ? 'project' : 'user',
-    projectScope ? workspacePath : undefined,
-  );
-  const manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
-  const manifestKey = `${tool}${projectScope ? ':project' : ''}`;
+  const { resolveDataHomeForScope } = await import('./config.js');
+  const dataHome = await resolveDataHomeForScope(projectScope ? 'project' : 'user', projectScope ? workspacePath : undefined);
+  // Project scope uses THIS worktree's own manifest file (per-worktree under the
+  // partition; migrates legacy shared records on first read). User scope uses the
+  // single global file. The ownership key needs no workspace segment.
+  let manifestPath: string;
+  let manifest: ManagedMcpManifest;
+  if (projectScope && workspacePath) {
+    const { loadProjectMcpManifest } = await import('./utils/mcp-manifest.js');
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, workspacePath));
+  } else {
+    manifestPath = managedMcpManifestPath(dataHome);
+    manifest = (await readJson<ManagedMcpManifest>(manifestPath)) ?? {};
+  }
+  const manifestKey = managedMcpManifestKey(tool, projectScope);
   const owned = manifest[manifestKey] ?? [];
   const ownedNames = new Set(owned.map((r: ManagedMcpRecord) => r.name));
 

@@ -11,7 +11,9 @@ import type {
 import {
   getMcpSharing,
   getEnvBackupPath,
+  getDataHome,
   managedMcpManifestPath,
+  managedMcpManifestKey,
   resolveBaseDir,
   scopedToolPaths,
 } from './types.js';
@@ -36,6 +38,7 @@ import {
   expandHome,
 } from './utils/fs.js';
 import { log } from './utils/logger.js';
+import { loadProjectMcpManifest } from './utils/mcp-manifest.js';
 
 // ─── Reconcile engine ────────────────────────────────────────
 //
@@ -325,8 +328,19 @@ export async function reconcileMcpForConfig(
   const targets = await resolveMcpTargets(teamConfig, localConfig);
   if (targets.length === 0) return { changes, wrote };
 
-  const manifestPath = managedMcpManifestPath(localConfig.scope, localConfig.projectRoot);
-  const manifest = await readManifest(manifestPath);
+  const dataHome = getDataHome(localConfig);
+  const projectScope = localConfig.scope === 'project';
+  // Project scope uses a PER-WORKTREE manifest under the partition (migrating this
+  // worktree's records out of any legacy shared file on first read); user scope
+  // keeps the single global file. Either way this reconcile owns exactly one file.
+  let manifestPath: string;
+  let manifest: ManagedMcpManifest;
+  if (projectScope && localConfig.projectRoot) {
+    ({ manifestPath, manifest } = await loadProjectMcpManifest(dataHome, localConfig.projectRoot, { dryRun: options.dryRun }));
+  } else {
+    manifestPath = managedMcpManifestPath(dataHome);
+    manifest = await readManifest(manifestPath);
+  }
 
   // An empty desired set still has to run: it is how servers dropped from
   // mcp.yaml get cleaned out of the tools we previously injected them into.
@@ -336,7 +350,7 @@ export async function reconcileMcpForConfig(
   const vars = await buildVarTable(localConfig);
 
   for (const target of targets) {
-    const manifestKey = `${target.tool}${target.projectScope ? ':project' : ''}`;
+    const manifestKey = managedMcpManifestKey(target.tool, target.projectScope);
     const owned = manifest[manifestKey] ?? [];
     const ownedNames = new Set(owned.map((r) => r.name));
     const nextRecords: ManagedMcpRecord[] = [];

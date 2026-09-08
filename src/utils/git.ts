@@ -745,6 +745,32 @@ export async function resolveAnchors(cwd?: string): Promise<ProjectAnchors | nul
 }
 
 /**
+ * List the realpath'd top-level directory of every worktree of the repo that
+ * contains `cwd` (main checkout + all linked worktrees), from
+ * `git worktree list --porcelain`. Returns [] outside a git repo. Used by a
+ * project-wide uninstall to clean each worktree's managed resources before the
+ * shared partition is deleted (issue #374 P1-2C).
+ */
+export async function listWorktrees(cwd?: string): Promise<string[]> {
+  const git = createGit(cwd);
+  let list: string;
+  try {
+    list = await git.raw(['worktree', 'list', '--porcelain']);
+  } catch {
+    return [];
+  }
+  const roots = list
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => l.slice('worktree '.length).trim())
+    .filter(Boolean);
+  const resolved = await Promise.all(
+    roots.map((r) => realpath(r).catch(() => r)),
+  );
+  return Array.from(new Set(resolved));
+}
+
+/**
  * Reset the team repo to a clean default-branch state.
  *
  * The team repo is a local cache — any uncommitted or conflicted state is

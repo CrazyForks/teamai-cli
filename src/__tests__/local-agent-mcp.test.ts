@@ -342,8 +342,13 @@ describe('local-agent: MCP install/uninstall commands', () => {
     expect(mcpConfig.mcpServers['enterprise-search']).toBeDefined();
     expect(mcpConfig.mcpServers['enterprise-search'].url).toBe('https://search.example.com/mcp');
 
-    // 检查 project 级 manifest
-    const manifest = await fse.readJson(path.join(wsPath, '.teamai', 'managed-mcp.json'));
+    // 检查 project 级 manifest — 现为 PER-WORKTREE 文件(#374:分区内每 worktree 一个
+    // 独立 managed-mcp.json),key 回归普通 `codebuddy:project`。定位 workspaces/ 下唯一文件
+    // (id 由 install 侧解析的 workspacePath 决定,可能经 realpath,故不硬算)。
+    const wsDir = path.join(wsPath, '.teamai', 'workspaces');
+    const ids = await fse.readdir(wsDir);
+    expect(ids.length).toBe(1);
+    const manifest = await fse.readJson(path.join(wsDir, ids[0], 'managed-mcp.json'));
     expect(manifest['codebuddy:project']).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'enterprise-search' })]),
     );

@@ -458,10 +458,13 @@ async function buildRemovalPlan(
 
   if (includeShared) {
     // (d3) teamai-managed MCP servers, tracked in managed-mcp.json (same
-    // ownership model as hooks). These live under ~/.teamai, so they are shared
-    // resources: only removed when the target is the last tool using teamai.
+    // ownership model as hooks). Project scope reads THIS worktree's own
+    // per-worktree manifest; user scope reads the single global file.
     const mcpManifestPath = expandHome(
-      managedMcpManifestPath(localConfig.scope, localConfig.projectRoot),
+      managedMcpManifestPath(
+        getDataHome(localConfig),
+        localConfig.scope === 'project' ? localConfig.projectRoot : undefined,
+      ),
     );
     const mcpManifest = (await readJson<ManagedMcpManifest>(mcpManifestPath)) ?? {};
     for (const [toolKey, records] of Object.entries(mcpManifest)) {
@@ -854,9 +857,30 @@ export async function uninstall(opts: UninstallOptions): Promise<void> {
     if (plan.includeShared) {
       try {
         const { reconcileMcpForConfig } = await import('./mcp-reconcile.js');
-        const { changes } = await reconcileMcpForConfig(teamConfig, localConfig, { removeAll: true });
-        const removed = changes.filter((c) => c.action === 'removed');
-        if (removed.length > 0) log.info(`Removed ${removed.length} teamai-managed MCP server(s)`);
+        // Project scope: the managed-mcp manifests are PER-WORKTREE under the
+        // shared partition (#374 P1-2C), and each worktree's MCP config lives in
+        // its own checkout. Since executeRemoval deletes the whole shared
+        // partition, we must first remove the managed MCP servers from EVERY
+        // linked worktree — otherwise a sibling worktree is left with an injected
+        // server whose ownership record just got deleted (orphaned). User scope
+        // has a single global manifest, so the current config is enough.
+        const configs: LocalConfig[] = [localConfig];
+        if (localConfig.scope === 'project' && localConfig.projectRoot) {
+          const { listWorktrees } = await import('./utils/git.js');
+          const { resolveProjectDataHome } = await import('./config.js');
+          const worktrees = await listWorktrees(localConfig.projectRoot);
+          for (const wt of worktrees) {
+            if (wt === localConfig.projectRoot) continue;
+            const dataHome = await resolveProjectDataHome(wt);
+            configs.push({ ...localConfig, projectRoot: wt, dataHome });
+          }
+        }
+        let removedTotal = 0;
+        for (const cfg of configs) {
+          const { changes } = await reconcileMcpForConfig(teamConfig, cfg, { removeAll: true });
+          removedTotal += changes.filter((c) => c.action === 'removed').length;
+        }
+        if (removedTotal > 0) log.info(`Removed ${removedTotal} teamai-managed MCP server(s)`);
       } catch (e) {
         log.warn(`Failed to remove MCP servers: ${(e as Error).message}`);
       }

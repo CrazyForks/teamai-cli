@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { getUserHome } from './utils/home.js';
 
 // ─── Tool path config ───────────────────────────────────
@@ -534,9 +535,64 @@ export interface ManagedMcpRecord {
 /** ~/.teamai/managed-mcp.json — team MCP servers injected per tool+scope key. */
 export type ManagedMcpManifest = Record<string, ManagedMcpRecord[]>;
 
-/** Path of the managed-MCP manifest for a scope. */
-export function managedMcpManifestPath(scope: Scope, projectRoot?: string): string {
-  return path.join(getTeamaiHome(scope, projectRoot), 'managed-mcp.json');
+/**
+ * Ownership key for the managed-MCP manifest, per tool and scope.
+ *
+ * The P1 partition (issue #374) keys the data home by the shared `projectAnchor`,
+ * so the main checkout and every linked worktree share ONE managed-mcp.json.
+ * But a project MCP file (`<workspace>/.mcp.json`, `.codex/config.toml`, …) is
+ * per-worktree. If the manifest key were just `<tool>:project`, one worktree's
+ * reconcile/uninstall would claim ownership of — and overwrite or remove — the
+ * MCP entries another worktree wrote into ITS own workspace file. So a
+ * project-scope key must carry the CURRENT workspace identity (the per-worktree
+ * `workspaceRoot`, not the shared anchor). Both the CLI reconcile/uninstall paths
+ * and the local-agent install/uninstall/report paths must build the key here so
+ * they agree. user scope has a single global file, so no workspace segment.
+ */
+/**
+ * Ownership key for the managed-MCP manifest, per tool and scope.
+ *
+ * Each project WORKTREE now has its OWN manifest file (see managedMcpManifestPath),
+ * so the file already isolates ownership by worktree — the key needs no workspace
+ * segment. It is `<tool>:project` for project scope and `<tool>` for user scope.
+ */
+export function managedMcpManifestKey(tool: string, projectScope: boolean): string {
+  return projectScope ? `${tool}:project` : tool;
+}
+
+/** Stable per-worktree identity segment; names the worktree's manifest subdirectory (#374). */
+export function managedMcpWorkspaceId(workspaceRoot: string): string {
+  return createHash('sha1').update(workspaceRoot).digest('hex').slice(0, 12);
+}
+
+/**
+ * Path of the managed-MCP manifest.
+ *
+ * user scope keeps ONE global file at `<dataHome>/managed-mcp.json`.
+ *
+ * project scope gets a PER-WORKTREE file at
+ * `<dataHome>/workspaces/<workspaceId>/managed-mcp.json` (#374). The partition data
+ * home is shared by every linked worktree, so a single shared manifest suffered
+ * both cross-worktree ownership bleed AND lost updates under concurrent
+ * read-modify-write. A file per worktree removes both: each reconcile/install
+ * reads and rewrites only its own file, and the key needs no workspace segment.
+ */
+export function managedMcpManifestPath(dataHome: string, workspaceRoot?: string): string {
+  if (workspaceRoot) {
+    return path.join(dataHome, 'workspaces', managedMcpWorkspaceId(workspaceRoot), 'managed-mcp.json');
+  }
+  return path.join(dataHome, 'managed-mcp.json');
+}
+
+/**
+ * Legacy shared manifest path (pre-#374-per-worktree). Older installs wrote all
+ * project ownership into `<dataHome>/managed-mcp.json` (possibly under a bare
+ * `<tool>:project` key, or the interim `<tool>:project:<id>` keys). The migration
+ * on first project reconcile lifts THIS worktree's records out of that file into
+ * its per-worktree file. Same path as the user-scope file, read for compat only.
+ */
+export function legacyManagedMcpManifestPath(dataHome: string): string {
+  return path.join(dataHome, 'managed-mcp.json');
 }
 
 // ─── Global options ─────────────────────────────────────

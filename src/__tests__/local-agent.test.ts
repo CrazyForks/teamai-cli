@@ -103,6 +103,78 @@ describe('local-agent: buildReportPayload disk scan', () => {
   });
 });
 
+describe('local-agent: project MCP report is per-worktree (issue #374 P1-2C)', () => {
+  it('reports only the current workspace\'s MCP records from the shared partition manifest', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { realpathSync } = await import('node:fs');
+    const { managedMcpWorkspaceId } = await import('../types.js');
+
+    // Real git repo + linked worktree → same projectAnchor → same partition.
+    const repo = realpathSync(await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-la-wt-')));
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 't@e'); git(repo, 'config', 'user.name', 'T');
+    git(repo, 'commit', '--allow-empty', '-q', '-m', 'init');
+    const wtB = path.join(repo, '..', path.basename(repo) + '-wtB');
+    git(repo, 'worktree', 'add', '-q', wtB, 'HEAD');
+    const wtBReal = realpathSync(wtB);
+
+    // Partition manifest (shared): A owns `a-only`, B owns `b-only`, each under
+    // its own workspace-scoped key.
+    const { projectDataHome } = await import('../utils/partition.js');
+    const partition = projectDataHome(repo); // keyed on the shared anchor
+    await fse.ensureDir(partition);
+    // A project config in the partition makes detectProjectConfig resolve the
+    // data home to this partition (both worktrees share it).
+    const YAML = (await import('yaml')).default;
+    await fse.writeFile(path.join(partition, 'config.yaml'), YAML.stringify({
+      repo: { localPath: path.join(partition, 'team-repo'), remote: 'https://example.com/x.git', kind: 'git' },
+      username: 'u', scope: 'project', projectRoot: repo, additionalRoles: [],
+    }));
+    await fse.writeJson(path.join(partition, 'managed-mcp.json'), {
+      [`codebuddy:project:${managedMcpWorkspaceId(repo)}`]: [{ name: 'a-only', hash: 'h1' }],
+      [`codebuddy:project:${managedMcpWorkspaceId(wtBReal)}`]: [{ name: 'b-only', hash: 'h2' }],
+    });
+
+    // config with a binding for worktree B so the report scans it.
+    const configDir = path.join(tmpDir, '.teamai', 'local-agent');
+    await fse.ensureDir(configDir);
+    await fse.writeJson(path.join(configDir, 'config.json'), {
+      endpoint: 'https://test.example.com/api', token: 't', localAgentId: 'id',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      workspaceBindings: { [wtBReal]: { projectId: 1, projectName: 'p', ideType: 'codebuddy' } },
+    });
+
+    const { buildReportPayload, loadLocalAgentConfig } = await import('../local-agent.js');
+    const config = await loadLocalAgentConfig();
+    const payload = await buildReportPayload(config!, { tool: 'codebuddy', cwd: wtBReal }) as {
+      workspaces?: Array<{ path: string; mcps?: Array<{ slug: string }> }>;
+    };
+
+    const wsB = payload.workspaces?.find((w) => w.path === wtBReal);
+    expect(wsB).toBeDefined();
+    const slugs = (wsB!.mcps ?? []).map((m) => m.slug);
+    // B reports ONLY its own MCP — never A's, even though both live in the shared manifest.
+    expect(slugs).toContain('b-only');
+    expect(slugs).not.toContain('a-only');
+
+    // Migration must be DURABLE: the first report migrated B's record out of the
+    // shared file into B's per-worktree file. A SECOND report must still see it
+    // (the pre-fix bug deleted the shared record without persisting the
+    // destination, so the second report returned empty).
+    const { managedMcpManifestPath } = await import('../types.js');
+    expect(await fse.pathExists(managedMcpManifestPath(partition, wtBReal))).toBe(true);
+    const payload2 = await buildReportPayload(config!, { tool: 'codebuddy', cwd: wtBReal }) as {
+      workspaces?: Array<{ path: string; mcps?: Array<{ slug: string }> }>;
+    };
+    const wsB2 = payload2.workspaces?.find((w) => w.path === wtBReal);
+    expect((wsB2!.mcps ?? []).map((m) => m.slug)).toContain('b-only');
+
+    await fse.remove(repo).catch(() => {});
+    await fse.remove(wtBReal).catch(() => {});
+  });
+});
+
 describe('local-agent: local_agent_id derivation (per-tool install dir)', () => {
   it('derives the id from ~/.<tool>, matching the historical status-report口径', async () => {
     await setupConfig();
@@ -1738,5 +1810,83 @@ describe('local-agent: cmds[] migration', () => {
 
     await expect(fse.pathExists(path.join(tmpDir, '.codebuddy', 'skills', 'skill-empty'))).resolves.toBe(true);
     expect(acks.find((a) => a.id === 9)?.status).toBe('success');
+  });
+});
+
+describe('local-agent: per-worktree claudemd isolation (issue #374 P1-2C)', () => {
+  it('worktree B\'s CLAUDE.md never merges worktree A\'s instructions', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { realpathSync } = await import('node:fs');
+
+    // Real git repo + linked worktree → shared partition data home. The resource
+    // cache used to be shared, so syncClaudemd merged A's + B's fragments.
+    const repo = realpathSync(await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-cmd-wt-')));
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 't@e'); git(repo, 'config', 'user.name', 'T');
+    git(repo, 'commit', '--allow-empty', '-q', '-m', 'init');
+    const wtB = path.join(repo, '..', path.basename(repo) + '-B');
+    git(repo, 'worktree', 'add', '-q', wtB, 'HEAD');
+    const wtBReal = realpathSync(wtB);
+    // codebuddy is the "installed" tool in each worktree.
+    for (const wt of [repo, wtBReal]) await fse.ensureDir(path.join(wt, '.codebuddy', 'skills'));
+
+    // A partition config so both worktrees resolve to the shared partition.
+    const YAML = (await import('yaml')).default;
+    const { projectDataHome } = await import('../utils/partition.js');
+    const partition = projectDataHome(repo);
+    await fse.ensureDir(partition);
+    await fse.writeFile(path.join(partition, 'config.yaml'), YAML.stringify({
+      repo: { localPath: path.join(partition, 'team-repo'), remote: 'https://example.com/x.git', kind: 'git' },
+      username: 'u', scope: 'project', projectRoot: repo, additionalRoles: [],
+    }));
+
+    await fse.ensureDir(path.join(tmpDir, '.teamai', 'local-agent'));
+    await fse.writeJson(path.join(tmpDir, '.teamai', 'local-agent', 'config.json'), {
+      endpoint: 'https://test.example.com/api', token: 't', localAgentId: 'id',
+      createdAt: '2026-01-01T00:00:00.000Z', workspaceBindings: {},
+    });
+
+    // fetch stub: distinct claudemd body per URL; sync returns a workspace-scoped
+    // install_prompt command for the requested worktree.
+    const install = (ws: string, slug: string) => ({
+      ok: true,
+      cmds: [{
+        id: slug === 'a-doc' ? 101 : 102,
+        type: 'install_prompt_rule', handle_type: 'prompt', slug,
+        version: '1.0.0', download_url: `http://127.0.0.1:42100/${slug}.md`,
+        scope: 'workspace', workspace_path: ws,
+      }],
+    });
+    let syncFor: { ws: string; slug: string } | null = null;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith('a-doc.md')) return new Response('INSTRUCTION-FROM-A');
+      if (url.endsWith('b-doc.md')) return new Response('INSTRUCTION-FROM-B');
+      if (url.includes('/local-agent/sync') && syncFor) return new Response(JSON.stringify(install(syncFor.ws, syncFor.slug)));
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    // Install A-only instruction from worktree A, then B-only from worktree B.
+    syncFor = { ws: repo, slug: 'a-doc' };
+    await reportAndSyncLocalAgent({ cwd: repo, tool: 'codebuddy', status: 'running' });
+    syncFor = { ws: wtBReal, slug: 'b-doc' };
+    await reportAndSyncLocalAgent({ cwd: wtBReal, tool: 'codebuddy', status: 'running' });
+
+    // B's injected claudemd (.codebuddy/CODEBUDDY.md) must contain ONLY B's
+    // instruction (the pre-fix shared cache made syncClaudemd merge A's in too).
+    const readTxt = async (p: string) => (await fse.pathExists(p)) ? fse.readFile(p, 'utf-8') : '';
+    const bClaudemd = await readTxt(path.join(wtBReal, '.codebuddy', 'CODEBUDDY.md'));
+    expect(bClaudemd).toContain('INSTRUCTION-FROM-B');
+    expect(bClaudemd).not.toContain('INSTRUCTION-FROM-A');
+    // A keeps only A's.
+    const aClaudemd = await readTxt(path.join(repo, '.codebuddy', 'CODEBUDDY.md'));
+    expect(aClaudemd).toContain('INSTRUCTION-FROM-A');
+    expect(aClaudemd).not.toContain('INSTRUCTION-FROM-B');
+
+    await fse.remove(repo).catch(() => {});
+    await fse.remove(wtBReal).catch(() => {});
   });
 });
