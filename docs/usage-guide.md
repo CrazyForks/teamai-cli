@@ -4,7 +4,7 @@
 
 > **teamai-cli** — the team collaboration layer for AI agents
 >
-> **Make every team continuously smarter with AI.** Define how agents work (Team Execution), give them team knowledge (Team Context), and turn real sessions into shared capability (Team Improvement). Skills, Rules, Docs, Env, MCP, and more sync automatically to Claude Code, CodeBuddy, Cursor, Codex, OpenCode, Gemini CLI, Windsurf, and others.
+> **Make every team continuously smarter with AI.** Define how agents work (Team Execution), give them team knowledge (Team Context), and turn real sessions into shared capability (Team Improvement). TeamAI manages Skills, Rules, Docs, Env, MCP, and more across Claude Code, Codex, CodeBuddy, WorkBuddy, OpenCode, Cursor, and other supported agents.
 
 ---
 
@@ -23,6 +23,8 @@
 - [Day-to-Day Use](#day-to-day-use)
 - [Sharing Team Resources](#sharing-team-resources)
 - [Knowledge Capture & Retrieval](#knowledge-capture--retrieval)
+- [Knowledge Base Health Report](#knowledge-base-health-report)
+- [Commit Co-Author Attribution](#commit-co-author-attribution)
 - [Team Culture](#team-culture)
 - [Advanced Features](#advanced-features)
 - [Configuration Reference](#configuration-reference)
@@ -89,7 +91,7 @@ npm install -g teamai-cli
 teamai --version
 ```
 
-**Prerequisites:** Node.js ≥ 18, Git (TGit users also need the `gf` CLI, and CNB users the `cnb` CLI — `teamai init` installs either automatically)
+**Prerequisites:** Node.js ≥ 20, Git (TGit users also need the `gf` CLI, and CNB users the `cnb` CLI — `teamai init` installs either automatically)
 
 ---
 
@@ -97,7 +99,7 @@ teamai --version
 
 > Only one admin needs to do this — other members can skip to [Member Onboarding](#member-onboarding).
 
-Create an empty repository on GitHub, GitLab (gitlab.com or a self-hosted instance), GitCode (gitcode.com), CNB (cnb.cool), TGit (Tencent's internal Git host), or any private/self-hosted Git service (suggested naming: `TeamAi-<team-name>`), or simply run `teamai init` — if the repo doesn't exist yet, you'll be prompted to create it automatically.
+Create an empty repository on GitHub, GitLab (gitlab.com or a self-hosted instance), GitCode (gitcode.com), CNB (cnb.cool), TGit, or any private/self-hosted Git service (suggested naming: `TeamAi-<team-name>`), or simply run `teamai init` — if the repo doesn't exist yet, you'll be prompted to create it automatically.
 
 ### Project Scope (default)
 
@@ -106,8 +108,8 @@ Resources are installed under the project directory (`<project>/.claude/skills/`
 ```bash
 # project is the default — --scope can be omitted
 cd /path/to/my-project
-teamai init <group>/TeamAi-<team>
-# equivalent alias: teamai init --repo <group>/TeamAi-<team>
+teamai init https://github.com/yourorg/yourrepo
+# equivalent alias: teamai init --repo https://github.com/yourorg/yourrepo
 ```
 
 Resulting directory structure:
@@ -122,7 +124,7 @@ Resulting directory structure:
 └── src/
 ```
 
-`teamai init` writes `.teamai/` only. Per-agent project roots (`.claude/`, `.cursor/`, `.codebuddy/`, …) are created on **SessionStart** for the tool that just opened (`--tool claude` creates `.claude/`, then pull writes into it). A bare `teamai pull` still skips tools whose project root does not exist, so it never invents agent directories for tools you have not opened in this project.
+`teamai init` writes `.teamai/` only. Per-agent project roots (`.claude/`, `.cursor/`, `.codebuddy/`, …) are created on **SessionStart** for the tool that just opened. For example, opening Claude Code creates `.claude/`, then pull writes into it. A bare `teamai pull` still skips tools whose project root does not exist, so it never invents agent directories for tools you have not opened in this project.
 
 If the repo has role-based skills enabled (i.e. `manifest/roles.yaml` exists), `teamai init` will also interactively ask you to choose:
 
@@ -132,7 +134,7 @@ If the repo has role-based skills enabled (i.e. `manifest/roles.yaml` exists), `
 You can also skip the interactive prompts via CLI flags for a fully non-interactive init (suitable for CI/CD or AI agents):
 
 ```bash
-teamai init <group>/TeamAi-<team> --scope project --role hai_dev --force
+teamai init https://github.com/yourorg/yourrepo --scope project --role hai_dev --force
 ```
 
 | Flag | Description |
@@ -165,7 +167,7 @@ resourceProfileVersion: 1
 Resources are installed into your home directory (`~/.claude/skills/`, etc.), suited for general team conventions and cross-project skills.
 
 ```bash
-teamai init <group>/TeamAi-<team> --scope user
+teamai init https://github.com/yourorg/yourrepo --scope user
 ```
 
 Resulting directory structure:
@@ -266,7 +268,7 @@ Once the admin shares the team repo URL with members:
 ```bash
 npm install -g teamai-cli
 cd /path/to/my-project
-teamai init <group>/TeamAi-<team>
+teamai init https://github.com/yourorg/yourrepo
 # Done! AI tools now automatically have access to team resources
 ```
 
@@ -274,7 +276,7 @@ teamai init <group>/TeamAi-<team>
 
 ```bash
 npm install -g teamai-cli
-teamai init <group>/TeamAi-<team> --scope user
+teamai init https://github.com/yourorg/yourrepo --scope user
 ```
 
 **HTTP mode (read-only consumer):**
@@ -438,7 +440,7 @@ Choose namespace [1-3] (default: 1 = common):
 
 - If `primaryRole` is set, the list of available namespaces is expanded from the manifest
 - If `primaryRole` is not set, the team repo's directory structure is scanned automatically
-- A single namespace is auto-selected; `--silent` mode uses the default
+- A single namespace is auto-selected; use `--role <id>` to choose one explicitly
 - Modifying an existing skill automatically keeps its original namespace
 
 **Updating an open PR instead of duplicating it:** If a resource is already waiting in an unmerged PR, re-running `teamai push` on it updates that existing PR in place (by force-pushing its branch) rather than opening a duplicate. Keep the resource selected to update its PR; deselect it to leave the PR untouched. Unrelated resources selected in the same run go into their own new PR. Once the PR merges (or its branch is removed from the remote), the record is cleared and the next push opens a fresh PR as usual.
@@ -492,6 +494,18 @@ teamai pull
 ```
 
 > **Safe degradation:** If an admin removes a role that a member is still configured with, `pull` won't error out — it falls back to a full sync and prints a warning prompting the member to choose a new role.
+
+### Tag subscriptions
+
+Tags let members subscribe to selected skills and rules outside their role's default namespaces.
+
+```bash
+teamai tags list
+teamai tags subscribe frontend testing
+teamai tags unsubscribe testing
+```
+
+Admins can manage resource tags with `teamai tags add` and `teamai tags remove`. Run `teamai pull` after changing your subscriptions.
 
 ---
 
@@ -957,116 +971,7 @@ When using `teamai init --http <baseUrl>`, the endpoint must implement the follo
 }
 ```
 
-The backend may push an **`apply_model_config`** task whose `cmd` is JSON. Both
-the documented candidate-set shape and the legacy single-model shape are accepted.
-`{"models":[...]}` is a full snapshot; a direct model object is an incremental upsert.
-`max_tokens` is optional (CodeBuddy `maxOutputTokens`); omitted or `0` defaults to `4096`. Claude does not use it.
-
-```jsonc
-{ "id": 16, "type": "apply_model_config",
-  "cmd": "{\"models\":[{\"provider\":\"openai\",\"model_id\":\"gpt-4o\",\"name\":\"GPT-4o\",\"base_url\":\"https://proxy.example.com/v1\",\"api_key\":\"<ProxyToken>\",\"max_tokens\":4096,\"context_window\":128000}]}" }
-```
-
-The candidate set is applied only to the agent that reported the task. CodeBuddy uses
-its user-level `~/.codebuddy/models.json`; user-owned entries with the same model ID
-are preserved. Claude gets an explicit profile at `~/.claude/teamai-models.json` and
-also receives the gateway environment in `~/.claude/settings.json` when it has no
-conflicting user-owned Anthropic gateway configuration. Unsupported agents acknowledge
-the task as failed instead of writing another agent's config. Symlinked user config
-files remain symlinks. These files are mode `0600`. A successful write is acknowledged with
-`type: "apply_model_config"`; malformed payloads are acknowledged as `failed`. Unknown
-future task types are silently skipped for protocol compatibility.
-
-The reverse direction is reported through the existing `report` call: models that
-TeamAI recorded in its model manifest and can still identify by model ID and provider
-on disk are sent as `user_level.models`. Normal agent-added metadata does not suppress
-the report. A successful apply triggers this report immediately in the same sync run.
-User-owned models are omitted because the backend cannot resolve them. The server
-requires both `provider` and `model_id`. Like skills and rules, the field is omitted
-entirely when nothing qualifies, because a present array is treated as a full
-snapshot. Only CodeBuddy (`~/.codebuddy/models.json`) and Claude (the
-`ANTHROPIC_CUSTOM_MODEL_OPTION` gateway in `~/.claude/settings.json`) expose a
-discoverable model config; other tools report nothing. Reported entries always use
-`source: "enterprise"`. **`api_key` is never reported back** — the ProxyToken stays
-on disk.
-
-```jsonc
-{ "agent_type": "codebuddy", "local_agent_id": "...",
-  "user_level": { "models": [
-    { "provider": "tokenhub", "model_id": "gpt-4o", "name": "GPT-4o", "source": "enterprise" }
-  ] } }
-```
-
-The backend may also push an **`uninstall_teamai`** command to remove the local agent. It carries a `cmd` (a single `teamai` subcommand) that runs once on the client, with the result reported back through the same ack channel:
-
-```json
-{ "id": 42, "type": "uninstall_teamai", "cmd": "teamai uninstall --force --agent codebuddy" }
-```
-
-Security boundary for the executed `cmd`:
-
-- **teamai subcommands only** — the first token must be exactly `teamai`; anything else is rejected (acked `failed`) and never executed. There is no arbitrary-shell surface.
-- **No shell** — the command is run via `execFile` with the current Node binary and teamai entry script, so shell metacharacters (`;`, `|`, `&`, `$`, …) are treated as literals and there is no PATH dependency (works inside sandboxes with a bundled Node).
-- **On by default** — like install/uninstall commands, it runs automatically. Set `TEAMAI_DISABLE_REMOTE_CMD=1` on the client to reject it (acked `failed` with `remote cmd disabled by client`).
-- **Timeout** — a hung command is killed after 120s and acked `failed`.
-
-The backend may also push **`install_hook_rule`** / **`uninstall_hook_rule`** commands to remotely
-manage a session hook in the **current reporting tool**'s settings, keyed by `slug`. The result is
-reported over the same ack channel:
-
-```jsonc
-// install (or replace) a hook keyed by slug
-{ "id": 50, "type": "install_hook_rule", "handle_type": "hook", "slug": "my-hook",
-  "event": "SessionStart", "cmd": "echo hi", "timeout": 10 }
-
-// uninstall the hook previously installed under slug
-{ "id": 51, "type": "uninstall_hook_rule", "handle_type": "hook", "slug": "my-hook" }
-```
-
-Rules for agent hooks:
-
-- **Current tool only** — the hook is written to the tool that is reporting (e.g. under Claude ⇒
-  only `.claude/settings.json`). Other tools are never touched.
-- **Supported tools** — `claude` / `codex` / `workbuddy` / `codebuddy` (plus their internal
-  variants). **Cursor and OpenClaw-family tools are rejected** → acked `failed` (`unsupported tool`).
-- **Event whitelist** — `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop`.
-  Any other event → acked `failed` (`unsupported event`).
-- **Optional `matcher`** — a tool-name filter for `PreToolUse` / `PostToolUse`; defaults to `*`
-  (all tools) when omitted.
-- **Default timeout 10s** when `timeout` is omitted; the backend value is honored when present.
-- **Idempotent** — re-installing the same `slug` replaces the existing hook rather than duplicating
-  it; `uninstall_hook_rule` for a missing `slug` is acked `success`.
-- **Isolation** — agent hooks use a dedicated `[teamai:agent-hook:<slug>]` marker, so a team pull
-  never deletes them and installing one never disturbs built-in or team hooks.
-- **Teardown** — agent hooks are removed by `uninstall_hook_rule`, `teamai source remove`, and
-  `teamai uninstall` (no residue in any tool's settings).
-- **Kill-switch** — an agent hook is a backend-supplied command the tool auto-runs on its events,
-  so it shares the `uninstall_teamai` trust model: setting `TEAMAI_DISABLE_REMOTE_CMD=1` on the
-  client rejects `install_hook_rule` / `uninstall_hook_rule` too (acked `failed`).
-- **Codex matching** — codex settings carry no description field, so codex agent hooks are matched
-  by their exact command and the local-agent manifest is the authoritative record for their
-  teardown. Backends should use a **unique `cmd` per codex `slug`** so replace/remove stay precise.
-
-Configurable environment variables:
-
-| Variable | Purpose |
-|------|------|
-| `TEAMAI_API_TOKEN` | API key (alternative to `--token`) |
-| `TEAMAI_REPORT_ENDPOINT` | Reporter base URL (defaults to the `--http` address) |
-| `TEAMAI_REPORT_PATHS` | JSON `{ "report", "sync", "ack" }`, overrides the three paths |
-| `TEAMAI_REPORT_AGENTS` | Comma-separated list of agents that report (default `workbuddy,codebuddy`) |
-| `TEAMAI_SKILL_DOWNLOAD_HOSTS` | Allowlist of hosts for skill `download_url` (empty = allow all) |
-| `TEAMAI_ALLOW_SANDBOX_REPORT` | Set to `1` to force report/sync inside a CloudStudio sandbox (see note below) |
-| `TEAMAI_DISABLE_REMOTE_CMD` | Set to `1` to reject server-pushed `uninstall_teamai`, `install_hook_rule`, and `uninstall_hook_rule` commands (they are acked `failed`) |
-| `TEAMAI_SKIP_AST` | Set to `1` to force heuristic-only code extraction, skipping the WASM tree-sitter AST track |
-
-> **Privacy:** The install path and machine id are only hashed locally to derive `local_agent_id` — they are never reported.
-
-> **CloudStudio sandbox:** When WorkBuddy runs teamai hooks inside a CloudStudio container, that container has a
-> different machine id than the macOS host and would report a duplicate agent card. The duplicate report is therefore
-> skipped automatically inside a CloudStudio sandbox (sync still runs, so pushed commands are still received) —
-> detected via `X_IDE_IS_CLOUDSTUDIO=TRUE` or the `/var/run/cloudstudio` directory.
-> Set `TEAMAI_ALLOW_SANDBOX_REPORT=1` to opt back in if you run teamai exclusively inside CloudStudio.
+The HTTP contract is intended for custom integrations. End users only need the `teamai init --http` command described in [Member Onboarding](#member-onboarding).
 
 ### Codebase Knowledge Graph
 
@@ -1087,9 +992,6 @@ teamai import --from-repo-list repos.yaml
 
 # Extract learnings from a merged MR/PR
 teamai import --from-mr https://github.com/org/repo/pull/123
-
-# Import docs from iWiki
-teamai import --from-iwiki 12345
 
 # Incremental mode (skip unchanged files)
 teamai import --from-repo https://github.com/org/repo --incremental
@@ -1173,13 +1075,14 @@ Hooks automatically injected by `teamai init`:
 | `Stop` | CLI update check + report session end |
 
 ```bash
+teamai hooks list      # Show effective built-in and team hooks
 teamai hooks inject    # Re-inject
 teamai hooks remove    # Remove
 ```
 
-Both commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed.
+The inject and remove commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed.
 
-> **Codex trust gate** — Codex (the OpenAI / ChatGPT Codex app, tool id `codex`) gates non-managed hooks behind an explicit user trust step. After teamai writes `~/.codex/hooks.json`, Codex may skip a newly added or changed hook until you review/trust it in `/hooks` or Settings → Hooks. `teamai hooks inject` and `teamai doctor` print a reminder when Codex hooks are installed; teamai never edits Codex's `[hooks.state]` to auto-trust — trusting is left to you. (The internal variants `codex-internal` / `tcodex` share the hooks.json format but have no trust gate, so no reminder is shown for them.)
+> **Codex trust gate** — Codex (the OpenAI / ChatGPT Codex app, tool id `codex`) gates non-managed hooks behind an explicit user trust step. After teamai writes `~/.codex/hooks.json`, Codex may skip a newly added or changed hook until you review/trust it in `/hooks` or Settings → Hooks. `teamai hooks inject` and `teamai doctor` print a reminder when Codex hooks are installed; teamai never edits Codex's `[hooks.state]` to auto-trust — trusting is left to you.
 
 ### Team Hooks Declaration
 
@@ -1274,10 +1177,13 @@ Upgrading from an earlier version: `.cursor/rules/*.md` copies written by the ol
 ```bash
 teamai doctor          # Config diagnostics
 teamai stats           # Skill usage stats
-teamai update          # CLI update
+teamai update --check  # Check for a CLI update without installing it
+teamai update          # Check for and install a CLI update
+teamai digest          # Generate the weekly team activity digest
 teamai remove skills <name>   # Remove a resource
 teamai remove rules <name>
-teamai remove wiki <name>
+teamai remove agents <name>
+teamai remove mcp <name>
 ```
 
 Auto-update runs in the Stop hook and is controlled by two tiers:
@@ -1373,6 +1279,8 @@ packages:
 sharing:
   rules:
     enforced: [code-review-guide]
+  recall:
+    enabled: false             # optional; members can override locally
   docs:
     localDir: ./.teamai/docs
   env:
@@ -1438,7 +1346,7 @@ The exclusion is durable: `uninstall --agent <tool>` drops the tool from `enable
 To rejoin after uninstalling:
 
 ```bash
-teamai init --repo <group>/TeamAi-<team> --scope user --role <role_id> --force
+teamai init --repo https://github.com/yourorg/yourrepo --scope user --role <role_id> --force
 teamai pull
 ```
 
@@ -1455,7 +1363,7 @@ Yes, but project scope remains isolated by default. When the current working dir
 In interactive mode, you'll be asked whether to overwrite — type `y` to confirm. You can also use `--force` to skip the confirmation:
 
 ```bash
-teamai init --repo <group>/<repo> --force
+teamai init --repo https://github.com/yourorg/yourrepo --force
 ```
 
 **Q: After `teamai init` in a project, there is no `.claude/` (or `.cursor/`, `.codebuddy/`) directory?**
