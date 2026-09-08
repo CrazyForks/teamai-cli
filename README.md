@@ -195,7 +195,7 @@ Task: Fix duplicate project-level Hook injection
 Consider running /teamai-share-learnings to summarize what you learned and share it with your team.
 ```
 
-The hint names the non-zero friction signals that triggered it and, when available, includes a redacted, single-line summary of the first task. The `/teamai-share-learnings` skill summarizes the session and pushes a learning document directly to the team repo. Each session is prompted at most once.
+The hint names the non-zero friction signals that triggered it and, when available, includes a redacted, single-line summary of the first task. The `/teamai-share-learnings` skill summarizes the session and pushes a learning document directly to the team repo. Each session is prompted at most once. Teams can switch the hint off with `sharing.contributeHint.enabled: false` in `teamai.yaml` (members: `contributeHintEnabled` in local config) while keeping the rest of the Stop hook.
 
 ### Team Knowledge Recall
 

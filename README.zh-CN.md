@@ -195,7 +195,7 @@ Task: Fix duplicate project-level Hook injection
 Consider running /teamai-share-learnings to summarize what you learned and share it with your team.
 ```
 
-提示会列出实际触发它的非零摩擦信号；如果能取得首个任务摘要，还会在脱敏、单行化后附上任务上下文。`/teamai-share-learnings` skill 自动总结 session 经验并推送到团队仓库。每个 session 最多提示一次。
+提示会列出实际触发它的非零摩擦信号；如果能取得首个任务摘要，还会在脱敏、单行化后附上任务上下文。`/teamai-share-learnings` skill 自动总结 session 经验并推送到团队仓库。每个 session 最多提示一次。团队可在 `teamai.yaml` 设置 `sharing.contributeHint.enabled: false` 关闭该提示（成员可用本地配置 `contributeHintEnabled` 覆盖），Stop hook 的其余功能不受影响。
 
 ### 团队知识检索
 
