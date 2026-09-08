@@ -102,6 +102,13 @@ vi.mock('../providers/index.js', () => ({
   }),
 }));
 
+// Isolation: push() takes a real ~/.teamai/.sync-lock. Parallel vitest workers
+// sharing that path race and skip/error, so these tests mock the lock.
+vi.mock('../update.js', () => ({
+  acquireLock: vi.fn().mockResolvedValue(true),
+  releaseLock: vi.fn().mockResolvedValue(undefined),
+}));
+
 function makeLocalConfig(overrides: Record<string, unknown> = {}) {
   return {
     repo: { localPath: '/tmp/team-repo', remote: 'https://git.woa.com/test/repo.git' },

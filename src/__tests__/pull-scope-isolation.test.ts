@@ -74,6 +74,13 @@ vi.mock('../roles.js', () => ({
   resolveRoleResourceNamespaces: vi.fn(() => ({ knowledge: [], skills: [], learnings: [] })),
 }));
 
+// Isolation: pull() takes a real ~/.teamai/.sync-lock. Parallel vitest workers
+// sharing that path race and skip/error, so these tests mock the lock.
+vi.mock('../update.js', () => ({
+  acquireLock: vi.fn().mockResolvedValue(true),
+  releaseLock: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { pull } from '../pull.js';
 import {
   loadLocalConfigForScope,
