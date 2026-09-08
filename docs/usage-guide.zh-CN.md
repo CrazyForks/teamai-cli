@@ -98,7 +98,19 @@ teamai --version
 
 > 只需一位管理员完成，其他成员跳到[成员接入](#成员接入)。
 
-在 GitHub、GitLab（gitlab.com 或自建实例）、GitCode（gitcode.com）、CNB（cnb.cool）、TGit，或任意私有/自建 Git 服务上创建一个空仓库（命名建议：`TeamAi-<团队名>`），或者直接执行 `teamai init`，不存在时会提示自动创建。
+在 GitHub、GitLab（gitlab.com 或自建实例）、GitCode（gitcode.com）、CNB（cnb.cool）、TGit，或任意私有/自建 Git 服务上创建一个空仓库（命名建议：`TeamAi-<团队名>`）。对于支持自动建仓的 provider，也可直接执行 `teamai init`，按提示创建尚不存在的仓库。
+
+使用自建 GitLab 时，先配置实例地址和具有 `api` 权限的 Personal Access Token：
+
+```bash
+export GITLAB_URL=https://git.example.com
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxx
+teamai init https://git.example.com/yourgroup/yourrepo
+```
+
+对于未知 host，`init` 会匿名检查 GitLab 登录页，总超时为三秒。确认是 GitLab 后，会在认证、克隆或写入配置前停止，提示设置实例地址和 token 后重试。探测不发送 token，也不跟随重定向。无法确认时，初始化继续使用通用 `git` provider；它支持 Git 传输，但不能自动建仓或创建 PR/MR。实例若由 SSO 遮蔽、部署在子路径下，或无法被探测访问，请显式设置 `GITLAB_URL`。
+
+**已经初始化为 `provider: git`？** 设置上述环境变量，并把团队仓库 `teamai.yaml` 中的 `provider` 改为 `gitlab`。仅设置环境变量不会改变已有 provider 选择。失败的 `teamai push` 可能已经推送了分支；若其诊断探测到 GitLab，会输出这些修复步骤。详见 [Provider 配置](providers.md#gitlab-provider含自托管)。
 
 ### 项目级（Project Scope，默认）
 

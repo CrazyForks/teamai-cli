@@ -25,6 +25,8 @@ npm install -g teamai-cli
 
 在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
 
+使用自建 GitLab 时，先将 `GITLAB_URL` 设为实例地址，并配置具有 `api` 权限的 `GITLAB_TOKEN`。若 `init` 探测到尚未配置的 GitLab 实例，会停止并提示配置方法。已有仓库若为 `provider: git`，还需把团队仓库 `teamai.yaml` 中的值改为 `provider: gitlab`，才能创建 MR。详见 [GitLab 配置](docs/providers.md#gitlab-provider含自托管)。
+
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Use this template** 生成自己的仓库，再对它执行 `teamai init`。
 
 ### 团队成员

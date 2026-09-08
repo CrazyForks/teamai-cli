@@ -27,15 +27,17 @@ https://gitlab.com/org/repo(.git)       → gitlab
 git@gitlab.com:org/repo.git             → gitlab
 https://gitcode.com/org/repo(.git)      → gitcode
 git@gitcode.com:org/repo.git            → gitcode
-https://git.example.com/group/repo.git  → git
-git@git.example.com:group/repo.git      → git
+https://git.example.com/group/repo.git  → 检查 GitLab，未确认则 git
+git@git.example.com:group/repo.git      → 检查 GitLab，未确认则 git
 ```
 
-provider 选择会写入 team 仓库的 `teamai.yaml` 的 `provider` 字段，后续 `push` / `pull` 都按这个值来。
+已知 host 和显式配置的 GitLab 实例优先。对于未知 host，`init` 会匿名探测 GitLab 登录页；确认是未配置的 GitLab 实例时，先提示设置 `GITLAB_URL` 和 `GITLAB_TOKEN` 后重试，不会直接把探测结果写入配置。未确认则继续使用 `git`。
+
+初始化成功后，provider 选择会写入 team 仓库的 `teamai.yaml` 的 `provider` 字段，后续 `push` / `pull` 都按这个值来。探测不会自动修改已有的 provider。
 
 ## 通用 Git Provider（自建/私有仓库）
 
-不在已知 host 列表中的完整 HTTPS 或 SSH URL 会自动选择 `git` provider。例如：
+完整 HTTPS 或 SSH URL 的 host 若不在已知列表、不匹配显式 GitLab 配置，且探测未确认 GitLab，就会选择 `git` provider。例如：
 
 ```bash
 teamai init https://code.qschou.com/Enterprise/arb-workflow-kit.git --scope user
@@ -49,6 +51,8 @@ teamai init git@code.qschou.com:Enterprise/arb-workflow-kit.git --scope user
 - SSH：预先配置 SSH Key，并确保 `ssh-agent` 能访问私钥。
 
 clone、pull、push 均可正常使用。平台 API 操作（自动建仓、自动创建 MR/PR）无法跨不同服务统一实现，因此暂不支持；`teamai push` 会先推送分支，再提示用户到对应平台手动创建 MR，并以非零退出码表明自动 PR/MR 创建未完成。
+
+若已有 `provider: git` 的仓库在创建 PR 时失败，CLI 会额外检查该 host；确认是 GitLab 后，会提示设置实例地址和 token，并将团队仓库 `teamai.yaml` 的 `provider` 改为 `gitlab`。这个提示不会自动修改配置，也不会撤回已经推送的分支。
 
 ## GitHub Provider
 
@@ -185,16 +189,18 @@ token 变量支持三个名字（按优先级）：`GITLAB_TOKEN` > `GITLAB_PRIV
 ### 自托管实例检测
 
 - **公有 gitlab.com**：URL host 直接命中，自动选择 gitlab provider。
-- **自托管实例**：设置 `GITLAB_URL` 后，URL host 与 `GITLAB_URL` 的 host 相同时自动识别为 gitlab；也可用 `TEAMAI_GITLAB_HOST` 直接指定 host。两种方式都不需要写完整 URL：
+- **自托管实例**：设置 `GITLAB_URL` 后，URL host 与 `GITLAB_URL` 的 host 相同时自动识别为 gitlab；也可用 `TEAMAI_GITLAB_HOST` 直接指定 host。仓库参数需使用完整 HTTP(S) 或 SSH URL：
   ```bash
   export GITLAB_URL=https://git.example.com
-  teamai init git.example.com/yourgroup/yourrepo     # → gitlab
+  teamai init https://git.example.com/yourgroup/yourrepo     # → gitlab
   ```
-- 也可以在 team 仓库的 `teamai.yaml` 显式写 `provider: gitlab` 强制切换。
+- **未配置的未知 host**：`init` 会匿名请求根路径下的 `/users/sign_in?auto_sign_in=false`，仅在响应包含明确的 GitLab 页面特征时确认。确认后，在认证、克隆和写入配置前停止，提示设置 `GITLAB_URL` 和具有 `api` 权限的 `GITLAB_TOKEN` 后重试。实例 URL 不会自动持久化。
+- **探测边界**：请求总超时为三秒，不发送 token、不跟随重定向、不关闭 TLS 校验。HTTP(S) 仓库 URL 保留其 scheme 和 Web 端口；SSH 仓库 URL 使用 HTTPS 的默认 443 端口探测，不会把 SSH 端口当作 Web 端口。超时、网络错误、代理拦截、重定向和无法确认的页面都继续回落到 `git`。子路径部署、SSO 遮蔽的登录页，以及 Web 地址与 SSH host 不同的实例，需要显式配置 `GITLAB_URL`。
+- **已有 `provider: git`**：设置实例地址和 token 后，还需在团队仓库的 `teamai.yaml` 中将 `provider` 改为 `gitlab`。仅补设环境变量不会覆盖配置中的 provider。创建 PR 失败后的 GitLab 探测只提供修复提示，不会自动切换。
 
 ### 与 `git` 通用 Provider 的分工
 
-未知 host 默认落到 `git` 通用 Provider——它只做传输（clone/pull/push 走系统 Git 凭据），`createRepo` 和创建 MR 都会直接报「不支持」。GitLab Provider 的价值就在这里：把自托管实例识别出来后，建仓、建 MR、拉 MR 数据、列 group 仓库这些平台能力才可用。检测顺序是 **已知 host → 自托管 GitLab → `git` 通用回落**。
+检测顺序是 **已知 host → 显式配置的自托管 GitLab → 匿名 GitLab 探测 → `git` 通用回落**。匿名探测只用于 `init` 的配置提示，以及通用 provider 创建 PR 失败后的诊断，只确认具有明确特征的 GitLab 页面，不会自动配置实例或 token。未确认的 host 使用 `git` 通用 Provider，clone/pull/push 走系统 Git 凭据，自动建仓和创建 MR 则不受支持。配置好 GitLab Provider 后，才可使用建仓、建 MR、拉 MR 数据、列 group 仓库等平台能力。
 
 ### 多级命名空间
 
