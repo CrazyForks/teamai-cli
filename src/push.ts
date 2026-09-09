@@ -283,40 +283,55 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
   // branch/commit/reset never touch the user's active tree. withKnowledgeWorktree
   // hands pushCore a config whose localPath is the worktree's .teamai.
   if (localConfig.repo.kind === 'self') {
-    // Self-heal an older .teamai/.gitignore that still ignores `env` (pre-beta.5).
-    // Run against the ACTIVE tree (original localConfig, projectRoot intact) BEFORE
-    // swapping into the worktree, so the fixed .gitignore lets env changes surface.
-    try {
-      const { migrateSelfModeGitignore } = await import('./init.js');
-      await migrateSelfModeGitignore(localConfig);
-    } catch { /* best-effort */ }
-
-    const { withKnowledgeWorktree, EmptyRepoError } = await import('./utils/reports-branch.js');
-    try {
-      const activeConfigPath = path.join(localConfig.repo.localPath, 'teamai.yaml');
-      const activeConfig = await readFileSafe(activeConfigPath);
-      const businessRoot = localConfig.repo.businessRepoRoot ?? localConfig.projectRoot;
-      let pendingTeamConfig: string | null = null;
-      if (activeConfig !== null && businessRoot) {
-        const relativeConfigPath = path.relative(businessRoot, activeConfigPath).split(path.sep).join('/');
-        const committed = await getFileContentAtRev(businessRoot, 'HEAD', relativeConfigPath);
-        if (committed === null || committed.toString() !== activeConfig) {
-          pendingTeamConfig = activeConfig;
-        }
-      }
-      await withKnowledgeWorktree(localConfig, async (wtConfig) => {
-        if (pendingTeamConfig !== null) {
-          await writeFile(path.join(wtConfig.repo.localPath, 'teamai.yaml'), pendingTeamConfig);
-        }
-        await pushCore(wtConfig, teamConfig, options, pendingTeamConfig);
-      });
-    } catch (e) {
-      if (e instanceof EmptyRepoError) {
-        log.error(e.message);
-      } else {
-        log.error(`Push failed: ${(e as Error).message}`);
-      }
+    // Guard self machine-data writes against a concurrent P2 migration relocating
+    // the same files. Contend on <getDataHome>/.sync-lock — the exact path
+    // migrateSelfA1 takes (for a pre-migration self install that is
+    // <repo>/.teamai/.sync-lock). Like git-mode push, error on contention rather
+    // than silently skipping (that would drop the user's changes).
+    const selfSyncLock = path.join(getDataHome(localConfig), SYNC_LOCK_FILENAME);
+    if (!(await acquireLock(selfSyncLock))) {
+      log.error('Another teamai pull/push/migration is in progress for this project. Re-run once it finishes.');
       process.exitCode = 1;
+      return;
+    }
+    try {
+      // Self-heal an older .teamai/.gitignore that still ignores `env` (pre-beta.5).
+      // Run against the ACTIVE tree (original localConfig, projectRoot intact) BEFORE
+      // swapping into the worktree, so the fixed .gitignore lets env changes surface.
+      try {
+        const { migrateSelfModeGitignore } = await import('./init.js');
+        await migrateSelfModeGitignore(localConfig);
+      } catch { /* best-effort */ }
+
+      const { withKnowledgeWorktree, EmptyRepoError } = await import('./utils/reports-branch.js');
+      try {
+        const activeConfigPath = path.join(localConfig.repo.localPath, 'teamai.yaml');
+        const activeConfig = await readFileSafe(activeConfigPath);
+        const businessRoot = localConfig.repo.businessRepoRoot ?? localConfig.projectRoot;
+        let pendingTeamConfig: string | null = null;
+        if (activeConfig !== null && businessRoot) {
+          const relativeConfigPath = path.relative(businessRoot, activeConfigPath).split(path.sep).join('/');
+          const committed = await getFileContentAtRev(businessRoot, 'HEAD', relativeConfigPath);
+          if (committed === null || committed.toString() !== activeConfig) {
+            pendingTeamConfig = activeConfig;
+          }
+        }
+        await withKnowledgeWorktree(localConfig, async (wtConfig) => {
+          if (pendingTeamConfig !== null) {
+            await writeFile(path.join(wtConfig.repo.localPath, 'teamai.yaml'), pendingTeamConfig);
+          }
+          await pushCore(wtConfig, teamConfig, options, pendingTeamConfig);
+        });
+      } catch (e) {
+        if (e instanceof EmptyRepoError) {
+          log.error(e.message);
+        } else {
+          log.error(`Push failed: ${(e as Error).message}`);
+        }
+        process.exitCode = 1;
+      }
+    } finally {
+      await releaseLock(selfSyncLock);
     }
     return;
   }

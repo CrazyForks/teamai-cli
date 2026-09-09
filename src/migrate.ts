@@ -465,8 +465,19 @@ async function migrateSelfA1(legacyDir: string, partitionDir: string): Promise<v
     if (!(await pathExists(src))) continue;
     const dest = path.join(partitionDir, name);
     if (await pathExists(dest)) {
-      // Partition copy is authoritative (e.g. written by a prior run or init).
-      // Drop the stale source rather than clobbering it.
+      if (await isDirectory(src)) {
+        // A DIRECTORY entry (workspaces/) may hold per-worktree children the
+        // partition copy lacks — e.g. a reconcile wrote `<legacy>/workspaces/<new>`
+        // between an interrupted run and this retry. A blind remove(src) would drop
+        // them (data loss). Merge instead: relocate only the children missing from
+        // the partition (each atomically), and never overwrite an existing child
+        // (the partition copy is authoritative). Then remove the drained source.
+        await mergeDirIntoPartition(src, dest);
+        await remove(src);
+        moved.push(name);
+        continue;
+      }
+      // A FILE entry: the partition copy is authoritative. Drop the stale source.
       await remove(src);
       continue;
     }
@@ -490,6 +501,39 @@ async function migrateSelfA1(legacyDir: string, partitionDir: string): Promise<v
     );
   } else {
     log.debug('self migration: nothing left to relocate');
+  }
+}
+
+/** True when `p` is a directory (following symlinks). Missing path → false. */
+async function isDirectory(p: string): Promise<boolean> {
+  try {
+    return (await fse.stat(p)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge a source directory's immediate children into an already-existing
+ * destination directory, without overwriting anything the destination already
+ * has. Used when relocating the `workspaces/` tree and the partition already holds
+ * some worktree subdirs (from an interrupted prior run): the partition copy is
+ * authoritative, but a child present ONLY in the source (e.g. a new worktree's
+ * managed-mcp/resource-cache written after the crash) must be carried over, not
+ * dropped. Each carried child moves via a temp sibling + atomic rename, so a
+ * concurrent reader sees a whole child or none.
+ */
+async function mergeDirIntoPartition(src: string, dest: string): Promise<void> {
+  await fse.ensureDir(dest);
+  const children = await fse.readdir(src);
+  for (const child of children) {
+    const childDest = path.join(dest, child);
+    if (await pathExists(childDest)) continue; // partition child wins; leave it
+    const childSrc = path.join(src, child);
+    const tmp = `${childDest}.${process.pid}.tmp`;
+    await remove(tmp);
+    await fse.copy(childSrc, tmp, { overwrite: true });
+    await fse.rename(tmp, childDest);
   }
 }
 

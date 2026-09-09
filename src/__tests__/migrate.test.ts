@@ -474,6 +474,48 @@ describe('self mode migration (P2)', () => {
     expect(await planMigration(repoRoot)).toBeNull();
   });
 
+  it('merges the workspaces/ tree instead of dropping legacy children when the partition dir already exists', async () => {
+    // Interrupted-run + reconcile race: the partition already has workspaces/wsA
+    // (moved by a crashed run), and a later reconcile wrote workspaces/wsB into the
+    // repo before the retry. A blind remove(src) would drop wsB (data loss); the
+    // merge must carry wsB over while leaving the authoritative wsA untouched.
+    await seedSelfLayout();
+    const partition = projectDataHome(repoRoot);
+    // partition already holds wsA (authoritative)
+    await fse.ensureDir(path.join(partition, 'workspaces', 'wsA'));
+    await fse.writeFile(path.join(partition, 'workspaces', 'wsA', 'managed-mcp.json'), '{"a":1}');
+    // legacy holds a DIFFERENT worktree wsB (+ the seed's ws1) that must not be lost
+    await fse.ensureDir(path.join(legacyDir, 'workspaces', 'wsB'));
+    await fse.writeFile(path.join(legacyDir, 'workspaces', 'wsB', 'managed-mcp.json'), '{"b":2}');
+    // also give partition an authoritative config so the run reaches the merge branch
+    await fse.writeFile(path.join(partition, 'config.yaml'), 'repo:\n  kind: self\n');
+
+    await runMigration((await planMigration(repoRoot))!);
+
+    // wsB (legacy-only) was carried over — NOT dropped.
+    expect(await fse.pathExists(path.join(partition, 'workspaces', 'wsB', 'managed-mcp.json'))).toBe(true);
+    expect(JSON.parse(await fse.readFile(path.join(partition, 'workspaces', 'wsB', 'managed-mcp.json'), 'utf-8'))).toEqual({ b: 2 });
+    // wsA (partition authoritative) was left untouched.
+    expect(JSON.parse(await fse.readFile(path.join(partition, 'workspaces', 'wsA', 'managed-mcp.json'), 'utf-8'))).toEqual({ a: 1 });
+    // the seed's ws1 also made it over.
+    expect(await fse.pathExists(path.join(partition, 'workspaces', 'ws1', 'managed-mcp.json'))).toBe(true);
+    // legacy workspaces drained + removed.
+    expect(await fse.pathExists(path.join(legacyDir, 'workspaces'))).toBe(false);
+  });
+
+  it('does not overwrite an authoritative partition workspaces child during merge', async () => {
+    await seedSelfLayout(); // seeds legacy workspaces/ws1 = {}
+    const partition = projectDataHome(repoRoot);
+    // partition already has ws1 with authoritative content — merge must keep it.
+    await fse.ensureDir(path.join(partition, 'workspaces', 'ws1'));
+    await fse.writeFile(path.join(partition, 'workspaces', 'ws1', 'managed-mcp.json'), '{"authoritative":true}');
+    await fse.writeFile(path.join(partition, 'config.yaml'), 'repo:\n  kind: self\n');
+
+    await runMigration((await planMigration(repoRoot))!);
+
+    expect(JSON.parse(await fse.readFile(path.join(partition, 'workspaces', 'ws1', 'managed-mcp.json'), 'utf-8'))).toEqual({ authoritative: true });
+  });
+
   it('finishes an interrupted relocation where config.yaml already moved but plaintext env.local lingers (C1)', async () => {
     // The dangerous crash: a partial run relocated config.yaml to the partition
     // but died before moving env.local/env.sh. planMigration must NOT go blind on
