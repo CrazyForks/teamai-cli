@@ -269,17 +269,19 @@ export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | n
     //    (which may be untracked/unverified) must never hijack it. Switching that
     //    project to single-repo mode is `init --self`'s job (it retires the
     //    partition), not detection's.
-    const fromPartition = await readConfigFrom(
-      projectDataHome(anchors.projectAnchor),
-      anchors.workspaceRoot,
-    );
+    const partitionDir = projectDataHome(anchors.projectAnchor);
+    const fromPartition = await readConfigFrom(partitionDir, anchors.workspaceRoot);
     if (fromPartition) return fromPartition;
-    // 2. No partition yet: a workspace that declares `mode: self` self-heals the
-    //    machine config under <workspaceRoot>/.teamai (issue #198 clone bootstrap).
-    // 3. Otherwise read the legacy `<workspaceRoot>/.teamai` config directly.
-    //    readConfigFrom runs the self-heal bootstrap when the config is missing,
-    //    so both cases funnel through the same call.
-    return readConfigFrom(legacyDir, anchors.workspaceRoot, anchors.workspaceRoot);
+    // 2. No partition config yet. A workspace that declares `mode: self` self-heals
+    //    on a fresh clone (issue #198): bootstrapSelfRepo now writes the machine
+    //    config into the PARTITION (P2), not <workspaceRoot>/.teamai. So run the
+    //    self-heal and, on success, read the config back FROM THE PARTITION.
+    const healed = await selfHealAndReadPartition(anchors.workspaceRoot, partitionDir);
+    if (healed) return healed;
+    // 3. Otherwise read a legacy `<workspaceRoot>/.teamai` config directly — a
+    //    pre-P2 self install (or any un-migrated install) whose config still lives
+    //    in the repo. Double-read compat until migration relocates it.
+    return readConfigFrom(legacyDir, anchors.workspaceRoot);
   }
 
   // Not a git repo: fall back to a legacy `.teamai` directly at `dir` (also runs
@@ -301,6 +303,28 @@ export async function detectProjectConfig(cwd?: string): Promise<LocalConfig | n
  * cheap on the hot path. Only passed for the legacy `<root>/.teamai` shape (the
  * partition is teamai-managed and never bootstrapped).
  */
+/**
+ * Self-heal a freshly-cloned single-repo project (issue #198), then read the
+ * config back from the PARTITION. bootstrapSelfRepo is a no-op ('skip') for any
+ * non-self workspace, so this stays cheap on the hot path; it only writes a
+ * config (into the partition, per P2) when the workspace carries a `mode: self`
+ * marker and the developer's git provider is already authenticated. Returns the
+ * bootstrapped config, or null when nothing was healed.
+ */
+async function selfHealAndReadPartition(
+  workspaceRoot: string,
+  partitionDir: string,
+): Promise<LocalConfig | null> {
+  try {
+    const { bootstrapSelfRepo } = await import('./bootstrap.js');
+    const result = await bootstrapSelfRepo(workspaceRoot, { silent: true });
+    if (result !== 'bootstrapped') return null;
+  } catch {
+    return null;
+  }
+  return readConfigFrom(partitionDir, workspaceRoot);
+}
+
 async function readConfigFrom(
   dataHomeDir: string,
   projectRoot: string,

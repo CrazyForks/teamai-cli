@@ -54,8 +54,30 @@ export interface MigrationPlan {
    * "partition exists" check and the legacy dir — including its plaintext `env`
    * — would linger in the workspace forever, breaking the zero-residue promise.
    */
-  mode: 'full' | 'retire-only';
+  mode: 'full' | 'retire-only' | 'self';
 }
+
+/**
+ * Class-A1 machine-data entries under a self install's `<repo>/.teamai/` that P2
+ * relocates to the partition. Everything NOT in this list stays in the repo: the
+ * class-B knowledge (skills/rules/docs/learnings/env/agents/hooks/mcp/teamai.yaml/
+ * .gitignore) committed to main, and the disposable reports-wt/knowledge-wt
+ * worktrees (which anchor on the repo and are rebuilt on demand, never moved).
+ *
+ * ORDER MATTERS: `config.yaml` is the sentinel planMigration keys on, so it is
+ * relocated LAST. If the run crashes partway, config.yaml is still in the repo,
+ * so the next planMigration still sees legacy A1 and finishes the job — the
+ * remaining entries (incl. the plaintext env.local/env.sh) never get stranded.
+ */
+const SELF_A1_ENTRIES = [
+  'state.json',
+  'env.local',
+  'env.sh',
+  'search-index.json',
+  'managed-mcp.json',
+  'workspaces',
+  'config.yaml',
+] as const;
 
 /**
  * Decide whether the current working directory is a legacy install that needs
@@ -78,26 +100,49 @@ export async function planMigration(cwd?: string): Promise<MigrationPlan | null>
   if (!anchors) return null;
 
   const legacyDir = path.join(anchors.workspaceRoot, '.teamai');
+  const partitionDir = projectDataHome(anchors.projectAnchor);
   const legacyConfig = path.join(legacyDir, 'config.yaml');
-  if (!(await pathExists(legacyConfig))) return null;
 
-  // Read the legacy config directly to gate on scope/kind. A malformed config is
-  // treated as "nothing to migrate" rather than crashing a write command.
-  const content = await readFileSafe(legacyConfig);
-  if (!content) return null;
+  // Gate on scope/kind read from config.yaml. It is normally in the repo, but a
+  // self migration that crashed partway may have already relocated config.yaml to
+  // the partition while other A1 (incl. plaintext env.local/env.sh) still lingers
+  // in the repo. So fall back to the partition config to read scope/kind — never
+  // key the whole decision on legacy config.yaml existing (that would go blind and
+  // strand the remaining A1 forever). A malformed config is treated as "nothing to
+  // migrate" rather than crashing a write command.
+  const gateContent =
+    (await readFileSafe(legacyConfig)) ??
+    (await readFileSafe(path.join(partitionDir, 'config.yaml')));
+  if (!gateContent) return null;
   let scope: string | undefined;
   let kind: string | undefined;
   try {
-    const parsed = LocalConfigSchema.parse(YAML.parse(content));
+    const parsed = LocalConfigSchema.parse(YAML.parse(gateContent));
     scope = parsed.scope;
     kind = parsed.repo.kind;
   } catch {
     return null;
   }
   if (scope !== 'project') return null;
-  if (kind === 'self') return null;
 
-  const partitionDir = projectDataHome(anchors.projectAnchor);
+  // Self mode (P2): the legacy `.teamai/` mixes class-B knowledge (committed to
+  // main, must stay) with class-A1 machine data (must move). We CANNOT rename the
+  // whole dir like a git-mode install — that would carry the knowledge off and
+  // rename `.teamai` to `.bak`, breaking "knowledge on main". Instead, selectively
+  // relocate the A1 whitelist and leave everything else in place. Plan whenever
+  // ANY A1 entry still sits in the repo — not just config.yaml — so an interrupted
+  // relocation (config.yaml already moved, env.local not yet) is still finished.
+  if (kind === 'self') {
+    const hasLegacyA1 = await anyExists(legacyDir, SELF_A1_ENTRIES);
+    if (!hasLegacyA1) return null;
+    return { legacyDir, partitionDir, anchor: anchors.projectAnchor, mode: 'self' };
+  }
+
+  // Non-self (git/http): keyed on legacy config.yaml — the git-mode migration
+  // renames the whole dir, so config.yaml being present IS the "un-migrated"
+  // signal (it is moved atomically, never piecemeal).
+  if (!(await pathExists(legacyConfig))) return null;
+
   // If the partition is already built, the copy is done (or was done by a prior
   // run that crashed before retiring the source). Don't re-copy onto the
   // authoritative partition — just finish the job by retiring the leftover
@@ -106,6 +151,14 @@ export async function planMigration(cwd?: string): Promise<MigrationPlan | null>
     (await pathExists(path.join(partitionDir, 'config.yaml'))) ? 'retire-only' : 'full';
 
   return { legacyDir, partitionDir, anchor: anchors.projectAnchor, mode };
+}
+
+/** True if any of `names` exists directly under `dir`. */
+async function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
+  for (const n of names) {
+    if (await pathExists(path.join(dir, n))) return true;
+  }
+  return false;
 }
 
 /**
@@ -132,7 +185,17 @@ export async function runMigration(
   const { legacyDir, partitionDir, anchor, mode } = plan;
 
   if (opts.dryRun) {
-    if (mode === 'retire-only') {
+    if (mode === 'self') {
+      const present = [];
+      for (const n of SELF_A1_ENTRIES) {
+        if (await pathExists(path.join(legacyDir, n))) present.push(n);
+      }
+      log.info(
+        `[dry-run] self mode: would relocate ${present.length} machine-data item(s) ` +
+          `(${present.join(', ')}) from ${legacyDir} to ${partitionDir}, leaving team ` +
+          `knowledge in place.`,
+      );
+    } else if (mode === 'retire-only') {
       log.info(
         `[dry-run] partition already built at ${partitionDir}; would retire the ` +
           `leftover ${legacyDir} to ${legacyDir}.bak`,
@@ -156,6 +219,15 @@ export async function runMigration(
   const staging = `${partitionDir}.staging`;
   let lockReleased = false;
   try {
+    // 'self' (P2): selectively relocate the class-A1 whitelist from the repo's
+    // `.teamai/` into the partition, leaving class-B knowledge and the
+    // reports-wt/knowledge-wt worktrees untouched. The `.teamai/` dir is NEVER
+    // renamed — the knowledge on main must stay exactly where it is.
+    if (mode === 'self') {
+      await migrateSelfA1(legacyDir, partitionDir);
+      return 'migrated';
+    }
+
     // 'retire-only': a prior run already built the partition but crashed before
     // retiring the source. The partition is authoritative — do NOT re-copy onto
     // it — just finish by retiring the leftover legacy dir.
@@ -319,8 +391,23 @@ async function rebasePath(
  *    stage the plaintext `env`/`token` in the backup. We drop a self-contained
  *    `.gitignore` (`*`) INTO the dir BEFORE renaming, so the backup ignores its
  *    own contents regardless of its final name or the repo's ignore rules.
+ *
+ * REFUSES to rename a dir that holds single-repo team knowledge (a `teamai.yaml`
+ * with `mode: self`): that directory is committed to main, and renaming it to
+ * `.bak` would wipe the knowledge from the working tree. Self installs are
+ * relocated selectively (migrateSelfA1), never retired wholesale — reaching here
+ * with a self `.teamai/` means an upstream mode misclassification, so we fail
+ * closed rather than destroy knowledge.
  */
 async function retireLegacy(legacyDir: string): Promise<string> {
+  if (await holdsSelfKnowledge(legacyDir)) {
+    throw new Error(
+      `migration refused to rename ${legacyDir} to .bak: it holds single-repo ` +
+        `team knowledge (teamai.yaml mode: self) committed to main. This is a ` +
+        `guard against wiping knowledge — self installs relocate machine data ` +
+        `selectively, never by renaming the whole directory.`,
+    );
+  }
   // Make the backup ignore everything it contains, independent of repo rules and
   // the backup's eventual name. Written before the rename so there is never a
   // window in which the credentials sit in a non-ignored directory.
@@ -332,6 +419,78 @@ async function retireLegacy(legacyDir: string): Promise<string> {
   }
   await fse.rename(legacyDir, backup);
   return backup;
+}
+
+/**
+ * True when `dir` (a `.teamai/`) carries single-repo team knowledge — a
+ * `teamai.yaml` with `mode: self`. Such a directory is committed to main and must
+ * never be renamed away. Malformed/absent yaml → false (nothing to protect).
+ */
+async function holdsSelfKnowledge(dir: string): Promise<boolean> {
+  const content = await readFileSafe(path.join(dir, 'teamai.yaml'));
+  if (!content) return false;
+  try {
+    const raw = YAML.parse(content) as { mode?: string } | null;
+    return raw?.mode === 'self';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * P2 self-mode selective relocation: move each class-A1 entry from the repo's
+ * `.teamai/` into the partition, leaving class-B knowledge and the worktrees
+ * untouched. The `.teamai/` directory itself is never renamed — the knowledge on
+ * main must stay in place.
+ *
+ * Per-entry durability (destination-first): copy `<legacy>/<item>` into the
+ * partition, then delete the source. A crash mid-way leaves the item readable in
+ * at least one place, never neither. Idempotent:
+ *  - source missing → skip (already relocated, or never existed);
+ *  - destination already present → do NOT overwrite the authoritative partition
+ *    copy; just remove the stale source (finishes an interrupted relocation).
+ *
+ * The copy lands via a temp sibling + atomic rename (`<dest>.<pid>.tmp` → dest),
+ * NOT a direct copy onto `dest`. A concurrent self pull/push does NOT take the
+ * partition `.sync-lock` (lockScope skips non-git kinds), so it can read
+ * `<partition>/env.local` while we relocate: the atomic rename guarantees it sees
+ * either the complete file or nothing, never a half-written one. Uses raw fse.copy
+ * (NOT copyDir) so a nested `.git` under workspaces/ survives.
+ */
+async function migrateSelfA1(legacyDir: string, partitionDir: string): Promise<void> {
+  await fse.ensureDir(partitionDir);
+  const moved: string[] = [];
+  for (const name of SELF_A1_ENTRIES) {
+    const src = path.join(legacyDir, name);
+    if (!(await pathExists(src))) continue;
+    const dest = path.join(partitionDir, name);
+    if (await pathExists(dest)) {
+      // Partition copy is authoritative (e.g. written by a prior run or init).
+      // Drop the stale source rather than clobbering it.
+      await remove(src);
+      continue;
+    }
+    // Destination-first, atomic: copy into a temp sibling, then rename onto dest
+    // (rename is atomic within the partition filesystem). Verify, THEN delete the
+    // source. A leftover .tmp from an earlier crash is cleared first.
+    const tmp = `${dest}.${process.pid}.tmp`;
+    await remove(tmp);
+    await fse.copy(src, tmp, { overwrite: true });
+    await fse.rename(tmp, dest);
+    if (!(await pathExists(dest))) {
+      throw new Error(`self migration: failed to relocate ${name} to the partition`);
+    }
+    await remove(src);
+    moved.push(name);
+  }
+  if (moved.length > 0) {
+    log.success(
+      `Slimmed single-repo .teamai/: relocated ${moved.length} machine-data item(s) ` +
+        `to ${partitionDir} (team knowledge stays in the repo).`,
+    );
+  } else {
+    log.debug('self migration: nothing left to relocate');
+  }
 }
 
 /** Top-level entries under a legacy `.teamai/` that migration will copy. */

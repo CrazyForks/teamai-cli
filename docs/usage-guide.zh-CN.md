@@ -268,7 +268,12 @@ teamai init . --agent claude,codex   # 非交互：启用 Claude Code + Codex
 |------|----------|---------------------------|
 | 知识资产：`skills/` `rules/` `docs/` `learnings/`、`teamai.yaml` | **main** 分支的 `.teamai/` | ✅ 会 |
 | 上报数据：`members/` `sessions/` `votes/` `stats/` | `teamai-reports` **孤儿分支** | 推送到 `origin`（独立历史） |
-| 本机私有：`config.yaml`、`token`、`state.json`、worktree | `.teamai/`（已 gitignore） | ❌ 不会（每台机器本地） |
+| 本机私有：`config.yaml`、`state.json`、搜索索引、env 备份、MCP manifest | `~/.teamai/projects/<slug>/`（**分区**，在仓库之外） | ❌ 不会（每台机器本地） |
+| 可丢弃的 git worktree（`reports-wt/`、`knowledge-wt/`） | `.teamai/`（已 gitignore；按需重建） | ❌ 不会（每台机器本地） |
+
+本机私有数据存放在仓库之外的按项目**分区**里，因此单仓模式的 `.teamai/` 只保留提交到
+main 的团队知识 —— `git status` 保持干净。旧版单仓装升级后，下一次
+`init`/`pull`/`push` 会自动把这些机器数据搬进分区（main 上的知识原封不动）。
 
 **克隆即初始化。** 由于知识资产和 `.teamai/teamai.yaml` 里的 `mode: self` 标记都提交在 main 上，团队成员 clone 仓库后会被自动初始化：下一条 `teamai` 命令或 AI 会话会识别该标记，并（在其 git provider 已认证的前提下）自动写入本机配置、注入 hooks、在孤儿分支上注册成员 —— 无需手抄 repo/role 参数。若尚未认证，teamai 会提示其运行一次 `teamai init .`。
 
