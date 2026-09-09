@@ -5,7 +5,7 @@ import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConf
 import { reconcileTeamHooksForConfig } from './hooks.js';
 import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
-import { getProvider, detectProvider, RepoNotFoundError } from './providers/index.js';
+import { getProvider, detectProviderForInit, RepoNotFoundError } from './providers/index.js';
 import { ensureDir, writeFile, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
 import {
@@ -708,7 +708,14 @@ export async function initSelfRepo(options: GlobalOptions & {
     process.exit(1);
     return;
   }
-  const providerName = detectProvider(remoteUrl);
+  let providerName: string;
+  try {
+    providerName = await detectProviderForInit(remoteUrl);
+  } catch (e) {
+    log.error((e as Error).message);
+    process.exit(1);
+    return;
+  }
   const provider = getProvider(providerName);
   log.debug(`Detected provider: ${providerName} (from ${remoteUrl})`);
 
@@ -1043,7 +1050,14 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 1b: Detect and initialize provider from URL
-  const providerName = detectProvider(repoInput);
+  let providerName: string;
+  try {
+    providerName = await detectProviderForInit(repoInput);
+  } catch (e) {
+    log.error((e as Error).message);
+    process.exit(1);
+    return;
+  }
   const provider = getProvider(providerName);
   log.debug(`Detected provider: ${providerName}`);
 

@@ -6,6 +6,7 @@ import { GitLabProvider } from './gitlab/index.js';
 import { GitCodeProvider } from './gitcode/index.js';
 import { GenericGitProvider } from './git/index.js';
 import { getCurrentPackageName } from '../package-info.js';
+import { probeSelfHostedGitLab } from './gitlab/probe.js';
 
 // ─── Provider Detection ──────────────────────────────────
 //
@@ -106,6 +107,25 @@ export function detectProvider(input: string): string {
 
   // Bare owner/repo — use distribution-based default.
   return getDefaultProvider();
+}
+
+/**
+ * Interactive initialization can probe an otherwise unknown host. Do not just
+ * return "gitlab": its API client needs an explicitly configured instance URL
+ * on subsequent runs too, otherwise it would silently target gitlab.com.
+ */
+export async function detectProviderForInit(input: string): Promise<string> {
+  const provider = detectProvider(input);
+  if (provider !== 'git') return provider;
+  const detected = await probeSelfHostedGitLab(input);
+  if (detected) {
+    throw new Error(
+      `Detected self-hosted GitLab at ${detected.baseUrl}. `
+      + `Set GITLAB_URL=${detected.baseUrl} (use the full instance base URL for a subpath deployment) `
+      + 'and GITLAB_TOKEN (a Personal Access Token with api scope), then run teamai init again.',
+    );
+  }
+  return provider;
 }
 
 /**

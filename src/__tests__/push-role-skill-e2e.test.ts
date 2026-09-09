@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const CLI = path.join(ROOT, 'dist', 'index.js');
+const PUSH_AGENTS = ['claude', 'codex', 'codebuddy', 'opencode'] as const;
+type PushAgent = (typeof PUSH_AGENTS)[number];
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: 'TeamAI CI',
@@ -62,8 +64,12 @@ interface PushFixture {
   remote: string;
 }
 
-function makePushFixture(provider: 'github' | 'gitlab', repoUrl: string): PushFixture {
-  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), `teamai-push-${provider}-e2e-`));
+function makePushFixture(
+  provider: 'github' | 'gitlab' | 'git',
+  repoUrl: string,
+  agent: PushAgent,
+): PushFixture {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), `teamai-push-${provider}-${agent}-e2e-`));
   const home = path.join(sandbox, 'home');
   const projectRoot = path.join(sandbox, 'project');
   const seed = path.join(sandbox, 'seed');
@@ -71,7 +77,7 @@ function makePushFixture(provider: 'github' | 'gitlab', repoUrl: string): PushFi
   const teamRepo = path.join(projectRoot, '.teamai', 'team-repo');
 
   fs.mkdirSync(home, { recursive: true });
-  fs.mkdirSync(path.join(projectRoot, '.claude', 'skills'), { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, `.${agent}`, 'skills'), { recursive: true });
   fs.mkdirSync(path.join(seed, 'skills', 'backend', 'beta-proof'), { recursive: true });
   fs.writeFileSync(
     path.join(seed, 'teamai.yaml'),
@@ -81,8 +87,8 @@ function makePushFixture(provider: 'github' | 'gitlab', repoUrl: string): PushFi
       `provider: ${provider}`,
       'reviewers: []',
       'toolPaths:',
-      '  claude:',
-      '    skills: .claude/skills',
+      `  ${agent}:`,
+      `    skills: .${agent}/skills`,
     ].join('\n'),
   );
   fs.writeFileSync(
@@ -114,6 +120,7 @@ function makePushFixture(provider: 'github' | 'gitlab', repoUrl: string): PushFi
 
 async function pullModifyAndPush(
   fixture: PushFixture,
+  agent: PushAgent,
   envOverrides: Record<string, string> = {},
 ): Promise<RunResult> {
   const pullResult = await runCLI(
@@ -123,13 +130,17 @@ async function pullModifyAndPush(
     envOverrides,
   );
   expect(pullResult.code, pullResult.output).toBe(0);
+  const skillPath = `.${agent}/skills/beta-proof`;
+  const skillFile = path.join(fixture.projectRoot, skillPath, 'SKILL.md');
+  expect(fs.existsSync(skillFile), pullResult.output).toBe(true);
+  expect(fs.readFileSync(skillFile, 'utf8')).toContain('# Original');
 
   fs.writeFileSync(
-    path.join(fixture.projectRoot, '.claude', 'skills', 'beta-proof', 'SKILL.md'),
+    skillFile,
     '---\nname: beta-proof\ndescription: modified\n---\n\n# Modified locally\n',
   );
   return runCLI(
-    ['push', '--skill', '.claude/skills/beta-proof', '--role', 'backend', '--all'],
+    ['push', '--skill', skillPath, '--role', 'backend', '--all'],
     fixture.projectRoot,
     fixture.home,
     envOverrides,
@@ -239,8 +250,43 @@ describe('role-scoped skill push e2e (issue #331)', () => {
 });
 
 describe('role-scoped skill provider PR creation e2e (issue #331)', () => {
-  it('commits, pushes, and creates a GitHub PR', async () => {
-    const fixture = makePushFixture('github', 'https://github.com/team/issue-331.git');
+  it.each(PUSH_AGENTS)('explains a saved generic provider when anonymous probing identifies GitLab for %s', async (agent) => {
+    const requests: http.IncomingMessage[] = [];
+    const server = http.createServer((request, response) => {
+      requests.push(request);
+      response.writeHead(200, {
+        'content-type': 'text/html',
+        'x-gitlab-meta': JSON.stringify({ correlation_id: 'probe-test', version: '1' }),
+      });
+      response.end('GitLab sign in');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing server address');
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const fixture = makePushFixture('git', `${baseUrl}/team/issue-331.git`, agent);
+    try {
+      const result = await pullModifyAndPush(fixture, agent, {
+        GITLAB_URL: '', TEAMAI_GITLAB_HOST: '', GITLAB_TOKEN: 'must-not-be-sent',
+      });
+      expect(result.code, result.output).not.toBe(0);
+      expect(result.output).toContain('Pushed branch teamai/push/issue-331-git/');
+      expect(result.output).toContain('Detected GitLab, but teamai.yaml has provider: git.');
+      expect(result.output).toContain('Change it to provider: gitlab');
+      expect(result.output).toContain(`set GITLAB_URL to ${baseUrl}`);
+      expect(result.output).not.toContain('must-not-be-sent');
+      expect(requests.map((request) => request.url)).toEqual(['/users/sign_in?auto_sign_in=false']);
+      expect(requests[0].headers['private-token']).toBeUndefined();
+      const config = fs.readFileSync(path.join(fixture.projectRoot, '.teamai', 'team-repo', 'teamai.yaml'), 'utf8');
+      expect(config).toContain('provider: git\n');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      fs.rmSync(fixture.sandbox, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it.each(PUSH_AGENTS)('commits, pushes, and creates a GitHub PR for %s', async (agent) => {
+    const fixture = makePushFixture('github', 'https://github.com/team/issue-331.git', agent);
     const binDir = path.join(fixture.sandbox, 'bin');
     const ghLog = path.join(fixture.sandbox, 'gh.log');
     fs.mkdirSync(binDir);
@@ -251,7 +297,7 @@ describe('role-scoped skill provider PR creation e2e (issue #331)', () => {
     );
 
     try {
-      const result = await pullModifyAndPush(fixture, {
+      const result = await pullModifyAndPush(fixture, agent, {
         PATH: `${binDir}:${process.env.PATH ?? ''}`,
         TEAMAI_FAKE_GH_LOG: ghLog,
       });
@@ -274,7 +320,7 @@ describe('role-scoped skill provider PR creation e2e (issue #331)', () => {
     }
   }, 60_000);
 
-  it('commits, pushes, and creates a GitLab MR', async () => {
+  it.each(PUSH_AGENTS)('commits, pushes, and creates a GitLab MR for %s', async (agent) => {
     const requestPaths: string[] = [];
     let requestBody = '';
     const server = http.createServer((request, response) => {
@@ -295,10 +341,10 @@ describe('role-scoped skill provider PR creation e2e (issue #331)', () => {
       throw new Error('Failed to start the fake GitLab API server.');
     }
     const gitlabUrl = `http://127.0.0.1:${address.port}`;
-    const fixture = makePushFixture('gitlab', `${gitlabUrl}/team/issue-331.git`);
+    const fixture = makePushFixture('gitlab', `${gitlabUrl}/team/issue-331.git`, agent);
 
     try {
-      const result = await pullModifyAndPush(fixture, {
+      const result = await pullModifyAndPush(fixture, agent, {
         GITLAB_URL: gitlabUrl,
         GITLAB_TOKEN: 'test-token',
       });

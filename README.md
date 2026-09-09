@@ -25,6 +25,8 @@ npm install -g teamai-cli
 
 Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
 
+For self-hosted GitLab, set `GITLAB_URL` to your instance URL and `GITLAB_TOKEN` to a token with `api` scope before initializing. If `init` recognizes an unconfigured GitLab instance, it stops with setup instructions. Existing repos with `provider: git` also need `provider: gitlab` in the team repo's `teamai.yaml` to create MRs. See [GitLab setup](docs/providers.md#gitlab-provider含自托管).
+
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
 ### Team members

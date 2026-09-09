@@ -95,12 +95,14 @@ async function createPrWithFallback(
 ): Promise<string | null> {
   const provider = getProvider(teamConfig.provider);
   const mrSpin = spinner('Creating Pull Request...').start();
+  let repoInput = teamConfig.repo;
   try {
     let repoInfo;
     try {
       repoInfo = provider.parseRepoInput(teamConfig.repo);
     } catch {
       repoInfo = provider.parseRepoInput(localConfig.repo.remote);
+      repoInput = localConfig.repo.remote;
     }
 
     const targetBranch = await getDefaultBranch(localConfig.repo.localPath);
@@ -118,6 +120,20 @@ async function createPrWithFallback(
   } catch (e) {
     mrSpin.fail(`Failed to create PR: ${(e as Error).message}`);
     log.info(`Branch ${branchName} has been pushed. You can create a PR manually.`);
+    if (provider.name === 'git') {
+      const { detectProvider } = await import('./providers/registry.js');
+      const { probeSelfHostedGitLab } = await import('./providers/gitlab/probe.js');
+      const repoUrl = repoInput || localConfig.repo.remote;
+      const detected = detectProvider(repoUrl) === 'gitlab'
+        ? { baseUrl: 'your GitLab instance base URL' }
+        : await probeSelfHostedGitLab(repoUrl);
+      if (detected) {
+        log.info(
+          'Detected GitLab, but teamai.yaml has provider: git. Change it to provider: gitlab, '
+          + `set GITLAB_URL to ${detected.baseUrl}, and configure GITLAB_TOKEN with api scope.`,
+        );
+      }
+    }
     return null;
   }
 }
