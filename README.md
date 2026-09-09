@@ -110,102 +110,22 @@ teamai push → create branch + MR → reviewer approves + merges
               SessionStart hook → teamai pull → synced to local AI tools
 ```
 
-### Team Skills
+### What Gets Shared
 
-A skill is a directory with `SKILL.md`. `teamai push` opens an MR; after merge, `teamai pull` delivers it to every agent.
+Each resource is declared once in the team repo and delivered on `teamai pull`:
 
-```markdown
----
-name: deploy-helper
-description: Deploy the service the team's way
----
-# Deploy Helper
-1. Run `npm test`
-2. Run `./deploy.sh`
-```
+| Resource | In the team repo | Commands |
+|----------|------------------|----------|
+| **Skills** | `skills/<name>/SKILL.md` | `teamai push` / `pull`, `teamai skill exclude` |
+| **Rules** | `rules/*.md` | `teamai push` / `pull` |
+| **Docs** | `docs/` | `teamai push` / `pull` |
+| **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
+| **Env** | `env/` | `teamai env` |
+| **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
+| **MCP servers** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
+| **Packages** | `teamai.yaml` | `teamai packages` |
 
-```bash
-teamai push
-```
-
-### Team Rules
-
-Markdown conventions injected into each agent's rules. Same push → review → pull flow.
-
-```markdown
-# Code review
-- Every function needs JSDoc
-- No `any`
-```
-
-```bash
-teamai push
-```
-
-### Team Hooks
-
-Declare custom hooks in `hooks/hooks.yaml` and `teamai pull` delivers them to every AI tool:
-
-```yaml
-hooks:
-  - id: block-secret
-    description: Scan for secrets before commit
-    event: PreToolUse
-    matcher: Bash
-    command: 'bash -lc "~/.teamai/team-scripts/scan-secret.sh" || true'
-    tools: [claude, cursor]
-```
-
-```bash
-teamai hooks list      # list effective hooks
-teamai hooks inject    # re-reconcile into every installed tool
-teamai hooks remove    # remove all teamai-managed hooks
-```
-
-### Team MCP Servers
-
-Declare once in `mcp/mcp.yaml`; `teamai pull` writes each tool's native config. Use `${VAR}` for secrets.
-
-```yaml
-servers:
-  - name: gpu-analysis
-    transport: http            # stdio | http | sse
-    url: https://example.com/api/mcp
-    headers:
-      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
-```
-
-```bash
-teamai mcp list | inject | remove
-```
-
-### Skill Subscription Sources
-
-Subscribe to additional skill repos — other teams' public repos, or shared/public repos within your own org:
-
-```bash
-teamai source add https://github.com/other-team/teamai-public.git --name other-team
-teamai source list
-teamai source browse other-team    # browse available skills
-teamai source remove other-team
-```
-
-The add/remove change takes effect locally right away, and subscribed skills sync on the next
-`teamai pull`. Run `teamai push` when you want to share the `teamai.yaml` change with teammates.
-
-### Team Packages
-
-Share and restore the team's npm packages and Claude Code plugins:
-
-```bash
-teamai packages install typescript
-teamai packages install typescript@5.9.2 --npm
-teamai packages install code-review@claude-plugins-official
-teamai push       # Share the declarations
-teamai packages    # Install everything declared by the team
-```
-
-See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
+For file formats and full workflows, see the [Usage Guide](docs/usage-guide.md).
 
 ## Team Context (beta)
 

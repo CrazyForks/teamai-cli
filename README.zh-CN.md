@@ -110,102 +110,22 @@ teamai push → 创建分支 + MR → reviewer 审批合并
            SessionStart hook → teamai pull → 同步到本地 AI 工具
 ```
 
-### 团队 Skills
+### 分发内容
 
-Skill 是带 `SKILL.md` 的目录。`teamai push` 开 MR，合并后 `teamai pull` 分发到每个 Agent。
+每类资源在团队仓库声明一次，随 `teamai pull` 分发：
 
-```markdown
----
-name: deploy-helper
-description: 按团队方式部署服务
----
-# Deploy Helper
-1. 运行 `npm test`
-2. 运行 `./deploy.sh`
-```
+| 资源 | 团队仓库中的位置 | 命令 |
+|------|------------------|------|
+| **Skills** | `skills/<name>/SKILL.md` | `teamai push` / `pull`、`teamai skill exclude` |
+| **Rules（规范）** | `rules/*.md` | `teamai push` / `pull` |
+| **Docs** | `docs/` | `teamai push` / `pull` |
+| **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
+| **Env** | `env/` | `teamai env` |
+| **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
+| **MCP Server** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
+| **Packages** | `teamai.yaml` | `teamai packages` |
 
-```bash
-teamai push
-```
-
-### 团队规范
-
-Markdown 规范，注入到各 Agent 的 rules。同样走 push → 评审 → pull。
-
-```markdown
-# 代码审查
-- 函数需要 JSDoc
-- 禁止 `any`
-```
-
-```bash
-teamai push
-```
-
-### 团队 Hooks
-
-在 `hooks/hooks.yaml` 中声明自定义 hooks，`teamai pull` 自动分发到所有 AI 工具：
-
-```yaml
-hooks:
-  - id: block-secret
-    description: 提交前扫描密钥
-    event: PreToolUse
-    matcher: Bash
-    command: 'bash -lc "~/.teamai/team-scripts/scan-secret.sh" || true'
-    tools: [claude, cursor]
-```
-
-```bash
-teamai hooks list      # 查看生效的 hooks
-teamai hooks inject    # 重新注入到每个已安装的工具
-teamai hooks remove    # 移除所有 teamai 管理的 hooks
-```
-
-### 团队 MCP Server
-
-在 `mcp/mcp.yaml` 中声明一次，`teamai pull` 按各工具原生格式写入。密钥用 `${VAR}`。
-
-```yaml
-servers:
-  - name: gpu-analysis
-    transport: http            # stdio | http | sse
-    url: https://example.com/api/mcp
-    headers:
-      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
-```
-
-```bash
-teamai mcp list | inject | remove
-```
-
-### Skill 订阅源
-
-订阅额外的 skill 仓库——其他团队的公开仓库，或本团队内的公共/共享仓库：
-
-```bash
-teamai source add https://github.com/other-team/teamai-public.git --name other-team
-teamai source list
-teamai source browse other-team    # 浏览可用 skills
-teamai source remove other-team
-```
-
-添加/移除会立即在本机生效，订阅的 skills 会在下一次 `teamai pull` 时同步。需要将
-`teamai.yaml` 的改动分享给团队成员时，再运行 `teamai push`。
-
-### 团队包
-
-共享并一键恢复团队的 npm 包和 Claude Code 插件：
-
-```bash
-teamai packages install typescript
-teamai packages install typescript@5.9.2 --npm
-teamai packages install code-review@claude-plugins-official
-teamai push       # 分享团队声明
-teamai packages    # 安装团队声明的全部包
-```
-
-完整工作流和配置见[使用指南](docs/usage-guide.zh-CN.md#团队包)。
+文件格式与完整工作流见[使用指南](docs/usage-guide.zh-CN.md)。
 
 ## Team Context (beta)
 
