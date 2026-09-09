@@ -124,7 +124,7 @@ Each resource is delivered to every agent:
 | **CLAUDE.md** | `claudemd/*.md` | |
 | **Env** | `env/` | Shared team-level environment variables and switches; do not put secrets here |
 | **Hooks** | `hooks/hooks.yaml` | |
-| **MCP servers** | `mcp/mcp.yaml` | |
+| **MCP** | `mcp/mcp.yaml` | |
 | **Packages** | `teamai.yaml` | Currently npm packages and Claude Code plugins only |
 | **Models** | — | Not implemented for every provider yet |
 
