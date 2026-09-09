@@ -82,6 +82,35 @@ interface CodexHooksJson {
   [key: string]: unknown;
 }
 
+// ZCode (~/.zcode/cli/config.json): Claude-shaped hooks nested under
+// `hooks.events`, gated by `hooks.enabled` (config-file hooks are disabled by
+// default — the writer must force it on). The file is shared with ZCode's own
+// plugin state, so reconcile merges keys and never replaces the document.
+// Hook entries use the `process` type (argv vector, no shell): spawning the
+// bare string `bash -lc "..."` through ZCode's command-type shell is
+// unreliable on Windows, where PATH order can resolve `bash` to the WSL
+// launcher instead of Git Bash.
+interface ZcodeHookEntry {
+  type: string;
+  command: string;
+  args?: string[];
+  timeoutMs?: number;
+}
+
+interface ZcodeHookMatcher {
+  matcher?: string;
+  hooks: ZcodeHookEntry[];
+}
+
+interface ZcodeHooksJson {
+  hooks?: {
+    enabled?: boolean;
+    description?: string;
+    events?: Record<string, ZcodeHookMatcher[]>;
+  };
+  [key: string]: unknown;
+}
+
 // ─── Unified reconcile engine (issue #19) ───────────────────
 //
 //  A single engine injects BOTH built-in operational hooks (source: 'builtin',
@@ -96,14 +125,16 @@ interface CodexHooksJson {
 //  Reconcile is idempotent and only writes when content actually changes, so an
 //  upgraded CLI re-running over an already-injected file produces a zero-diff.
 
-type ToolFormat = 'claude' | 'cursor' | 'codex';
+type ToolFormat = 'claude' | 'cursor' | 'codex' | 'zcode';
 export type HookStatus = 'installed' | 'missing';
 
 const CURSOR_TOOLS = new Set(['cursor']);
 const CODEX_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
+const ZCODE_TOOLS = new Set(['zcode']);
 
 function detectFormat(tool: string): ToolFormat {
   if (CODEX_TOOLS.has(tool)) return 'codex';
+  if (ZCODE_TOOLS.has(tool)) return 'zcode';
   return CURSOR_TOOLS.has(tool) ? 'cursor' : 'claude';
 }
 
@@ -269,6 +300,32 @@ function toCodexEntry(def: HookDef): CodexHookMatcher {
   };
   if (def.matcher && def.matcher !== '*') entry.matcher = def.matcher;
   return entry;
+}
+
+function toZcodeEntry(def: HookDef): ZcodeHookMatcher {
+  const entry: ZcodeHookEntry = {
+    type: 'process',
+    command: 'bash',
+    // Stored verbatim: the shell payload must equal `def.command` exactly so
+    // managed-entry detection and the managed-hooks manifest share one command
+    // representation (the same invariant the Codex format keeps). teamai
+    // hook-dispatch is silent and failure-tolerant on its success paths, so no
+    // shell redirection is layered on top of the payload.
+    args: ['-lc', def.command],
+    ...(def.timeout !== undefined ? { timeoutMs: def.timeout * 1000 } : {}),
+  };
+  const group: ZcodeHookMatcher = { hooks: [entry] };
+  // ZCode's matcher is a case-sensitive regex on the match value; '*' is an
+  // invalid pattern that would never match. Omitted matcher matches everything.
+  if (def.matcher && def.matcher !== '*') group.matcher = def.matcher;
+  return group;
+}
+
+/** Shell payload of a ZCode hook entry, for managed-entry matching. */
+function zcodeEntryCommand(entry: ZcodeHookMatcher): string {
+  const hook = entry.hooks?.[0];
+  if (hook?.command === 'bash' && hook.args?.[0] === '-lc') return hook.args[1] ?? '';
+  return hook?.command ?? '';
 }
 
 /** Ordered, de-duplicated list of events appearing in the desired defs. */
@@ -471,6 +528,63 @@ async function reconcileCodexFormat(
   }
 }
 
+// ─── ZCode (~/.zcode/cli/config.json) reconcile ─────────────
+
+async function reconcileZcodeFormat(
+  settingsPath: string,
+  tool: string,
+  teamDefs: HookDef[],
+  opts: ReconcileHooksOptions,
+  priorTeamCommands: Set<string>,
+): Promise<void> {
+  const expanded = expandHome(settingsPath);
+  await ensureDir(path.dirname(expanded));
+  const cfg: ZcodeHooksJson = (await readJson<ZcodeHooksJson>(expanded)) ?? {};
+  if (!cfg.hooks) cfg.hooks = {};
+  let changed = false;
+  // Config-file hooks are disabled by default in ZCode; entries we write would
+  // never fire unless the runner is explicitly enabled. Persist the flip even
+  // when the event arrays are already up to date — but only when installing.
+  // Removal must preserve the runner state the user chose: re-enabling during
+  // uninstall would switch hooks the user explicitly disabled back on.
+  if (!opts.removeAll && cfg.hooks.enabled !== true) {
+    cfg.hooks.enabled = true;
+    changed = true;
+  }
+  if (!cfg.hooks.events) cfg.hooks.events = {};
+
+  // ZCode hook entries carry no description field, so managed-entry detection
+  // relies on the teamai command markers plus the managed-hooks manifest —
+  // same strategy as the Codex format.
+  const isManaged = (entry: ZcodeHookMatcher): boolean => {
+    const cmd = zcodeEntryCommand(entry);
+    return TEAMAI_COMMAND_MARKERS.some((marker) => cmd.includes(marker)) || priorTeamCommands.has(cmd);
+  };
+
+  const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
+  const eventOrder = desiredEventOrder(defs, (e) => e);
+  const eventsMap = cfg.hooks.events;
+  const events = [...eventOrder, ...Object.keys(eventsMap).filter((e) => !eventOrder.includes(e))];
+
+  for (const event of events) {
+    const existing = eventsMap[event] ?? [];
+    const untouched = existing.filter((e) => !isManaged(e));
+    const desiredEntries = defs.filter((d) => d.event === event).map(toZcodeEntry);
+    const newArr = [...untouched, ...desiredEntries];
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      eventsMap[event] = newArr;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await writeJson(expanded, cfg);
+    log.success(`${opts.removeAll ? 'Removed' : 'Updated'} teamai hooks in ${settingsPath}`);
+  } else {
+    log.debug(`teamai hooks already up-to-date in ${settingsPath}`);
+  }
+}
+
 // ─── Agent hooks (HTTP-source, issue #238) ──────────────────
 
 /**
@@ -669,6 +783,8 @@ export async function reconcileHooks(
     await reconcileCursorFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else if (format === 'codex') {
     await reconcileCodexFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
+  } else if (format === 'zcode') {
+    await reconcileZcodeFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else {
     await reconcileClaudeFormat(settingsPath, tool, scopedDefs, {
       ...opts,
@@ -747,6 +863,19 @@ export async function getHookStatus(settingsPath: string, tool?: string): Promis
     return present ? 'installed' : 'missing';
   }
 
+  if (format === 'zcode') {
+    const cfg = await readJson<ZcodeHooksJson>(expanded);
+    const eventsMap = cfg?.hooks?.events;
+    if (!eventsMap) return 'missing';
+    const present = defs.every((def) => {
+      const want = toZcodeEntry(def);
+      const wantCmd = zcodeEntryCommand(want);
+      const entries = eventsMap[def.event] ?? [];
+      return entries.some((e) => e.matcher === want.matcher && zcodeEntryCommand(e) === wantCmd);
+    });
+    return present ? 'installed' : 'missing';
+  }
+
   const settings = await readJson<ClaudeSettingsJson>(expanded);
   if (!settings?.hooks) return 'missing';
   const present = defs.every((def) => {
@@ -793,6 +922,18 @@ export async function hasTeamaiHooks(
     return Object.values(j.hooks).some((entries) =>
       (entries ?? []).some((e) => {
         const cmd = e.hooks?.[0]?.command ?? '';
+        return TEAMAI_COMMAND_MARKERS.some((m) => cmd.includes(m)) || priorTeamCommands.has(cmd);
+      }),
+    );
+  }
+
+  if (format === 'zcode') {
+    const j = await readJson<ZcodeHooksJson>(expanded);
+    const eventsMap = j?.hooks?.events;
+    if (!eventsMap) return false;
+    return Object.values(eventsMap).some((entries) =>
+      (entries ?? []).some((e) => {
+        const cmd = zcodeEntryCommand(e);
         return TEAMAI_COMMAND_MARKERS.some((m) => cmd.includes(m)) || priorTeamCommands.has(cmd);
       }),
     );

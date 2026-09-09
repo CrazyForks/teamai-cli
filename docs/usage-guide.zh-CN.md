@@ -1275,6 +1275,15 @@ team-repo/
 
 Qoder 已作为内置目标支持。TeamAI 会将 Skills、Rules 和 Subagents 分别下发到 `.qoder/skills/`、`.qoder/rules/` 和 `.qoder/agents/`。Hooks 与 MCP Server 会合并进对应作用域的 `.qoder/settings.json`，并保留用户已有的其他设置；这些路径与 Qoder 的用户级和项目级配置约定一致。
 
+### ZCode
+
+ZCode 已作为内置目标支持。Skills 下发到 `.zcode/skills/`（ZCode 同时会读取中央目录 `~/.agents/skills/`，该目录由 `agents` 条目覆盖），Subagents 以 Claude 风格 Markdown 下发到 `.zcode/agents/`。Hooks 会合并进共享的 `~/.zcode/cli/config.json`，并保留插件状态等无关键值。写入器为你处理了两个 ZCode 特有的细节：
+
+- ZCode 的配置文件钩子**默认禁用**——TeamAI 会强制置 `hooks.enabled: true`，确保写入的条目真正生效。
+- 钩子条目使用 `process` 类型（`bash -lc <dispatch>` 以 argv 向量执行）而非 shell 字符串，规避 Windows 下 PATH 解析命中 WSL `bash.exe` 而非 Git Bash 的陷阱。
+
+以上路径已对照 ZCode 桌面端实测验证：设置页「新建子智能体」写入的就是 `~/.zcode/agents/*.md`，反向放入的文件也会出现在页面的已安装列表中。MCP Server 下发到 `~/.agents/mcp.json`（用户级，Claude 的 `mcpServers` 结构——正是 ZCode 自己的 MCP 设置页读取的文件）。项目级暂未接入：ZCode 的工作区 MCP 使用不同的键（`.zcode/config.json` 内的 `mcp.servers`），Claude 写入器无法生成该结构。ZCode 暂无用户级 Rules 目录约定，因此 Rules 不同步。
+
 ### JoyCode
 
 JoyCode 已作为内置目标支持。Skills、Rules 和 Subagents 分别下发到 `.joycode/skills/`、`.joycode/rules/` 和 `.joycode/agents/`。Rules 使用与 Cursor 兼容的 `.mdc` 格式，包括下文所述的派生 frontmatter 和仅正文往返同步；Subagents 使用带 YAML frontmatter 的 Markdown 文件。

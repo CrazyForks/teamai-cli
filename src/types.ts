@@ -271,6 +271,17 @@ export const TeamaiConfigSchema = z.object({
       mcp: '.qoder/settings.json',
       mcpProject: '.qoder/settings.json',
     },
+    // ZCode: user-level config lives at ~/.zcode/cli/config.json (a shared file
+    // that also carries plugin state — reconcile must merge, never replace).
+    // Hooks are Claude-shaped but nested under `hooks.events` and gated by
+    // `hooks.enabled` (config-file hooks are disabled by default; the writer
+    // must force it on). Subagents deploy to ~/.zcode/agents/ as Claude-style
+    // Markdown (the CLI also reads <project>/.zcode/agents/ per workspace).
+    // User-scope MCP mirrors Claude's shape (`mcpServers` key) in
+    // ~/.agents/mcp.json; project scope writes `mcp.servers` inside
+    // .zcode/config.json (a different key), which the Claude writer cannot
+    // emit — so no mcpProject. ZCode has no user-level rules dir convention.
+    zcode: { skills: '.zcode/skills', agents: '.zcode/agents', settings: '.zcode/cli/config.json', mcp: '.agents/mcp.json' },
     codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents', mcp: '.codebuddy/mcp.json', mcpProject: '.codebuddy/mcp.json' },
     openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules', claudemd: '.openclaw/workspace/AGENTS.md' },
     hermes: { skills: '.hermes/skills', claudemd: 'AGENTS.md' },
