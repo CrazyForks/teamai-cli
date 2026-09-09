@@ -1097,7 +1097,10 @@ so a user who runs Claude via shell env keeps their own gateway — TeamAI skips
 and logs the skipped keys to `~/.teamai/reporter/errors.jsonl`. Protected keys are
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
 `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_MODEL_OPTION{,_NAME}`, and
-`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`. Unsupported agents acknowledge
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`. A shell value that matches what TeamAI
+last wrote (Claude re-injects `settings.json` `env` into the hook process) is recognized
+as managed, not a user conflict, so a managed gateway can still be updated or removed on
+later syncs. Unsupported agents acknowledge
 the task as failed instead of writing another agent's config. Symlinked user config
 files remain symlinks. These files are mode `0600`. A successful write is acknowledged with
 `type: "apply_model_config"`; malformed payloads are acknowledged as `failed`. Unknown

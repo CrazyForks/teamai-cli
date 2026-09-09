@@ -1076,7 +1076,8 @@ shell 环境变量（`export ANTHROPIC_*`），因此通过 shell 环境变量�
 TeamAI 跳过写入，并把跳过的 key 记入 `~/.teamai/reporter/errors.jsonl`。受保护的 key 包括
 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_CUSTOM_HEADERS`、
 `ANTHROPIC_CUSTOM_MODEL_OPTION{,_NAME}` 以及 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`。
-不支持的 agent 会回执失败，不会误写其他
+若某个 shell 值与 TeamAI 上次写入的值一致（Claude 会把 `settings.json` 的 `env` 回注到 hook 进程），
+则识别为托管值而非用户冲突，因此后续同步仍可更新或删除托管网关。不支持的 agent 会回执失败，不会误写其他
 agent 的配置。用户配置文件是符号链接时会保留链接。以上含凭证文件权限均为 `0600`。落盘成功后以
 `type: "apply_model_config"` 回执；非法 payload 回执 `failed`。未来未知任务类型会静默跳过，以保持协议向后兼容。
 
