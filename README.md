@@ -112,7 +112,7 @@ teamai push → create branch + MR → reviewer approves + merges
 
 ### What Gets Shared
 
-Each resource is declared once in the team repo and delivered on `teamai pull`:
+Each resource is delivered to every agent:
 
 | Resource | In the team repo | Commands |
 |----------|------------------|----------|
@@ -120,10 +120,13 @@ Each resource is declared once in the team repo and delivered on `teamai pull`:
 | **Rules** | `rules/*.md` | `teamai push` / `pull` |
 | **Docs** | `docs/` | `teamai push` / `pull` |
 | **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
+| **Culture** | `culture.md` | `teamai push` / `pull` |
+| **CLAUDE.md** | `claudemd/*.md` | `teamai push` / `pull` |
 | **Env** | `env/` | `teamai env` |
 | **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
 | **MCP servers** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
 | **Packages** | `teamai.yaml` | `teamai packages` |
+| **Models** | — | local-agent on session start |
 
 For file formats and full workflows, see the [Usage Guide](docs/usage-guide.md).
 

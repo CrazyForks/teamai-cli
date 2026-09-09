@@ -112,7 +112,7 @@ teamai push → 创建分支 + MR → reviewer 审批合并
 
 ### 分发内容
 
-每类资源在团队仓库声明一次，随 `teamai pull` 分发：
+每类资源分发到每个 Agent：
 
 | 资源 | 团队仓库中的位置 | 命令 |
 |------|------------------|------|
@@ -120,10 +120,13 @@ teamai push → 创建分支 + MR → reviewer 审批合并
 | **Rules（规范）** | `rules/*.md` | `teamai push` / `pull` |
 | **Docs** | `docs/` | `teamai push` / `pull` |
 | **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
+| **Culture（团队文化）** | `culture.md` | `teamai push` / `pull` |
+| **CLAUDE.md** | `claudemd/*.md` | `teamai push` / `pull` |
 | **Env** | `env/` | `teamai env` |
 | **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
 | **MCP Server** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
 | **Packages** | `teamai.yaml` | `teamai packages` |
+| **Models（模型）** | — | session start 时由 local-agent 下发 |
 
 文件格式与完整工作流见[使用指南](docs/usage-guide.zh-CN.md)。
 
