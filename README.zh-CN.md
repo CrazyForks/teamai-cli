@@ -13,6 +13,16 @@
 
 TeamAI 统一管理团队的 Skills、Rules、MCP 和知识，驾驭 Claude Code、Codex、CodeBuddy、WorkBuddy、OpenCode、Cursor 等 AI Agents。
 
+## 贡献者
+
+感谢每一位为 TeamAI 贡献代码的伙伴！
+
+<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
+</a>
+
+由 [contrib.rocks](https://contrib.rocks) 生成。
+
 ## 快速开始
 
 ### 安装
@@ -24,8 +34,6 @@ npm install -g teamai-cli
 ### 团队管理员 / 个人使用者
 
 在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
-
-使用自建 GitLab 时，先将 `GITLAB_URL` 设为实例地址，并配置具有 `api` 权限的 `GITLAB_TOKEN`。若 `init` 探测到尚未配置的 GitLab 实例，会停止并提示配置方法。已有仓库若为 `provider: git`，还需把团队仓库 `teamai.yaml` 中的值改为 `provider: gitlab`，才能创建 MR。详见 [GitLab 配置](docs/providers.md#gitlab-provider含自托管)。
 
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Use this template** 生成自己的仓库，再对它执行 `teamai init`。
 
@@ -48,13 +56,13 @@ teamai init https://github.com/yourorg/yourrepo --scope user
 
 ## 产品架构
 
-**Team Execution × Team Context × Team Improvement**：
+**Team Execution × Team Context (beta) × Team Improvement (beta)**：
 
 | 层 | 要解决的问题 | 当前 CLI 中的体现 |
 |----|--------------|-------------------|
 | **Team Execution** | 让每个 Agent 按团队的方式工作 | `init` / `pull` / `push`，skills、rules、agents、hooks、MCP、env |
-| **Team Context** | 让每个 Agent 理解整个团队 | recall、learnings、代码知识图谱、teamwiki... |
-| **Team Improvement** | 让每一次执行都成为团队能力的积累 | 基于摩擦信号的经验分享、sessions、digest、dashboard... |
+| **Team Context** (beta) | 让每个 Agent 理解整个团队 | recall、learnings、代码知识图谱、teamwiki... |
+| **Team Improvement** (beta) | 让每一次执行都成为团队能力的积累 | 基于摩擦信号的经验分享、sessions、digest、dashboard... |
 
 ## 功能概览
 
@@ -63,8 +71,8 @@ teamai init https://github.com/yourorg/yourrepo --scope user
     <tr>
       <th rowspan="2">Agent</th>
       <th colspan="7">Team Execution</th>
-      <th colspan="3">Team Context</th>
-      <th colspan="3">Team Improvement</th>
+      <th colspan="3">Team Context (beta)</th>
+      <th colspan="3">Team Improvement (beta)</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -112,74 +120,27 @@ teamai push → 创建分支 + MR → reviewer 审批合并
            SessionStart hook → teamai pull → 同步到本地 AI 工具
 ```
 
-成员通过 `teamai push` 提交变更并创建合并请求供审核。若某个资源已在未合并的 PR 中等待评审，再次对它执行 `teamai push` 会就地更新该 PR，而非新开一个重复的 PR。合并后，`teamai pull`（由 SessionStart hook 在会话启动时自动触发）将最新资源同步到本地。Skills 会同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/` 等目录。对于 Codex，若 skill 已存在于 `~/.agents/skills/`，则会在原位置更新，不会在 `~/.codex/skills/` 创建重复副本。在 **project scope** 安装下，SessionStart 会先为当前工具创建项目根目录（例如 `<project>/.claude`），再 pull 写入；单独执行 `teamai pull` 仍不会凭空创建 Agent 目录。
+### 分发内容
 
-### 团队 Hooks
+每类资源分发到每个 Agent：
 
-在 `hooks/hooks.yaml` 中声明自定义 hooks，`teamai pull` 自动分发到所有 AI 工具：
+| 资源 | 团队仓库中的位置 | 备注 |
+|------|------------------|------|
+| **Skills** | `skills/<name>/SKILL.md` | |
+| **Rules** | `rules/*.md` | |
+| **Docs** | `docs/` | 项目基础文档，默认不全量加载（渐进式披露） |
+| **Agents** | `agents/<name>.yaml` | |
+| **Culture** | `culture.md` | 团队使命、价值观与协作准则——注入各 Agent 的 CLAUDE.md / AGENTS.md，成为每次会话的行事底色 |
+| **CLAUDE.md** | `claudemd/*.md` | |
+| **Env** | `env/` | 通用环境变量、团队级开关；不建议直接放密钥 |
+| **Hooks** | `hooks/hooks.yaml` | |
+| **MCP** | `mcp/mcp.yaml` | |
+| **Packages** | `teamai.yaml` | 目前只支持 npm 包和 Claude 插件 |
+| **Models** | — | 暂时没有对全部 provider 实现 |
 
-```yaml
-hooks:
-  - id: block-secret
-    description: 提交前扫描密钥
-    event: PreToolUse
-    matcher: Bash
-    command: 'bash -lc "~/.teamai/team-scripts/scan-secret.sh" || true'
-    tools: [claude, cursor]
-```
+文件格式与完整工作流见[使用指南](docs/usage-guide.zh-CN.md)。
 
-```bash
-teamai hooks list      # 查看生效的 hooks
-teamai hooks inject    # 重新注入到每个已安装的工具
-teamai hooks remove    # 移除所有 teamai 管理的 hooks
-```
-
-### 团队 MCP Server
-
-在 `mcp/mcp.yaml` 中声明一次，`teamai pull` 按各工具原生格式写入。密钥用 `${VAR}`。
-
-```yaml
-servers:
-  - name: gpu-analysis
-    transport: http            # stdio | http | sse
-    url: https://example.com/api/mcp
-    headers:
-      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
-```
-
-```bash
-teamai mcp list | inject | remove
-```
-
-### Skill 订阅源
-
-订阅额外的 skill 仓库——其他团队的公开仓库，或本团队内的公共/共享仓库：
-
-```bash
-teamai source add https://github.com/other-team/teamai-public.git --name other-team
-teamai source list
-teamai source browse other-team    # 浏览可用 skills
-teamai source remove other-team
-```
-
-添加/移除会立即在本机生效，订阅的 skills 会在下一次 `teamai pull` 时同步。需要将
-`teamai.yaml` 的改动分享给团队成员时，再运行 `teamai push`。
-
-### 团队包
-
-共享并一键恢复团队的 npm 包和 Claude Code 插件：
-
-```bash
-teamai packages install typescript
-teamai packages install typescript@5.9.2 --npm
-teamai packages install code-review@claude-plugins-official
-teamai push       # 分享团队声明
-teamai packages    # 安装团队声明的全部包
-```
-
-完整工作流和配置见[使用指南](docs/usage-guide.zh-CN.md#团队包)。
-
-## Team Context
+## Team Context (beta)
 
 > Every agent understands how the team works.
 
@@ -242,9 +203,19 @@ teamai codebase --lint --output /path/to/repo # 检查本地提取的图谱
 
 WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若因任何原因加载失败，提取会降级到启发式轨并记录一条 `AST_UNAVAILABLE` gap。设置 `TEAMAI_SKIP_AST=1` 可强制仅使用启发式提取。
 
-## Team Improvement
+## Team Improvement (beta)
 
 > Every execution makes the entire team smarter.
+
+### Maintenance
+
+随着 skills 和知识积累，可以把团队不再使用的内容清掉。`teamai recall maintenance` 会归档低置信度 learnings，并标出过时的 skills、rules 和 docs，供清理或更新：
+
+```bash
+teamai recall maintenance --prune --dry-run      # 预览
+teamai recall maintenance --prune --archive      # 归档无用 learnings
+teamai recall maintenance --update-quality       # 为过时 skills / docs 生成更新草稿
+```
 
 洞察团队实际如何使用 AI 工具，也是把 session 中的摩擦转化为共享 Skill、Rule 和知识的起点：
 
@@ -291,13 +262,3 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 ## 贡献
 
 欢迎提交 PR！请先阅读 [CONTRIBUTING.md](.github/CONTRIBUTING.md)。
-
-## 贡献者
-
-感谢每一位为 TeamAI 贡献代码的伙伴！
-
-<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
-</a>
-
-由 [contrib.rocks](https://contrib.rocks) 生成。

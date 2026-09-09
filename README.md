@@ -13,6 +13,16 @@
 
 TeamAI manages your team's skills, rules, MCP, and knowledge across Claude Code, Codex, CodeBuddy, WorkBuddy, OpenCode, Cursor, and other AI agents.
 
+## Contributors
+
+Thanks to everyone who has contributed to TeamAI!
+
+<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
+</a>
+
+Made with [contrib.rocks](https://contrib.rocks).
+
 ## Quick Start
 
 ### Install
@@ -24,8 +34,6 @@ npm install -g teamai-cli
 ### Team admin / solo user
 
 Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
-
-For self-hosted GitLab, set `GITLAB_URL` to your instance URL and `GITLAB_TOKEN` to a token with `api` scope before initializing. If `init` recognizes an unconfigured GitLab instance, it stops with setup instructions. Existing repos with `provider: git` also need `provider: gitlab` in the team repo's `teamai.yaml` to create MRs. See [GitLab setup](docs/providers.md#gitlab-provider含自托管).
 
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
@@ -48,13 +56,13 @@ Once initialized, every AI session automatically pulls the latest skills / rules
 
 ## Product architecture
 
-**Team Execution × Team Context × Team Improvement**:
+**Team Execution × Team Context (beta) × Team Improvement (beta)**:
 
 | Layer | Job | In this CLI today |
 |-------|-----|-------------------|
 | **Team Execution** | Make every agent work the team's way | `init` / `pull` / `push`, skills, rules, agents, hooks, MCP, env |
-| **Team Context** | Make every agent understand the team | recall, learnings, codebase graph, teamwiki... |
-| **Team Improvement** | Make every execution improve the team | friction-based share-learnings, sessions, digest, dashboard... |
+| **Team Context** (beta) | Make every agent understand the team | recall, learnings, codebase graph, teamwiki... |
+| **Team Improvement** (beta) | Make every execution improve the team | friction-based share-learnings, sessions, digest, dashboard... |
 
 ## Overview
 
@@ -63,8 +71,8 @@ Once initialized, every AI session automatically pulls the latest skills / rules
     <tr>
       <th rowspan="2">Agent</th>
       <th colspan="7">Team Execution</th>
-      <th colspan="3">Team Context</th>
-      <th colspan="3">Team Improvement</th>
+      <th colspan="3">Team Context (beta)</th>
+      <th colspan="3">Team Improvement (beta)</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -112,74 +120,27 @@ teamai push → create branch + MR → reviewer approves + merges
               SessionStart hook → teamai pull → synced to local AI tools
 ```
 
-Members push changes via `teamai push`, which opens a Merge Request for review. Re-running `teamai push` on a resource that is still waiting in an unmerged PR updates that PR in place instead of opening a duplicate. Once merged, `teamai pull` (triggered automatically on session start via the SessionStart hook) syncs the latest resources locally. Skills sync to `~/.claude/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.codebuddy/skills/`, etc. For Codex, an existing skill under `~/.agents/skills/` is updated there instead of duplicated under `~/.codex/skills/`. In a **project-scope** install, SessionStart first creates that tool's project root (e.g. `<project>/.claude`) if it is missing, then pulls into it — a bare `teamai pull` still will not invent agent directories.
+### What Gets Shared
 
-### Team Hooks
+Each resource is delivered to every agent:
 
-Declare custom hooks in `hooks/hooks.yaml` and `teamai pull` delivers them to every AI tool:
+| Resource | In the team repo | Notes |
+|----------|------------------|-------|
+| **Skills** | `skills/<name>/SKILL.md` | |
+| **Rules** | `rules/*.md` | |
+| **Docs** | `docs/` | Foundational project docs; not all loaded by default (progressive disclosure) |
+| **Agents** | `agents/<name>.yaml` | |
+| **Culture** | `culture.md` | Team mission, values, and working principles — injected into each agent's CLAUDE.md / AGENTS.md so every session inherits them |
+| **CLAUDE.md** | `claudemd/*.md` | |
+| **Env** | `env/` | Shared team-level environment variables and switches; do not put secrets here |
+| **Hooks** | `hooks/hooks.yaml` | |
+| **MCP** | `mcp/mcp.yaml` | |
+| **Packages** | `teamai.yaml` | Currently npm packages and Claude Code plugins only |
+| **Models** | — | Not implemented for every provider yet |
 
-```yaml
-hooks:
-  - id: block-secret
-    description: Scan for secrets before commit
-    event: PreToolUse
-    matcher: Bash
-    command: 'bash -lc "~/.teamai/team-scripts/scan-secret.sh" || true'
-    tools: [claude, cursor]
-```
+For file formats and full workflows, see the [Usage Guide](docs/usage-guide.md).
 
-```bash
-teamai hooks list      # list effective hooks
-teamai hooks inject    # re-reconcile into every installed tool
-teamai hooks remove    # remove all teamai-managed hooks
-```
-
-### Team MCP Servers
-
-Declare once in `mcp/mcp.yaml`; `teamai pull` writes each tool's native config. Use `${VAR}` for secrets.
-
-```yaml
-servers:
-  - name: gpu-analysis
-    transport: http            # stdio | http | sse
-    url: https://example.com/api/mcp
-    headers:
-      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}
-```
-
-```bash
-teamai mcp list | inject | remove
-```
-
-### Skill Subscription Sources
-
-Subscribe to additional skill repos — other teams' public repos, or shared/public repos within your own org:
-
-```bash
-teamai source add https://github.com/other-team/teamai-public.git --name other-team
-teamai source list
-teamai source browse other-team    # browse available skills
-teamai source remove other-team
-```
-
-The add/remove change takes effect locally right away, and subscribed skills sync on the next
-`teamai pull`. Run `teamai push` when you want to share the `teamai.yaml` change with teammates.
-
-### Team Packages
-
-Share and restore the team's npm packages and Claude Code plugins:
-
-```bash
-teamai packages install typescript
-teamai packages install typescript@5.9.2 --npm
-teamai packages install code-review@claude-plugins-official
-teamai push       # Share the declarations
-teamai packages    # Install everything declared by the team
-```
-
-See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
-
-## Team Context
+## Team Context (beta)
 
 > Every agent understands how the team works.
 
@@ -242,9 +203,19 @@ Edges come from two tracks that run together, with AST results taking precedence
 
 The WASM parser is a pure-JavaScript dependency — no native toolchain is required. If it fails to load for any reason, extraction falls back to the heuristic track and records an `AST_UNAVAILABLE` gap. Set `TEAMAI_SKIP_AST=1` to force heuristic-only extraction.
 
-## Team Improvement
+## Team Improvement (beta)
 
 > Every execution makes the entire team smarter.
+
+### Maintenance
+
+As skills and knowledge accumulate, prune what the team no longer uses. `teamai recall maintenance` archives low-confidence learnings and flags stale skills, rules, and docs for cleanup or updates:
+
+```bash
+teamai recall maintenance --prune --dry-run      # preview
+teamai recall maintenance --prune --archive      # archive unused learnings
+teamai recall maintenance --update-quality       # draft updates for stale skills / docs
+```
 
 Insight into how the team actually uses its AI tools, and a starting point for turning session friction into shared skills, rules, and knowledge:
 
@@ -291,13 +262,3 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 ## Contributing
 
 PRs are welcome! Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) first.
-
-## Contributors
-
-Thanks to everyone who has contributed to TeamAI!
-
-<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
-</a>
-
-Made with [contrib.rocks](https://contrib.rocks).
