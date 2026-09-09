@@ -122,7 +122,7 @@ teamai push → 创建分支 + MR → reviewer 审批合并
 | **Agents** | `agents/<name>.yaml` | |
 | **Culture** | `culture.md` | 注入到各 Agent 的 CLAUDE.md / AGENTS.md 中的一段文字 |
 | **CLAUDE.md** | `claudemd/*.md` | |
-| **Env** | `env/` | |
+| **Env** | `env/` | 通用环境变量、团队级开关；不建议直接放密钥 |
 | **Hooks** | `hooks/hooks.yaml` | |
 | **MCP Server** | `mcp/mcp.yaml` | |
 | **Packages** | `teamai.yaml` | 目前只支持 npm 包和 Claude 插件 |

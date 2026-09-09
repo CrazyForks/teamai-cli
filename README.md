@@ -122,7 +122,7 @@ Each resource is delivered to every agent:
 | **Agents** | `agents/<name>.yaml` | |
 | **Culture** | `culture.md` | Injected into each agent's CLAUDE.md / AGENTS.md |
 | **CLAUDE.md** | `claudemd/*.md` | |
-| **Env** | `env/` | |
+| **Env** | `env/` | Shared team-level environment variables and switches; do not put secrets here |
 | **Hooks** | `hooks/hooks.yaml` | |
 | **MCP servers** | `mcp/mcp.yaml` | |
 | **Packages** | `teamai.yaml` | Currently npm packages and Claude Code plugins only |
