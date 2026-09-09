@@ -1062,8 +1062,11 @@ teamai import --from-repo https://github.com/org/repo --skip-enrich
 # 从本地仓库提取代码事实与图谱（写入 <repo>/teamwiki/）
 teamai codebase --extract /path/to/repo --project my-service
 
-# 图谱健康检查
-teamai codebase --lint
+# 增量刷新：复用首次提取的仓库路径和项目名
+teamai codebase --extract /path/to/repo --project my-service --incremental
+
+# 检查本地提取的图谱；--output 指向仓库根目录，而非 teamwiki/
+teamai codebase --lint --output /path/to/repo
 ```
 
 ### Dashboard

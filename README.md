@@ -227,7 +227,7 @@ Matched: conflict | Missing: port
 teamai import --from-repo https://github.com/org/repo
 teamai import --from-org myorg              # batch import all repos
 teamai codebase --extract /path/to/repo     # local extract into teamwiki/
-teamai codebase --lint                      # health check
+teamai codebase --lint --output /path/to/repo # check the locally extracted graph
 ```
 
 The graph stores components, interfaces, configs, and cross-repo import edges. `teamai recall` uses it for graph-boosted re-ranking.

@@ -1074,8 +1074,11 @@ Dependency edges are extracted by two parallel tracks: a WASM tree-sitter **AST 
 # Extract code facts and the graph from a local repo (writes <repo>/teamwiki/)
 teamai codebase --extract /path/to/repo --project my-service
 
-# Graph health check
-teamai codebase --lint
+# Incremental refresh: reuse the original repository path and project slug
+teamai codebase --extract /path/to/repo --project my-service --incremental
+
+# Check the local graph; --output is the repository root, not teamwiki/
+teamai codebase --lint --output /path/to/repo
 ```
 
 ### Dashboard
