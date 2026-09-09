@@ -227,7 +227,7 @@ Matched: conflict | Missing: port
 teamai import --from-repo https://github.com/org/repo
 teamai import --from-org myorg              # 批量导入所有仓库
 teamai codebase --extract /path/to/repo     # 本地提取到 teamwiki/
-teamai codebase --lint                      # 健康检查
+teamai codebase --lint --output /path/to/repo # 检查本地提取的图谱
 ```
 
 图谱存储组件、接口、配置和跨仓库依赖边。`teamai recall` 利用图谱进行增强排名。

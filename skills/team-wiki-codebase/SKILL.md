@@ -892,8 +892,8 @@ _review/                                ← 过程文件（不入知识库）
 | K3 后编译进 wiki | Skip. TeamAI does not ship a separate team-wiki CLI. Continue with this skill using `teamai` and the files under this skill directory. No extra plugin is required. |
 | 产品文档入图 | Skip. Same English note as above. |
 | 产品↔代码桥接 | Skip. Same English note as above. |
-| 一键刷新 | Use `teamai codebase --extract --incremental` when updating a repo already extracted. Do not look for another CLI. |
-| 质量评估 | Use `scripts/validate_kb.py` and `teamai codebase --lint` on `teamwiki/`. Skip any extra evaluate binary. |
+| 一键刷新 | Use `teamai codebase --extract <repo> --project <slug> --incremental`, reusing the Phase 0 repository path and project slug even when running from another directory. Do not look for another CLI. |
+| 质量评估 | Use `scripts/validate_kb.py` and `teamai codebase --lint --output <repo>` to check `<repo>/teamwiki/` (`--output` takes the repository root, not the `teamwiki/` directory). Skip any extra evaluate binary. |
 
 **路径约定**（本 skill 安装后）：
 

@@ -77,4 +77,47 @@ describe('teamai codebase extract CLI (issue #360 slice 1)', () => {
       fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
+
+  it('refreshes and lints the same local graph using the skill commands from another directory', async () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-local-workflow-'));
+    const caller = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-workflow-caller-'));
+    try {
+      const skill = fs.readFileSync(path.join(ROOT, 'skills/team-wiki-codebase/SKILL.md'), 'utf8');
+      const commands = [...skill.matchAll(/`(teamai codebase [^`]+)`/g)].map(match => match[1]);
+      const refresh = commands.find(command => command.includes('--incremental'));
+      const lint = commands.find(command => command.includes('--lint'));
+      expect(refresh).toBeDefined();
+      expect(lint).toBeDefined();
+      const args = (command: string) => command.split(/\s+/).slice(1)
+        .map(arg => arg === '<repo>' ? fixture : arg === '<slug>' ? 'custom-service' : arg);
+      const source = path.join(fixture, 'greet.ts');
+      fs.writeFileSync(source, 'export function originalGreeting() { return "hello"; }\n');
+      const initial = await runCLI(
+        ['codebase', '--extract', fixture, '--project', 'custom-service', '--json'], caller,
+      );
+      expect(initial.code, initial.output).toBe(0);
+      fs.writeFileSync(source, 'export function updatedGreeting() { return "updated"; }\n');
+
+      const refreshed = await runCLI([...args(refresh!), '--json'], caller);
+      expect(refreshed.code, refreshed.output).toBe(0);
+      expect(JSON.parse(refreshed.stdout)).toMatchObject({ project: 'custom-service', incremental: true });
+      const wiki = path.join(fixture, 'teamwiki');
+      expect(fs.readdirSync(path.join(wiki, 'evidence', 'code'))).toEqual(['custom-service']);
+      const evidence = fs.readFileSync(path.join(wiki, 'evidence', 'code', 'custom-service', 'component.md'), 'utf8');
+      expect(evidence).toContain('updatedGreeting');
+      expect(evidence).not.toContain('originalGreeting');
+      expect(fs.readFileSync(path.join(wiki, 'router.md'), 'utf8')).toContain('evidence/code/custom-service/index');
+      expect(fs.existsSync(path.join(caller, 'teamwiki'))).toBe(false);
+
+      const checked = await runCLI([...args(lint!), '--json'], caller);
+      expect(checked.code, checked.output).toBe(0);
+      const report = JSON.parse(checked.stdout);
+      const graph = JSON.parse(fs.readFileSync(path.join(wiki, '.indices', 'graph-index.json'), 'utf8'));
+      expect(report.graphHealth.nodeCount).toBe(graph.nodes.length);
+      expect(report.graphHealth.nodeCount).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+      fs.rmSync(caller, { recursive: true, force: true });
+    }
+  });
 });
