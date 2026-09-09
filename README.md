@@ -197,6 +197,16 @@ The WASM parser is a pure-JavaScript dependency — no native toolchain is requi
 
 > Every execution makes the entire team smarter.
 
+### Maintenance
+
+As skills and knowledge accumulate, prune what the team no longer uses. `teamai recall maintenance` archives low-confidence learnings and flags stale skills, rules, and docs for cleanup or updates:
+
+```bash
+teamai recall maintenance --prune --dry-run      # preview
+teamai recall maintenance --prune --archive      # archive unused learnings
+teamai recall maintenance --update-quality       # draft updates for stale skills / docs
+```
+
 Insight into how the team actually uses its AI tools, and a starting point for turning session friction into shared skills, rules, and knowledge:
 
 | Capability | Command | What it shows |
@@ -205,7 +215,6 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 | **Sessions** | `teamai session save` | Privacy-scrubbed per-session summaries (tool sequence, prompt turns, interventions) that feed the digest's Session Highlights. |
 | **Dashboard** | `teamai dashboard` | Web dashboard showing team members' live coding-session status, intervention count, and token usage. |
 | **KB Health** | `teamai dashboard` → KB Health | Built-in dashboard page reporting knowledge-base usage & health — coverage by type, top recalled entries, silent entries, recall trend, author contributions, and a maintenance console. |
-| **Maintenance** | `teamai recall maintenance` | Prune low-confidence learnings and identify stale skills, rules, and docs for cleanup or updates. |
 
 ## Commands
 

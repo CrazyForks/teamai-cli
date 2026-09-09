@@ -197,6 +197,16 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 
 > Every execution makes the entire team smarter.
 
+### Maintenance
+
+随着 skills 和知识积累，可以把团队不再使用的内容清掉。`teamai recall maintenance` 会归档低置信度 learnings，并标出过时的 skills、rules 和 docs，供清理或更新：
+
+```bash
+teamai recall maintenance --prune --dry-run      # 预览
+teamai recall maintenance --prune --archive      # 归档无用 learnings
+teamai recall maintenance --update-quality       # 为过时 skills / docs 生成更新草稿
+```
+
 洞察团队实际如何使用 AI 工具，也是把 session 中的摩擦转化为共享 Skill、Rule 和知识的起点：
 
 | 能力 | 命令 | 呈现内容 |
@@ -205,7 +215,6 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | **会话（Sessions）** | `teamai session save` | 脱敏的单会话摘要（工具序列、对话轮次、干预次数），喂给周报的 Session Highlights。 |
 | **看板（Dashboard）** | `teamai dashboard` | Web 看板，实时展示成员的编码会话状态、干预次数和 token 用量。 |
 | **知识库健康（KB Health）** | `teamai dashboard` → KB Health | 内置于看板的报告页面，展示知识库使用情况与健康状态——各类型覆盖率、高频召回条目、沉默条目、召回趋势、作者贡献及维护控制台。 |
-| **维护（Maintenance）** | `teamai recall maintenance` | 清理低置信度 learnings，并识别待清理或更新的过时 skills、rules 和 docs。 |
 
 ## 命令一览
 
