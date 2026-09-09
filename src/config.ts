@@ -353,7 +353,24 @@ async function readConfigFrom(
     // projectRoot can be wrong (e.g. a `.teamai/` copied from the main checkout
     // into a worktree names the main checkout); overriding keeps landing tied to
     // the real workspace (also backfills when absent, #85).
-    return { ...config, projectRoot, dataHome: dataHomeDir };
+    const resolved: LocalConfig = { ...config, projectRoot, dataHome: dataHomeDir };
+    // Self mode (P2): the config now lives in the SHARED partition, but its
+    // persisted repo.localPath / businessRepoRoot name the checkout that first
+    // migrated (typically main). Every worktree reads that one config, so without
+    // rebinding, a feature worktree would read main's knowledge
+    // (getKnowledgeDir === repo.localPath) and write it into the feature tree.
+    // Self's invariant is localPath === <workspaceRoot>/.teamai and
+    // businessRepoRoot === <workspaceRoot>, so re-anchor both to THIS workspace.
+    // (Non-self localPath is the team-repo clone path — shared across worktrees on
+    // purpose — so it is left untouched.)
+    if (config.repo.kind === 'self') {
+      resolved.repo = {
+        ...config.repo,
+        localPath: path.join(projectRoot, '.teamai'),
+        businessRepoRoot: projectRoot,
+      };
+    }
+    return resolved;
   } catch {
     return null;
   }
