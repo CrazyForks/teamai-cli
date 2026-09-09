@@ -873,7 +873,7 @@ program
 program
   .command('codebase')
   .description('Inspect and maintain team-codebase outputs')
-  .addOption(new Option('--extract [path]', 'Extract code knowledge and build graph from source').hideHelp())
+  .option('--extract [path]', 'Extract code knowledge and build graph from source')
   .addOption(new Option('--incremental', 'Only re-extract changed files (requires prior manifest)').hideHelp())
   .addOption(new Option('--project <name>', 'Project slug for extract output (default: directory name)').hideHelp())
   .addOption(new Option('--max-files <n>', 'Max source files to scan (default: 200)').hideHelp())
