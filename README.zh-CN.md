@@ -205,6 +205,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | **会话（Sessions）** | `teamai session save` | 脱敏的单会话摘要（工具序列、对话轮次、干预次数），喂给周报的 Session Highlights。 |
 | **看板（Dashboard）** | `teamai dashboard` | Web 看板，实时展示成员的编码会话状态、干预次数和 token 用量。 |
 | **知识库健康（KB Health）** | `teamai dashboard` → KB Health | 内置于看板的报告页面，展示知识库使用情况与健康状态——各类型覆盖率、高频召回条目、沉默条目、召回趋势、作者贡献及维护控制台。 |
+| **维护（Maintenance）** | `teamai recall maintenance` | 清理低置信度 learnings，并识别待清理或更新的过时 skills、rules 和 docs。 |
 
 ## 命令一览
 

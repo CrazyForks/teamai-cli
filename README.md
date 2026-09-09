@@ -205,6 +205,7 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 | **Sessions** | `teamai session save` | Privacy-scrubbed per-session summaries (tool sequence, prompt turns, interventions) that feed the digest's Session Highlights. |
 | **Dashboard** | `teamai dashboard` | Web dashboard showing team members' live coding-session status, intervention count, and token usage. |
 | **KB Health** | `teamai dashboard` → KB Health | Built-in dashboard page reporting knowledge-base usage & health — coverage by type, top recalled entries, silent entries, recall trend, author contributions, and a maintenance console. |
+| **Maintenance** | `teamai recall maintenance` | Prune low-confidence learnings and identify stale skills, rules, and docs for cleanup or updates. |
 
 ## Commands
 
