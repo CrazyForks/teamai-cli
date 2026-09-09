@@ -6,8 +6,9 @@ import {
   mergeGraphs,
   createGraphIndex,
   toPageSlug,
+  validateGraph,
 } from './core/graph-index.schema.js';
-import type { GraphIndex, GraphNode, GraphEdge } from './core/graph-index.schema.js';
+import type { GraphIndex, GraphNode, GraphEdge, GraphEdgeSource } from './core/graph-index.schema.js';
 import type { WikiConfidence } from './core/wiki-protocol.js';
 import { buildConfidence } from './reconciler-v2-types.js';
 import type {
@@ -71,10 +72,60 @@ interface PageRecord {
   updated?: string;
 }
 
+const BRIDGE_EDGE_SOURCE = 'bridge-reconcile' as const;
+const PRODUCT_PAGE_TYPE = 'source' as const;
+const CODE_PAGE_TYPE = 'component' as const;
+const PAGE_CONFIDENCE = 'EXTRACTED' as const;
+const PRODUCT_PAGE_DOMAIN = 'product-knowledge';
+const CODE_PAGE_DOMAIN = 'code-knowledge';
+const REPAIRABLE_CODE_EDGE_SOURCES = new Set<GraphEdgeSource>(['code-ast', 'code-heuristic']);
+const MISSING_PATH_ERROR_CODE = 'ENOENT';
+const REPAIRABLE_VALIDATION_ISSUE_CODE = 'edge.missing_node';
+
+async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
+  const graphPath = path.join(wikiRoot, '.indices', 'graph-index.json');
+  const graph = await loadGraphIndex(wikiRoot);
+  if (!graph) {
+    if (!(await exists(graphPath))) return createGraphIndex();
+    throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
+  }
+  if (validateGraph(graph).issues.some(issue => issue.code !== REPAIRABLE_VALIDATION_ISSUE_CODE)) {
+    throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
+  }
+  const nodeSlugs = new Set(graph.nodes.map(node => node.slug));
+  const endpointNodes: GraphNode[] = [];
+  for (const edge of graph.edges) {
+    if (!edge.source || !REPAIRABLE_CODE_EDGE_SOURCES.has(edge.source)) continue;
+    for (const slug of [edge.from, edge.to]) {
+      if (nodeSlugs.has(slug)) continue;
+      nodeSlugs.add(slug);
+      endpointNodes.push({
+        slug,
+        type: CODE_PAGE_TYPE,
+        confidence: PAGE_CONFIDENCE,
+        title: path.basename(slug),
+        domain: CODE_PAGE_DOMAIN,
+        source: edge.source,
+      });
+    }
+  }
+  const repaired = mergeGraphs(graph, createGraphIndex(endpointNodes));
+  if (!validateGraph(repaired).valid) {
+    throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
+  }
+  return repaired;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function exists(p: string): Promise<boolean> {
-  return stat(p).then(() => true).catch(() => false);
+  try {
+    await stat(p);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === MISSING_PATH_ERROR_CODE) return false;
+    throw error;
+  }
 }
 
 async function readPages(dirPath: string): Promise<PageRecord[]> {
@@ -86,7 +137,7 @@ async function readPages(dirPath: string): Promise<PageRecord[]> {
     if (entry.isDirectory()) {
       pages.push(...await readPages(full));
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      const text = await readFile(full, 'utf8').catch(() => '');
+      const text = await readFile(full, 'utf8');
       const headingMatch = text.match(/^#\s+(.+)/m);
       const title = headingMatch ? headingMatch[1].trim() : entry.name.replace(/\.md$/, '');
       const updatedMatch = text.match(/updated[:\s]+(\d{4}-\d{2}-\d{2})/i);
@@ -357,23 +408,57 @@ export async function reconcileKnowledge(options: ReconcileOptions): Promise<Rec
     }
   }
 
-  // Write merged graph edges unless dryRun
-  if (!dryRun && graphEdges.length > 0) {
-    const existing = await loadGraphIndex(wikiRoot) ?? createGraphIndex();
+  const existing = await loadReconciliationBase(wikiRoot);
+
+  // Replace the reconciliation overlay so removed matches cannot leave stale state.
+  if (!dryRun) {
+    const baseEdges = existing.edges.filter(edge => edge.source !== BRIDGE_EDGE_SOURCE);
+    const preservedNodeSlugs = new Set(baseEdges.flatMap(edge => [edge.from, edge.to]));
+    const baseNodes = existing.nodes.filter(
+      node => node.source !== BRIDGE_EDGE_SOURCE || preservedNodeSlugs.has(node.slug),
+    );
+    const existingNodeSlugs = new Set(
+      baseNodes.filter(node => node.source !== BRIDGE_EDGE_SOURCE).map(node => node.slug),
+    );
+    const pageNodes: GraphNode[] = [
+      ...productPages.map(page => ({
+        slug: toPageSlug(path.relative(wikiRoot, page.path)),
+        type: PRODUCT_PAGE_TYPE,
+        confidence: PAGE_CONFIDENCE,
+        title: page.title,
+        domain: PRODUCT_PAGE_DOMAIN,
+        source: BRIDGE_EDGE_SOURCE,
+      })),
+      ...codePages.map(page => ({
+        slug: toPageSlug(path.relative(wikiRoot, page.path)),
+        type: CODE_PAGE_TYPE,
+        confidence: PAGE_CONFIDENCE,
+        title: page.title,
+        domain: CODE_PAGE_DOMAIN,
+        source: BRIDGE_EDGE_SOURCE,
+      })),
+    ].filter(node => !existingNodeSlugs.has(node.slug));
     const newEdges: GraphEdge[] = graphEdges.map(e => ({
       from: e.from,
       to: e.to,
       relation: e.relation,
       weight: e.confidenceScore,
-      source: 'bridge-reconcile' as const,
+      source: BRIDGE_EDGE_SOURCE,
     }));
-    const overlay = createGraphIndex([], newEdges);
-    const merged = mergeGraphs(existing, overlay);
+    const base = createGraphIndex(
+      baseNodes,
+      baseEdges,
+    );
+    const refreshedNodes = mergeGraphs(base, createGraphIndex(pageNodes)).nodes;
+    const merged = mergeGraphs(
+      createGraphIndex(refreshedNodes, newEdges),
+      createGraphIndex([], baseEdges),
+    );
     await saveGraphIndex(wikiRoot, merged);
   }
 
   const durationMs = Date.now() - startMs;
-  const mappingCount = new Set(graphEdges.map(e => `${e.from}||${e.to}`)).size;
+  const mappingCount = new Set(graphEdges.map(e => JSON.stringify([e.from, e.to]))).size;
   const allScores = graphEdges.map(e => e.confidenceScore ?? 0);
   const averageConfidence = allScores.length > 0
     ? allScores.reduce((a, b) => a + b, 0) / allScores.length

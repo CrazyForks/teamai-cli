@@ -191,6 +191,7 @@ Matched: conflict | Missing: port
 teamai import --from-repo https://github.com/org/repo
 teamai import --from-org myorg              # batch import all repos
 teamai codebase --extract /path/to/repo     # local extract into teamwiki/
+teamai codebase --reconcile --output /path/to/repo # map product docs to code pages
 teamai codebase --lint --output /path/to/repo # check the locally extracted graph
 ```
 
@@ -243,6 +244,7 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 | `teamai recall maintenance` | Maintain knowledge base health: prune low-confidence learnings, writeback confidence scores, flag stale entries |
 | `teamai import` | Import knowledge (`--dir`, `--from-repo`, `--from-org`, `--from-repo-list`, `--from-mr`) |
 | `teamai codebase --extract [path]` | Extract code facts and build the local graph under `teamwiki/` |
+| `teamai codebase --reconcile` | Reconcile product documentation with extracted code knowledge |
 | `teamai codebase --lint` | Knowledge graph health check |
 | `teamai ci extract-mr --url <url>` | CI: extract knowledge from MR, post comments, write after merge |
 | `teamai members` | List team members |

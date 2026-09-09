@@ -20,6 +20,7 @@ export interface CodebaseCmdOptions extends GlobalOptions {
     project?: string;
     maxFiles?: string;
     status?: boolean;
+    reconcile?: boolean;
 }
 
 // ─── Command handler ─────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ export async function codebaseCmd(opts: CodebaseCmdOptions): Promise<void> {
         return;
     }
 
-    if (!opts.lint) {
+    if (!opts.lint && !opts.reconcile) {
         console.log('teamai codebase — team codebase knowledge management');
         console.log('');
         console.log('Usage:');
@@ -64,6 +65,7 @@ export async function codebaseCmd(opts: CodebaseCmdOptions): Promise<void> {
         console.log('  teamai codebase --lint                  Run teamwiki consistency lint');
         console.log('  teamai codebase --lint --json           Output JSON report (for CI)');
         console.log('  teamai codebase --lint --severity high  Only report high-severity issues');
+        console.log('  teamai codebase --reconcile             Reconcile product and code knowledge');
         console.log('  teamai codebase --status                Show knowledge-base git baseline');
         return;
     }
@@ -85,6 +87,18 @@ export async function codebaseCmd(opts: CodebaseCmdOptions): Promise<void> {
 
     if (!(await pathExists(teamwikiDir))) {
         console.log('No teamwiki found. Run `teamai import` first.');
+        if (opts.reconcile) process.exitCode = 1;
+        return;
+    }
+
+    if (opts.reconcile) {
+        const { reconcileKnowledge } = await import('./wiki-engine/adapters/index.js');
+        const result = await reconcileKnowledge({ wikiRoot: teamwikiDir, dryRun: opts.dryRun });
+        if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+        } else {
+            console.log(`Reconciliation complete: mappings=${result.mappings}, gaps=${result.gaps.length}, conflicts=${result.conflicts.length}`);
+        }
         return;
     }
 
