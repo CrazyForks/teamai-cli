@@ -192,6 +192,17 @@ export function getDispatchCommand(event: string, tool: string, matcher?: string
 }
 
 /**
+ * Raw dispatch command without a shell wrapper. Used by ZCode, whose hook
+ * entries are `process`-typed (an executable plus an argv vector): the writer
+ * puts `bash -lc <raw>` into `args` itself, so the wrapper must not be baked
+ * into the command string.
+ */
+export function getRawDispatchCommand(event: string, tool: string, matcher?: string): string {
+  const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
+  return `teamai hook-dispatch ${event} --tool ${tool}${matcherArg}`;
+}
+
+/**
  * Build a hook command that prepends `$HOME/.teamai/bin` to PATH so the
  * wrapper script is found even without the user's login shell PATH.
  * Used by GUI tools (WorkBuddy, CodeBuddy) that spawn hook subprocesses
@@ -241,8 +252,10 @@ const BUILTIN_HOOK_SPECS: BuiltinHookSpec[] = [
 const WRAPPER_TOOLS = SHELL_DEPENDENT_TOOLS;
 
 export function builtinHookDefs(tool: string): HookDef[] {
-  const withTimeout = tool === 'cursor' || tool === 'workbuddy' || tool === 'codebuddy';
-  const buildCommand = WRAPPER_TOOLS.has(tool) ? getWrapperDispatchCommand : getDispatchCommand;
+  const withTimeout = tool === 'cursor' || tool === 'workbuddy' || tool === 'codebuddy' || tool === 'zcode';
+  const buildCommand = tool === 'zcode'
+    ? getRawDispatchCommand
+    : WRAPPER_TOOLS.has(tool) ? getWrapperDispatchCommand : getDispatchCommand;
   return BUILTIN_HOOK_SPECS.map((spec) => ({
     source: 'builtin' as const,
     key: spec.key,

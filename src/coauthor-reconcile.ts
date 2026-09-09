@@ -93,6 +93,9 @@ async function resolveTargets(
   for (const [tool, paths] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
     if (disabled.has(tool)) continue;
     if (whitelist && !whitelist.includes(tool)) continue;
+    // ZCode exposes no documented attribution setting — writing one into its
+    // shared config.json would be an unknown key the tool never reads.
+    if (tool === 'zcode') continue;
     const family = familyOf(tool);
 
     // Installation probe: the tool's root dir (parent of its resource dir), same
