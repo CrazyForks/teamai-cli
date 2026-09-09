@@ -13,6 +13,16 @@
 
 TeamAI 统一管理团队的 Skills、Rules、MCP 和知识，驾驭 Claude Code、Codex、CodeBuddy、WorkBuddy、OpenCode、Cursor 等 AI Agents。
 
+## 贡献者
+
+感谢每一位为 TeamAI 贡献代码的伙伴！
+
+<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
+</a>
+
+由 [contrib.rocks](https://contrib.rocks) 生成。
+
 ## 快速开始
 
 ### 安装
@@ -252,13 +262,3 @@ teamai recall maintenance --update-quality       # 为过时 skills / docs 生�
 ## 贡献
 
 欢迎提交 PR！请先阅读 [CONTRIBUTING.md](.github/CONTRIBUTING.md)。
-
-## 贡献者
-
-感谢每一位为 TeamAI 贡献代码的伙伴！
-
-<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
-</a>
-
-由 [contrib.rocks](https://contrib.rocks) 生成。

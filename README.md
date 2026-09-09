@@ -13,6 +13,16 @@
 
 TeamAI manages your team's skills, rules, MCP, and knowledge across Claude Code, Codex, CodeBuddy, WorkBuddy, OpenCode, Cursor, and other AI agents.
 
+## Contributors
+
+Thanks to everyone who has contributed to TeamAI!
+
+<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
+</a>
+
+Made with [contrib.rocks](https://contrib.rocks).
+
 ## Quick Start
 
 ### Install
@@ -252,13 +262,3 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 ## Contributing
 
 PRs are welcome! Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) first.
-
-## Contributors
-
-Thanks to everyone who has contributed to TeamAI!
-
-<a href="https://github.com/Tencent/teamai-cli/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Tencent/teamai-cli" alt="Contributors" />
-</a>
-
-Made with [contrib.rocks](https://contrib.rocks).
