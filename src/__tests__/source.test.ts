@@ -27,7 +27,7 @@ vi.mock('../utils/git.js', () => ({
   pullRepo: vi.fn().mockResolvedValue('already up to date'),
 }));
 
-import { deriveSourceName, getAllSourceSkillNames, pullSources } from '../source.js';
+import { deriveSourceName, getAllSourceSkillNames, pullSources, sourceSyncWarnings } from '../source.js';
 import type { TeamaiConfig, LocalConfig, SourceInstallManifest } from '../types.js';
 
 describe('source', () => {
@@ -451,5 +451,45 @@ describe('TeamaiConfig sources schema', () => {
       publicSkills: ['skill-a', 'skill-b'],
     });
     expect(config.publicSkills).toEqual(['skill-a', 'skill-b']);
+  });
+});
+
+describe('sourceSyncWarnings', () => {
+  async function makeConfig(overrides: Record<string, unknown>): Promise<TeamaiConfig> {
+    const { TeamaiConfigSchema } = await import('../types.js');
+    return TeamaiConfigSchema.parse({
+      team: 'test',
+      repo: 'https://git.woa.com/test/repo.git',
+      ...overrides,
+    });
+  }
+
+  it('warns that a source with no teamai.yaml will sync 0 skills', () => {
+    const lines = sourceSyncWarnings('acme', null);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('has no teamai.yaml');
+    expect(lines[0]).toContain('"acme"');
+    expect(lines[1]).toContain('sync 0 skills');
+  });
+
+  it('warns that a source with an empty publicSkills list will sync 0 skills', async () => {
+    const config = await makeConfig({ publicSkills: [] });
+    const lines = sourceSyncWarnings('acme', config);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('declares no publicSkills');
+    expect(lines[1]).toContain('sync 0 skills');
+  });
+
+  it('warns when publicSkills is absent (undefined) just like an empty list', async () => {
+    const config = await makeConfig({});
+    expect(config.publicSkills).toBeUndefined();
+    const lines = sourceSyncWarnings('acme', config);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('declares no publicSkills');
+  });
+
+  it('is silent when the source declares at least one public skill', async () => {
+    const config = await makeConfig({ publicSkills: ['cool-skill'] });
+    expect(sourceSyncWarnings('acme', config)).toEqual([]);
   });
 });
