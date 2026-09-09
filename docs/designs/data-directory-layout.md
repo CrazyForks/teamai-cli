@@ -201,6 +201,6 @@ uninitialized; `.teamai.bak/` is the manual rollback. Flag prominently in releas
 
 ### Explicitly out of scope
 
-`teamai migrate` / `gc` / `--revert` commands; cross-project shared team-repo clone;
-Codex `.agents/skills` landing (separate issue). Downgrade to an older teamai after
+`teamai migrate` / `gc` / `--revert` commands; cross-project shared team-repo clone.
+Downgrade to an older teamai after
 P1 migration is not supported (`.teamai.bak/` is the manual rollback path).

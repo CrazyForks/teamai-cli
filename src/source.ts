@@ -18,9 +18,10 @@ import {
 } from './utils/fs.js';
 import { getHandler } from './resources/index.js';
 import { ResourceHandler } from './resources/base.js';
+import { resolveSkillDestination } from './resources/skills.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import { getUserHome } from './utils/home.js';
-import { assertSafeResourceName } from './utils/path-safety.js';
+import { assertSafeResourceName, assertWithinRoot } from './utils/path-safety.js';
 import type {
   TeamaiConfig,
   LocalConfig,
@@ -450,6 +451,7 @@ async function pullSingleSource(
 
   // Deploy skills to tool paths
   const deployed: string[] = [];
+  const installedPaths: Record<string, string[]> = { ...oldManifest?.installedPaths };
   let newCount = 0;
   let updatedCount = 0;
 
@@ -468,12 +470,15 @@ async function pullSingleSource(
     }
 
     // Deploy to each tool's skills directory
-    for (const [_tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+    for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!toolPath.skills) continue;
       if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) continue;
 
-      const targetDir = path.join(baseDir, toolPath.skills, skill.name);
+      const targetDir = await resolveSkillDestination(tool, toolPath.skills, baseDir, skill.name, skill.sourcePath);
       await copyDir(skill.sourcePath, targetDir);
+      const relativeTarget = path.relative(baseDir, targetDir);
+      const skillPaths = installedPaths[skill.name] ??= [];
+      if (!skillPaths.includes(relativeTarget)) skillPaths.push(relativeTarget);
     }
 
     if (oldInstalled.has(skill.name)) {
@@ -489,8 +494,9 @@ async function pullSingleSource(
     const deployedSet = new Set(deployed);
     for (const oldSkill of oldInstalled) {
       if (!deployedSet.has(oldSkill) && !localTeamSkills.has(oldSkill)) {
-        await removeSkillFromToolPaths(oldSkill, teamConfig, localConfig, baseDir);
+        await removeSkillFromToolPaths(oldSkill, teamConfig, localConfig, baseDir, oldManifest?.installedPaths?.[oldSkill]);
         log.debug(`[source:${source.name}] Removed "${oldSkill}" (no longer public)`);
+        delete installedPaths[oldSkill];
       }
     }
   }
@@ -500,6 +506,7 @@ async function pullSingleSource(
     await saveSourceManifest(source.name, {
       lastPull: new Date().toISOString(),
       installedSkills: deployed,
+      installedPaths,
     });
   }
 
@@ -600,8 +607,17 @@ async function getLocalTeamSkillNames(teamConfig: TeamaiConfig, localConfig: Loc
 /**
  * Remove a skill from all tool paths.
  */
-async function removeSkillFromToolPaths(skillName: string, teamConfig: TeamaiConfig, localConfig: LocalConfig, baseDir: string): Promise<void> {
-  for (const [_tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+async function removeSkillFromToolPaths(skillName: string, teamConfig: TeamaiConfig, localConfig: LocalConfig, baseDir: string, installedPaths?: string[]): Promise<void> {
+  if (installedPaths) {
+    for (const installedPath of installedPaths) {
+      const skillDir = path.resolve(baseDir, installedPath);
+      assertWithinRoot(baseDir, skillDir);
+      if (await pathExists(skillDir)) await remove(skillDir);
+    }
+    return;
+  }
+
+  for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
     if (!toolPath.skills) continue;
     const skillDir = path.join(baseDir, toolPath.skills, skillName);
     if (await pathExists(skillDir)) {
@@ -619,7 +635,7 @@ async function cleanupSourceSkills(sourceName: string, teamConfig: TeamaiConfig,
 
   const baseDir = resolveBaseDir(localConfig);
   for (const skillName of manifest.installedSkills) {
-    await removeSkillFromToolPaths(skillName, teamConfig, localConfig, baseDir);
+    await removeSkillFromToolPaths(skillName, teamConfig, localConfig, baseDir, manifest.installedPaths?.[skillName]);
   }
 }
 

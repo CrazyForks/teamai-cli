@@ -210,6 +210,42 @@ describe('source', () => {
       expect(manifest.installedSkills).toContain('cool-skill');
     });
 
+    it('deploys a source Codex skill to its existing shared location', async () => {
+      teamConfig.sources = [{ name: 'platform', repo: 'https://example.test/platform/repo.git' }];
+      teamConfig.toolPaths = { codex: { skills: '.codex/skills' } };
+      const sharedSkill = path.join(homeDir, '.agents', 'skills', 'cool-skill');
+      await fse.ensureDir(path.join(homeDir, '.codex'));
+      await fse.ensureDir(sharedSkill);
+
+      const YAML = (await import('yaml')).default;
+      await fse.writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), YAML.stringify(teamConfig));
+      const sourceRepoDir = path.join(sourcesDir, 'platform', 'repo');
+      await fse.ensureDir(path.join(sourceRepoDir, 'skills', 'cool-skill'));
+      await fse.writeFile(
+        path.join(sourceRepoDir, 'skills', 'cool-skill', 'SKILL.md'),
+        '---\nname: cool-skill\ndescription: Shared\n---\n',
+      );
+      await fse.writeFile(
+        path.join(sourceRepoDir, 'teamai.yaml'),
+        YAML.stringify({ team: 'platform', repo: 'https://example.test/platform/repo.git', publicSkills: ['cool-skill'] }),
+      );
+
+      await pullSources(localConfig, {});
+
+      expect(await fse.readFile(path.join(sharedSkill, 'SKILL.md'), 'utf8')).toContain('description: Shared');
+      expect(await fse.pathExists(path.join(homeDir, '.codex', 'skills', 'cool-skill'))).toBe(false);
+
+      await fse.ensureDir(path.join(sourceRepoDir, 'skills', 'next-skill'));
+      await fse.writeFile(path.join(sourceRepoDir, 'skills', 'next-skill', 'SKILL.md'), '# Next');
+      await fse.writeFile(
+        path.join(sourceRepoDir, 'teamai.yaml'),
+        YAML.stringify({ team: 'platform', repo: 'https://example.test/platform/repo.git', publicSkills: ['next-skill'] }),
+      );
+      await pullSources(localConfig, {});
+
+      expect(await fse.pathExists(sharedSkill)).toBe(false);
+    });
+
     it('should not deploy source skill that conflicts with local team skill', async () => {
       teamConfig.sources = [{ name: 'platform', repo: 'git@git.woa.com:platform/repo.git' }];
 
@@ -339,6 +375,48 @@ describe('source', () => {
         path.join(homeDir, '.claude', 'skills', 'cool-skill'),
       );
       expect(deployed).toBe(false);
+    });
+
+    it('removes a source skill from its recorded path when a shared Codex skill appears later', async () => {
+      teamConfig.sources = [{ name: 'platform', repo: 'git@git.woa.com:platform/repo.git' }];
+      teamConfig.toolPaths = { codex: { skills: '.codex/skills' } };
+      const YAML = (await import('yaml')).default;
+      await fse.writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), YAML.stringify(teamConfig));
+
+      const sourceDir = path.join(sourcesDir, 'platform');
+      await fse.ensureDir(sourceDir);
+      await fse.writeJson(path.join(sourceDir, 'installed.json'), {
+        lastPull: new Date(0).toISOString(),
+        installedSkills: ['old-skill'],
+        installedPaths: { 'old-skill': ['.codex/skills/old-skill'] },
+      } satisfies SourceInstallManifest);
+      await fse.ensureDir(path.join(homeDir, '.codex', 'skills', 'old-skill'));
+      await fse.writeFile(path.join(homeDir, '.codex', 'skills', 'old-skill', 'SKILL.md'), '# Source copy');
+      await fse.ensureDir(path.join(homeDir, '.agents', 'skills', 'old-skill'));
+      await fse.writeFile(path.join(homeDir, '.agents', 'skills', 'old-skill', 'SKILL.md'), '# User copy');
+      await fse.ensureDir(path.join(sourceDir, 'repo', 'skills', 'old-skill'));
+      await fse.writeFile(path.join(sourceDir, 'repo', 'skills', 'old-skill', 'SKILL.md'), '# Updated source');
+      await fse.writeFile(path.join(sourceDir, 'repo', 'teamai.yaml'), YAML.stringify({
+        team: 'platform', repo: 'git@git.woa.com:platform/repo.git', publicSkills: ['old-skill'],
+      }));
+
+      await pullSources(localConfig, { force: true });
+
+      const updatedManifest = await fse.readJson(path.join(sourceDir, 'installed.json')) as SourceInstallManifest;
+      expect(updatedManifest.installedPaths?.['old-skill']).toEqual([
+        '.codex/skills/old-skill', '.agents/skills/old-skill',
+      ]);
+
+      await fse.ensureDir(path.join(sourceDir, 'repo', 'skills', 'new-skill'));
+      await fse.writeFile(path.join(sourceDir, 'repo', 'skills', 'new-skill', 'SKILL.md'), '# New');
+      await fse.writeFile(path.join(sourceDir, 'repo', 'teamai.yaml'), YAML.stringify({
+        team: 'platform', repo: 'git@git.woa.com:platform/repo.git', publicSkills: ['new-skill'],
+      }));
+
+      await pullSources(localConfig, { force: true });
+
+      expect(await fse.pathExists(path.join(homeDir, '.codex', 'skills', 'old-skill'))).toBe(false);
+      expect(await fse.pathExists(path.join(homeDir, '.agents', 'skills', 'old-skill'))).toBe(false);
     });
   });
 });
