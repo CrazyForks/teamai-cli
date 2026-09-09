@@ -25,8 +25,6 @@ npm install -g teamai-cli
 
 Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
 
-For self-hosted GitLab, set `GITLAB_URL` to your instance URL and `GITLAB_TOKEN` to a token with `api` scope before initializing. If `init` recognizes an unconfigured GitLab instance, it stops with setup instructions. Existing repos with `provider: git` also need `provider: gitlab` in the team repo's `teamai.yaml` to create MRs. See [GitLab setup](docs/providers.md#gitlab-provider含自托管).
-
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
 ### Team members
@@ -48,13 +46,13 @@ Once initialized, every AI session automatically pulls the latest skills / rules
 
 ## Product architecture
 
-**Team Execution × Team Context × Team Improvement**:
+**Team Execution × Team Context (beta) × Team Improvement (beta)**:
 
 | Layer | Job | In this CLI today |
 |-------|-----|-------------------|
 | **Team Execution** | Make every agent work the team's way | `init` / `pull` / `push`, skills, rules, agents, hooks, MCP, env |
-| **Team Context** | Make every agent understand the team | recall, learnings, codebase graph, teamwiki... |
-| **Team Improvement** | Make every execution improve the team | friction-based share-learnings, sessions, digest, dashboard... |
+| **Team Context** (beta) | Make every agent understand the team | recall, learnings, codebase graph, teamwiki... |
+| **Team Improvement** (beta) | Make every execution improve the team | friction-based share-learnings, sessions, digest, dashboard... |
 
 ## Overview
 
@@ -63,8 +61,8 @@ Once initialized, every AI session automatically pulls the latest skills / rules
     <tr>
       <th rowspan="2">Agent</th>
       <th colspan="7">Team Execution</th>
-      <th colspan="3">Team Context</th>
-      <th colspan="3">Team Improvement</th>
+      <th colspan="3">Team Context (beta)</th>
+      <th colspan="3">Team Improvement (beta)</th>
     </tr>
     <tr>
       <th>skills</th><th>rules</th><th>docs</th><th>env</th><th>agents</th><th>hooks</th><th>mcp</th>
@@ -179,7 +177,7 @@ teamai packages    # Install everything declared by the team
 
 See the [Usage Guide](docs/usage-guide.md#team-packages) for the complete workflow and configuration.
 
-## Team Context
+## Team Context (beta)
 
 > Every agent understands how the team works.
 
@@ -242,7 +240,7 @@ Edges come from two tracks that run together, with AST results taking precedence
 
 The WASM parser is a pure-JavaScript dependency — no native toolchain is required. If it fails to load for any reason, extraction falls back to the heuristic track and records an `AST_UNAVAILABLE` gap. Set `TEAMAI_SKIP_AST=1` to force heuristic-only extraction.
 
-## Team Improvement
+## Team Improvement (beta)
 
 > Every execution makes the entire team smarter.
 
