@@ -183,8 +183,8 @@ export async function recallFeedback(opts: { positive?: string; negative?: strin
   const { autoDetectInit } = await import('./config.js');
   const { localConfig } = await autoDetectInit();
   const { username } = localConfig;
-  const { VOTES_LOCAL_DIR } = await import('./types.js');
-  const votePath = path.join(VOTES_LOCAL_DIR, `${username}.yaml`);
+  const { getUserVotesDir } = await import('./types.js');
+  const votePath = path.join(getUserVotesDir(), `${username}.yaml`);
 
   if (opts.positive) {
     await incrementUpvoted(votePath, [opts.positive]);

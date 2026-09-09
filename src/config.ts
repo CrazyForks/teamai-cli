@@ -4,8 +4,8 @@ import {
   TeamaiConfigSchema,
   LocalConfigSchema,
   StateSchema,
-  TEAMAI_CONFIG_PATH,
-  TEAMAI_STATE_PATH,
+  getUserConfigPath,
+  getUserStatePath,
   type TeamaiConfig,
   type LocalConfig,
   type State,
@@ -17,7 +17,7 @@ import {
 } from './types.js';
 import { readFileSafe, readJson, writeFile, writeJson, expandHome, pathExists } from './utils/fs.js';
 import { resolveAnchors } from './utils/git.js';
-import { projectDataHome } from './utils/partition.js';
+import { projectDataHome, writeAnchorFile } from './utils/partition.js';
 import { log } from './utils/logger.js';
 import { loadRolesManifest } from './roles.js';
 
@@ -72,7 +72,7 @@ export async function loadTeamConfig(repoPath: string): Promise<TeamaiConfig | n
  * Load the local config (~/.teamai/config.yaml)
  */
 export async function loadLocalConfig(): Promise<LocalConfig | null> {
-  const configPath = expandHome(TEAMAI_CONFIG_PATH);
+  const configPath = expandHome(getUserConfigPath());
   const content = await readFileSafe(configPath);
   if (!content) return null;
   try {
@@ -100,14 +100,14 @@ function serializeLocalConfig(config: LocalConfig): string {
  * Save the local config
  */
 export async function saveLocalConfig(config: LocalConfig): Promise<void> {
-  await writeFile(expandHome(TEAMAI_CONFIG_PATH), serializeLocalConfig(config));
+  await writeFile(expandHome(getUserConfigPath()), serializeLocalConfig(config));
 }
 
 /**
  * Load the local state (~/.teamai/state.json)
  */
 export async function loadState(): Promise<State> {
-  const raw = await readJson<Record<string, unknown>>(expandHome(TEAMAI_STATE_PATH));
+  const raw = await readJson<Record<string, unknown>>(expandHome(getUserStatePath()));
   if (!raw) return StateSchema.parse({});
   return StateSchema.parse(raw);
 }
@@ -116,7 +116,7 @@ export async function loadState(): Promise<State> {
  * Save the local state
  */
 export async function saveState(state: State): Promise<void> {
-  await writeJson(expandHome(TEAMAI_STATE_PATH), state);
+  await writeJson(expandHome(getUserStatePath()), state);
 }
 
 /**
@@ -179,8 +179,25 @@ export async function saveLocalConfigForScope(
   _scope?: Scope,
   _projectRoot?: string,
 ): Promise<void> {
-  const configPath = path.join(getDataHome(config), 'config.yaml');
+  const dataHome = getDataHome(config);
+  const configPath = path.join(dataHome, 'config.yaml');
   await writeFile(expandHome(configPath), serializeLocalConfig(config));
+  // If the config lives in a project partition, drop the `anchor` reverse-lookup
+  // file next to it (issue #374 P3). Previously only migration wrote it, so
+  // freshly-init'd partitions had no anchor and `status --all` could not resolve
+  // them back to a project path. Skip user scope (dataHome is ~/.teamai, not a
+  // partition) and legacy in-repo data homes.
+  try {
+    if (config.scope === 'project' && config.projectRoot) {
+      const partition = await resolveProjectDataHome(config.projectRoot);
+      if (path.resolve(expandHome(dataHome)) === path.resolve(partition)) {
+        const anchors = await resolveAnchors(config.projectRoot);
+        if (anchors) await writeAnchorFile(partition, anchors.projectAnchor);
+      }
+    }
+  } catch {
+    // anchor file is a best-effort convenience for status --all; never fail a save
+  }
 }
 
 /**

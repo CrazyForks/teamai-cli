@@ -673,11 +673,34 @@ export interface GlobalOptions {
 
 // ─── Constants ──────────────────────────────────────────
 
-export const TEAMAI_HOME = path.join(getUserHome(), '.teamai');
-export const TEAMAI_CONFIG_PATH = path.join(TEAMAI_HOME, 'config.yaml');
-export const TEAMAI_STATE_PATH = path.join(TEAMAI_HOME, 'state.json');
-export const TEAMAI_TOKEN_PATH = path.join(TEAMAI_HOME, 'token');
-export const TEAMAI_UPDATE_LOCK_PATH = path.join(TEAMAI_HOME, '.update-lock');
+// Machine-level (class A2) paths under ~/.teamai. These are getters, NOT
+// top-level `const`s: a `const path.join(getUserHome(), …)` is evaluated ONCE at
+// module import, so a test that later swaps the HOME env var never sees the new
+// value. Evaluating at call time (issue #374 P3) makes HOME isolation actually
+// work, and keeps a single source of truth for the user home. A2 means they stay
+// under ~/.teamai (functionizing is NOT project-scoping — the landing is
+// unchanged); the project-scoped equivalents already route through getDataHome().
+
+/** The machine-level teamai home, `~/.teamai` (class A2). Evaluated at call time. */
+export function getTeamaiHomeDir(): string {
+  return path.join(getUserHome(), '.teamai');
+}
+/** User-scope global config path, `~/.teamai/config.yaml`. Evaluated at call time. */
+export function getUserConfigPath(): string {
+  return path.join(getTeamaiHomeDir(), 'config.yaml');
+}
+/** User-scope global state path, `~/.teamai/state.json`. Evaluated at call time. */
+export function getUserStatePath(): string {
+  return path.join(getTeamaiHomeDir(), 'state.json');
+}
+/** API token path, `~/.teamai/token` (machine-level). Evaluated at call time. */
+export function getTokenPath(): string {
+  return path.join(getTeamaiHomeDir(), 'token');
+}
+/** Self-update lock path, `~/.teamai/.update-lock`. Evaluated at call time. */
+export function getUpdateLockPath(): string {
+  return path.join(getTeamaiHomeDir(), '.update-lock');
+}
 
 export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'agents', 'hooks', 'mcp'];
 
@@ -722,14 +745,19 @@ export const TEAMAI_RECALL_RULES_END = '<!-- [teamai:recall-rules:end] -->';
 /** Regex for valid skill names: alphanumeric, hyphens, underscores, colons, dots. Max 200 chars. */
 export const SKILL_NAME_REGEX = /^[a-zA-Z0-9_\-:.]{1,200}$/;
 
-export const TEAMAI_USAGE_PATH = `${TEAMAI_HOME}/usage.jsonl`;
-export const TEAMAI_KNOWN_SKILLS_PATH = `${TEAMAI_HOME}/known-skills.json`;
-export const TEAMAI_PUSHIGNORE_PATH = `${TEAMAI_HOME}/pushignore`;
+// TEAMAI_USAGE_PATH / TEAMAI_KNOWN_SKILLS_PATH / TEAMAI_PUSHIGNORE_PATH were
+// module-load consts with no live consumers — the code uses runtime getters
+// (usage-tracker.ts getUsagePath/getKnownSkillsPath, getPushignorePath below), so
+// they are removed here (issue #374 P3).
+
 /**
  * Local monthly session logs (`teamai session save`). Kept in a dedicated dir —
  * not the sessions directory, which holds per-session contribute-state `.json`.
+ * Evaluated at call time so HOME isolation works in tests (issue #374 P3).
  */
-export const SESSION_LOGS_LOCAL_DIR = `${TEAMAI_HOME}/session-logs`;
+export function getSessionLogsDir(): string {
+  return path.join(getTeamaiHomeDir(), 'session-logs');
+}
 
 export interface UsageEvent {
   skill: string;
@@ -983,8 +1011,11 @@ export interface DashboardSession {
   tokens: TokenUsage;
 }
 
-export const DASHBOARD_EVENTS_DIR = `${TEAMAI_HOME}/dashboard`;
-export const DASHBOARD_EVENTS_PATH = `${DASHBOARD_EVENTS_DIR}/events.jsonl`;
+// DASHBOARD_EVENTS_DIR / DASHBOARD_EVENTS_PATH were module-load consts that no
+// code consumed — dashboard read/write go through runtime helpers that inline
+// getUserHome() (dashboard-collector.ts getEventsPath, dashboard.ts), so HOME
+// isolation already works there. Removed (issue #374 P3). The dashboard is an
+// A2 machine-level singleton keyed by event cwd/sessionId, not per-project.
 export const DASHBOARD_DEFAULT_PORT = 3721;
 /** Sessions with no activity for this long (ms) are marked idle */
 export const DASHBOARD_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -1157,8 +1188,9 @@ export const CONTRIBUTE_LOW_QUALITY_THRESHOLD = 5.0;
 /** Phase 2: git commit is neutral (no bonus, no penalty) */
 export const CONTRIBUTE_GIT_COMMIT_DOWNWEIGHT = 0;
 
-/** Directory for per-session contribute state files */
-export const CONTRIBUTE_SESSIONS_DIR = `${TEAMAI_HOME}/sessions`;
+// CONTRIBUTE_SESSIONS_DIR was a module-load const with no live consumers — the
+// code uses contribute-check.ts getSessionPath() (inlines getUserHome()), so it
+// is removed here (issue #374 P3).
 
 // ─── Learnings / Recall (Git-Native Memory) ──────────
 //
@@ -1274,9 +1306,21 @@ export interface UserVotesV2 {
   deltas: Record<string, VoteDelta>;
 }
 
-export const LEARNINGS_LOCAL_DIR = `${TEAMAI_HOME}/learnings`;
-export const SEARCH_INDEX_PATH = `${TEAMAI_HOME}/search-index.json`;
-export const VOTES_LOCAL_DIR = `${TEAMAI_HOME}/votes`;
+// User-scope (A2) learnings mirror / search index / votes. Getters, not consts,
+// so HOME isolation works in tests (issue #374 P3). The project-scope equivalents
+// route through getDataHome(); these remain the user-scope global landing.
+/** User-scope learnings mirror dir, `~/.teamai/learnings`. Evaluated at call time. */
+export function getUserLearningsDir(): string {
+  return path.join(getTeamaiHomeDir(), 'learnings');
+}
+/** User-scope search index, `~/.teamai/search-index.json`. Evaluated at call time. */
+export function getUserSearchIndexPath(): string {
+  return path.join(getTeamaiHomeDir(), 'search-index.json');
+}
+/** User-scope votes dir, `~/.teamai/votes`. Evaluated at call time. */
+export function getUserVotesDir(): string {
+  return path.join(getTeamaiHomeDir(), 'votes');
+}
 
 export const CultureCompanySchema = z.object({
   name: z.string(),

@@ -47,19 +47,21 @@ describe('getUserHome', () => {
     expect(resolveBaseDir(config)).toBe('C:\\Users\\alice');
   });
 
-  it('initializes exported user paths from USERPROFILE when HOME is unavailable', async () => {
+  it('resolves user paths from USERPROFILE when HOME is unavailable (evaluated at call time)', async () => {
+    // Path getters read the home dir at CALL time (issue #374 P3), so changing
+    // the environment takes effect immediately — no vi.resetModules() dance the
+    // old module-load constants needed.
     delete process.env.HOME;
     process.env.USERPROFILE = 'C:\\Users\\alice';
-    vi.resetModules();
 
-    const paths = await import('../types.js');
+    const { getTeamaiHomeDir, getUserConfigPath, getUserStatePath } = await import('../types.js');
 
-    expect(paths.TEAMAI_HOME).toBe(path.join('C:\\Users\\alice', '.teamai'));
-    expect(paths.TEAMAI_CONFIG_PATH).toBe(
+    expect(getTeamaiHomeDir()).toBe(path.join('C:\\Users\\alice', '.teamai'));
+    expect(getUserConfigPath()).toBe(
       path.join('C:\\Users\\alice', '.teamai', 'config.yaml'),
     );
-    expect(paths.TEAMAI_SOURCES_DIR).toBe(
-      path.join('C:\\Users\\alice', '.teamai', 'sources'),
+    expect(getUserStatePath()).toBe(
+      path.join('C:\\Users\\alice', '.teamai', 'state.json'),
     );
   });
 

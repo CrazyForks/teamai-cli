@@ -10,8 +10,6 @@ import { resolveMonitorPid } from './pid-monitor.js';
 import { normalizeToolName } from './utils/tool-names.js';
 import { redactWithEnv } from './utils/redact.js';
 import {
-  DASHBOARD_EVENTS_PATH,
-  DASHBOARD_EVENTS_DIR,
   DASHBOARD_COMPACTION_THRESHOLD,
   DASHBOARD_IDLE_TIMEOUT_MS,
   DASHBOARD_STALE_TIMEOUT_MS,

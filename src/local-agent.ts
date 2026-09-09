@@ -49,8 +49,7 @@ import { logHttpRequest, logHttpResponse } from './utils/http-log.js';
 import { reconcilePlugins, teardownAllPlugins, parseGetConfig, substituteVars, unresolvedPlaceholders, type ReconcileDeps, type PluginState } from './plugin-lifecycle.js';
 import {
   resolveBaseDir,
-  TEAMAI_HOME,
-  TEAMAI_TOKEN_PATH,
+  getTokenPath,
   TEAMAI_CLAUDEMD_START,
   TEAMAI_CLAUDEMD_END,
   TeamaiConfigSchema,
@@ -3257,7 +3256,7 @@ export async function initLocalAgentHttp(options: {
   await ensureDir(getLocalAgentHome());
   await saveLocalAgentConfig(config);
   if (options.token) {
-    await writeTokenFile(TEAMAI_TOKEN_PATH, options.token);
+    await writeTokenFile(getTokenPath(), options.token);
   }
 
   const teamConfig = createLocalAgentTeamConfig(endpoint);

@@ -15,7 +15,7 @@ import { withTimeout } from './utils/async.js';
 import { writeFile, readFileSafe, ensureDir, pathExists, readJson, writeJson } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { UserStats, UserInterventionStats, SessionMetrics, TokenUsage, DashboardEvent, LocalConfig } from './types.js';
-import { VOTES_LOCAL_DIR, emptyTokenUsage, addTokenUsage } from './types.js';
+import { getUserVotesDir, emptyTokenUsage, addTokenUsage } from './types.js';
 import { getUserHome } from './utils/home.js';
 import {
   aggregateDailySessions,
@@ -478,9 +478,9 @@ export async function reportUsageToTeam(
 
     // Always stage pending local votes (V2 delta-aware merge)
     try {
-      if (await pathExists(VOTES_LOCAL_DIR)) {
+      if (await pathExists(getUserVotesDir())) {
         const { syncVotesToTeam } = await import('./votes.js');
-        const synced = await syncVotesToTeam(writeRoot, username, VOTES_LOCAL_DIR);
+        const synced = await syncVotesToTeam(writeRoot, username, getUserVotesDir());
         if (synced) {
           filesToPush.push(`votes/${username}.yaml`);
         }

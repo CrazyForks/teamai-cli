@@ -19,7 +19,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 vi.mock('../types.js', () => ({
-  TEAMAI_HOME: '/tmp/test-teamai-home',
+  getTeamaiHomeDir: () => '/tmp/test-teamai-home',
 }));
 
 vi.mock('node:child_process', () => ({

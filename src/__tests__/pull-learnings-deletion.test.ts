@@ -63,7 +63,7 @@ vi.mock('../update.js', () => ({
 
 const { pull } = await import('../pull.js');
 const { loadLocalConfigForScope, loadTeamConfig } = await import('../config.js');
-const { LEARNINGS_LOCAL_DIR, SEARCH_INDEX_PATH } = await import('../types.js');
+const { getUserLearningsDir, getUserSearchIndexPath } = await import('../types.js');
 const { loadIndex } = await import('../utils/search-index.js');
 import type { LocalConfig, TeamaiConfig } from '../types.js';
 
@@ -94,8 +94,8 @@ describe('pull — user-scope learning deletion propagation (issue #458)', () =>
   beforeEach(async () => {
     vi.clearAllMocks();
     await fse.remove(repoPath);
-    await fse.remove(LEARNINGS_LOCAL_DIR);
-    await fse.remove(SEARCH_INDEX_PATH);
+    await fse.remove(getUserLearningsDir());
+    await fse.remove(getUserSearchIndexPath());
     await fse.outputFile(path.join(repoPath, 'learnings', 'shared-a.md'), '---\ntitle: shared a\n---\n');
     await fse.outputFile(path.join(repoPath, 'learnings', 'shared-b.md'), '---\ntitle: shared b\n---\n');
     vi.mocked(loadLocalConfigForScope).mockResolvedValue(localConfig);
@@ -109,13 +109,13 @@ describe('pull — user-scope learning deletion propagation (issue #458)', () =>
 
   it('removes a shared Markdown file deleted upstream and drops it from the index', async () => {
     await pull({ silent: true });
-    expect(await fse.pathExists(path.join(LEARNINGS_LOCAL_DIR, 'shared-b.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(getUserLearningsDir(), 'shared-b.md'))).toBe(true);
 
     await fse.remove(path.join(repoPath, 'learnings', 'shared-b.md'));
     await pull({ silent: true, force: true });
 
-    expect(await fse.pathExists(path.join(LEARNINGS_LOCAL_DIR, 'shared-b.md'))).toBe(false);
-    const index = await loadIndex(SEARCH_INDEX_PATH);
+    expect(await fse.pathExists(path.join(getUserLearningsDir(), 'shared-b.md'))).toBe(false);
+    const index = await loadIndex(getUserSearchIndexPath());
     expect(index?.entries.map((entry) => entry.title)).toEqual(['shared a']);
   });
 });

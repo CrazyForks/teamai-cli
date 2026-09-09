@@ -300,8 +300,8 @@ const votesSyncHandler: HookHandler = {
       // autoDetectInit picks project scope when present (so self-mode configs are
       // honored), falling back to user scope otherwise.
       const { localConfig } = await autoDetectInit();
-      const { VOTES_LOCAL_DIR } = await import('./types.js');
-      const votesDir = VOTES_LOCAL_DIR;
+      const { getUserVotesDir } = await import('./types.js');
+      const votesDir = getUserVotesDir();
       const votePath = path.join(votesDir, `${localConfig.username}.yaml`);
 
       // Only count upvotes for docs actually recalled this session, to avoid crediting hallucinated/distractor doc-ids

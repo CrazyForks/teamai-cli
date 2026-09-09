@@ -3,7 +3,7 @@ import fse from 'fs-extra';
 import YAML from 'yaml';
 import { LocalConfigSchema, SYNC_LOCK_FILENAME } from './types.js';
 import { resolveAnchors } from './utils/git.js';
-import { projectDataHome } from './utils/partition.js';
+import { projectDataHome, writeAnchorFile } from './utils/partition.js';
 import { realpath } from 'node:fs/promises';
 import { expandHome, pathExists, readFileSafe, remove, writeFile } from './utils/fs.js';
 import { acquireLock, releaseLock } from './update.js';
@@ -283,10 +283,8 @@ export async function runMigration(
     await remove(partitionDir);
     await fse.rename(staging, partitionDir);
 
-    // 4. Write the anchor reverse-lookup file. The slug is a one-way sha256, so
-    //    the original projectAnchor is only recoverable from this file — which
-    //    lives inside the partition, off the workspace, preserving zero-residue.
-    await writeFile(path.join(partitionDir, 'anchor'), `${anchor}\n`);
+    // 4. Write the anchor reverse-lookup file (shared helper, also used by init).
+    await writeAnchorFile(partitionDir, anchor);
 
     // 5. Release the lock BEFORE renaming legacyDir away, so releaseLock finds
     //    the lock at its original path and no live lock is buried in the backup.
