@@ -281,6 +281,35 @@ describe('codebase reconciliation', () => {
     ]));
   });
 
+  it('replaces legacy bridge edges that upstream persisted without endpoint nodes', async () => {
+    const root = createWikiFixture();
+    const graphPath = path.join(root, 'teamwiki', '.indices', 'graph-index.json');
+    fs.mkdirSync(path.dirname(graphPath), { recursive: true });
+    fs.writeFileSync(graphPath, JSON.stringify({
+      schemaVersion: 'team-wiki.graph-index.v1',
+      generatedAt: '2026-01-01',
+      nodes: [],
+      edges: [{
+        from: 'product/login',
+        to: 'evidence/code/auth/component',
+        relation: 'MAPS_TO',
+        weight: 1,
+        source: 'bridge-reconcile',
+      }],
+    }));
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await codebaseCmd({ reconcile: true, output: root, json: true });
+
+    const graph = await loadGraphIndex(path.join(root, 'teamwiki'));
+    expect(validateGraph(graph as GraphIndex)).toEqual({ valid: true, issues: [] });
+    expect(graph?.edges).toContainEqual(expect.objectContaining({
+      from: 'product/login',
+      to: 'evidence/code/auth/component',
+      source: 'bridge-reconcile',
+    }));
+  });
+
   it('rejects structural corruption not owned by the extractor', async () => {
     const root = createWikiFixture();
     const graphPath = path.join(root, 'teamwiki', '.indices', 'graph-index.json');

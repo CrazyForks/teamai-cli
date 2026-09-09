@@ -89,12 +89,16 @@ async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
     if (!(await exists(graphPath))) return createGraphIndex();
     throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
   }
-  if (validateGraph(graph).issues.some(issue => issue.code !== REPAIRABLE_VALIDATION_ISSUE_CODE)) {
+  const base = createGraphIndex(
+    graph.nodes,
+    graph.edges.filter(edge => edge.source !== BRIDGE_EDGE_SOURCE),
+  );
+  if (validateGraph(base).issues.some(issue => issue.code !== REPAIRABLE_VALIDATION_ISSUE_CODE)) {
     throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
   }
-  const nodeSlugs = new Set(graph.nodes.map(node => node.slug));
+  const nodeSlugs = new Set(base.nodes.map(node => node.slug));
   const endpointNodes: GraphNode[] = [];
-  for (const edge of graph.edges) {
+  for (const edge of base.edges) {
     if (!edge.source || !REPAIRABLE_CODE_EDGE_SOURCES.has(edge.source)) continue;
     for (const slug of [edge.from, edge.to]) {
       if (nodeSlugs.has(slug)) continue;
@@ -109,7 +113,7 @@ async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
       });
     }
   }
-  const repaired = mergeGraphs(graph, createGraphIndex(endpointNodes));
+  const repaired = mergeGraphs(base, createGraphIndex(endpointNodes));
   if (!validateGraph(repaired).valid) {
     throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
   }
