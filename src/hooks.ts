@@ -544,8 +544,10 @@ async function reconcileZcodeFormat(
   let changed = false;
   // Config-file hooks are disabled by default in ZCode; entries we write would
   // never fire unless the runner is explicitly enabled. Persist the flip even
-  // when the event arrays are already up to date.
-  if (cfg.hooks.enabled !== true) {
+  // when the event arrays are already up to date — but only when installing.
+  // Removal must preserve the runner state the user chose: re-enabling during
+  // uninstall would switch hooks the user explicitly disabled back on.
+  if (!opts.removeAll && cfg.hooks.enabled !== true) {
     cfg.hooks.enabled = true;
     changed = true;
   }

@@ -190,4 +190,30 @@ describe('ZCode support', () => {
       await fse.remove(home);
     }
   });
+
+  it('removeAll preserves a user-disabled hooks.enabled while stripping entries', async () => {
+    const home = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-zcode-test-'));
+    try {
+      const configPath = path.join(home, '.zcode', 'cli', 'config.json');
+      await fse.ensureDir(path.dirname(configPath));
+
+      await reconcileHooks(configPath, 'zcode');
+      const disabled = await fse.readJson(configPath);
+      disabled.hooks.enabled = false;
+      await fse.writeJson(configPath, disabled);
+
+      await reconcileHooks(configPath, 'zcode', [], { removeAll: true });
+
+      const cfg = await fse.readJson(configPath);
+      // Removal strips the managed entries but must not flip the user's
+      // explicit runner choice back on.
+      expect(cfg.hooks.enabled).toBe(false);
+      for (const entries of Object.values(cfg.hooks.events) as Array<unknown[]>) {
+        expect(entries).toEqual([]);
+      }
+      expect(await hasTeamaiHooks(configPath, 'zcode')).toBe(false);
+    } finally {
+      await fse.remove(home);
+    }
+  });
 });
