@@ -120,7 +120,7 @@ teamai push → 创建分支 + MR → reviewer 审批合并
 | **Rules** | `rules/*.md` | |
 | **Docs** | `docs/` | 项目基础文档，默认不全量加载（渐进式披露） |
 | **Agents** | `agents/<name>.yaml` | |
-| **Culture** | `culture.md` | |
+| **Culture** | `culture.md` | 注入到各 Agent 的 CLAUDE.md / AGENTS.md 中的一段文字 |
 | **CLAUDE.md** | `claudemd/*.md` | |
 | **Env** | `env/` | |
 | **Hooks** | `hooks/hooks.yaml` | |

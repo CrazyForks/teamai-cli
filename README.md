@@ -120,7 +120,7 @@ Each resource is delivered to every agent:
 | **Rules** | `rules/*.md` | |
 | **Docs** | `docs/` | Foundational project docs; not all loaded by default (progressive disclosure) |
 | **Agents** | `agents/<name>.yaml` | |
-| **Culture** | `culture.md` | |
+| **Culture** | `culture.md` | Injected into each agent's CLAUDE.md / AGENTS.md |
 | **CLAUDE.md** | `claudemd/*.md` | |
 | **Env** | `env/` | |
 | **Hooks** | `hooks/hooks.yaml` | |
