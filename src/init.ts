@@ -433,12 +433,25 @@ export async function initHttp(
 /**
  * Build the .teamai/.gitignore for single-repo mode. Unlike the standalone
  * project-scope gitignore, knowledge (skills/rules/docs/learnings) is COMMITTED
- * to main here, so it must NOT be ignored. Only machine-local state, worktrees,
- * and orphan-branch report data are ignored.
+ * to main here, so it must NOT be ignored.
+ *
+ * As of P2 (issue #374) a self install's machine data (class A1 —
+ * config/state/env backup/search index/managed-mcp/resource cache) lives in the
+ * per-project partition `~/.teamai/projects/<slug>/`, NOT the repo, so it does
+ * not need ignoring at all. These entries are kept as belt-and-suspenders:
+ *  - a pre-P2 self install still has them in the repo until migration relocates
+ *    them (double-read compat window), and
+ *  - should any A1 path ever fail to route to the partition, the ignore keeps it
+ *    out of a commit rather than leaking (esp. plaintext env.local/token).
+ * `workspaces/` is NEW here — before P2 the user-scope managed-mcp.json and the
+ * per-worktree `workspaces/<id>/` tree were NOT ignored, so a self repo that ran
+ * MCP reconcile or the local agent would leak them into `git status`.
  */
 export function buildSelfModeGitignore(): string {
   return [
-    '# teamai single-repo mode — machine-local state (never commit)',
+    '# teamai single-repo mode — machine-local state (never commit).',
+    '# As of P2 this data lives in ~/.teamai/projects/<slug>/; these entries guard',
+    '# pre-P2 installs (pre-migration) and any un-relocated path.',
     'config.yaml',
     'state.json',
     'token',
@@ -446,6 +459,7 @@ export function buildSelfModeGitignore(): string {
     '.update-lock',
     '.reports-lock',
     '.bootstrap-lock',
+    '.sync-lock',
     // NB: env/ is intentionally NOT ignored in single-repo mode — team env vars
     // (.teamai/env/env.yaml) are committed to main so `teamai push` can carry them
     // and teammates get them on clone. env.yaml holds plaintext key/value pairs, so
@@ -457,6 +471,10 @@ export function buildSelfModeGitignore(): string {
     'usage.jsonl',
     'known-skills.json',
     'search-index.json',
+    'managed-mcp.json',
+    // Per-worktree machine data (managed-mcp.json + the local-agent resource
+    // cache). Not ignored before P2 — a real leak source in self repos.
+    'workspaces/',
     'dashboard/',
     '# git worktrees for reports (orphan branch) and knowledge PRs',
     'reports-wt/',
@@ -671,7 +689,12 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
   const businessRepoRoot = cwd;
   const teamaiHome = path.join(businessRepoRoot, '.teamai');
-  const localPath = teamaiHome; // knowledge lives under <repo>/.teamai (localPath convention)
+  const localPath = teamaiHome; // knowledge (class B) lives under <repo>/.teamai (localPath convention)
+  // P2 self slimming (issue #374): machine data (class A1 — config/state/env
+  // backup/search index/managed-mcp/resource cache) now lands in the per-project
+  // partition, NOT the repo, so `.teamai/` keeps only committed team knowledge.
+  // Attaching dataHome routes every getDataHome()-based write into the partition.
+  const partitionHome = await resolveProjectDataHome(businessRepoRoot);
 
   let inheritUserScope: boolean | undefined;
   try {
@@ -687,9 +710,12 @@ export async function initSelfRepo(options: GlobalOptions & {
   log.info(`  knowledge → ${localPath}/{skills,rules,docs,learnings} (committed to main)`);
   log.info(`  reports   → ${REPORTS_BRANCH} orphan branch (members/sessions/votes/stats)`);
 
-  // Re-init guard
-  const existingConfigPath = getConfigPath('project', businessRepoRoot);
-  if (await pathExists(existingConfigPath)) {
+  // Re-init guard. The machine config now lives in the partition (P2), so check
+  // there; also check the legacy in-repo location so re-running init on a
+  // pre-P2 self install is still recognized as "already initialized".
+  const existingConfigPath = path.join(partitionHome, 'config.yaml');
+  const legacyConfigPath = getConfigPath('project', businessRepoRoot);
+  if ((await pathExists(existingConfigPath)) || (await pathExists(legacyConfigPath))) {
     log.warn(`teamai is already initialized (project scope) at ${existingConfigPath}`);
     if (options.force) {
       log.info('Overwriting existing config (--force)');
@@ -780,12 +806,15 @@ export async function initSelfRepo(options: GlobalOptions & {
     return;
   }
 
-  // Step 4: assemble local config (kind: self).
+  // Step 4: assemble local config (kind: self). dataHome points at the partition
+  // so config/state and every other class-A1 write lands outside the repo (P2);
+  // repo.localPath stays <repo>/.teamai — that is the class-B knowledge anchor.
   const localConfig: LocalConfig = {
     repo: { localPath, remote: repoInfo.httpsUrl, kind: 'self', businessRepoRoot },
     username,
     scope: 'project',
     projectRoot: businessRepoRoot,
+    dataHome: partitionHome,
     additionalRoles: [],
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
@@ -810,28 +839,17 @@ export async function initSelfRepo(options: GlobalOptions & {
     localConfig.disabledAgents = (existing?.disabledAgents ?? []).filter((t) => !selectedAgents.includes(t));
   }
 
-  // Step 5: write local config + single-repo gitignore.
+  // Step 5: write local config (into the partition via dataHome) + single-repo
+  // gitignore. ensureDir both the knowledge dir (class B, in the repo) and the
+  // partition (class A1 machine data). saveLocalConfigForScope writes through
+  // getDataHome, which now resolves to the partition.
   await ensureDir(teamaiHome);
+  await ensureDir(partitionHome);
   await saveLocalConfigForScope(localConfig, 'project', businessRepoRoot);
-  log.success(`Local config saved to ${teamaiHome}/config.yaml`);
-
-  // Retire any stale project partition from an earlier git-mode install: detection
-  // treats an existing partition as authoritative, so leaving it behind would make
-  // this self install unreachable (pull/push would keep hitting the old external
-  // repo). Removing the partition config is enough for detection to fall through to
-  // this self config; the rest of the old partition is left for the user to clean.
-  try {
-    const partition = await resolveProjectDataHome(businessRepoRoot);
-    if (partition !== teamaiHome) {
-      const partitionConfig = path.join(partition, 'config.yaml');
-      if (await pathExists(partitionConfig)) {
-        await remove(partitionConfig);
-        log.info(`Retired stale project partition config at ${partitionConfig}`);
-      }
-    }
-  } catch (e) {
-    log.debug(`partition retire skipped: ${(e as Error).message}`);
-  }
+  log.success(`Local config saved to ${partitionHome}/config.yaml`);
+  // (Pre-P2 this retired any stale partition config so detection fell back to the
+  // in-repo self config. P2 makes self USE the partition, so there is nothing to
+  // retire — the config we just wrote there is the authoritative one.)
 
   const gitignorePath = path.join(teamaiHome, '.gitignore');
   await writeFile(gitignorePath, buildSelfModeGitignore());

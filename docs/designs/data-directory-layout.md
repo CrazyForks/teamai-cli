@@ -1,8 +1,8 @@
 # Design: teamai data directory layout — global home + per-project partitioning
 
-> Status: **P0 + P1 implemented** (issue #374). P1 shipped as PRs #397 / #402 /
-> #406 / #414 / #417 (partition routing) and the P1-3 auto-migration below.
-> P2–P3 are follow-up phases, tracked below.
+> Status: **P0 + P1 + P2 implemented** (issue #374). P1 shipped as PRs #397 / #402 /
+> #406 / #414 / #417 (partition routing) and #439 (P1-3 auto-migration). P2 (self
+> mode slimming) is below. P3 is a follow-up phase, tracked below.
 
 ## Problem
 
@@ -191,10 +191,54 @@ a raw async-hook rejection.
 **Downgrade is not supported** — an older teamai treats a partitioned install as
 uninitialized; `.teamai.bak/` is the manual rollback. Flag prominently in release notes.
 
+## P2 — self (single-repo) mode slimming (implemented)
+
+Before P2, self mode kept its class-A1 machine data (config, state, env backup,
+search index, managed-mcp, the per-worktree resource cache) inside the business
+repo at `<repo>/.teamai/`, alongside the class-B team knowledge that is committed
+to main. A hand-maintained `.gitignore` blacklist kept `git status` clean — a
+fragile arrangement (the per-worktree `workspaces/` tree and the user-scope
+`managed-mcp.json` were, in fact, never listed, so a self repo running MCP
+reconcile or the local agent leaked them into the working tree).
+
+P2 physically relocates the A1 data to the partition `~/.teamai/projects/<slug>/`,
+leaving `.teamai/` with only class-B knowledge. The lever is the same as non-self
+installs: attach a partition `dataHome` to the self LocalConfig, and every
+`getDataHome()`-based write follows.
+
+**Invariant:** `getKnowledgeDir` / `repo.localPath` stay `<repo>/.teamai` — that is
+the class-B knowledge anchor, committed to main, and the ~230 `path.join(localPath,
+…)` call sites do not change. `reports-wt/` and `knowledge-wt/` stay in the repo
+too (git worktrees must live in the same repo; they anchor on `localPath`, not
+`getDataHome`).
+
+- **init** (`initSelfRepo`): resolves the partition up front, attaches it as
+  `dataHome`, and writes config/state there. The pre-P2 "retire the stale
+  partition" step is gone — self now USES the partition, so there is nothing to
+  retire.
+- **bootstrap** (teammate fresh clone, `bootstrapSelfRepo`): the "already
+  initialized" check and the config write both target the partition (with a legacy
+  fallback so a pre-P2 install is still recognized).
+- **detection seam** (the delicate part): on a fresh clone the partition config
+  does not exist yet, so partition-first misses. The legacy branch runs the
+  self-heal bootstrap — which now writes the config into the PARTITION — then reads
+  it back FROM the partition (`selfHealAndReadPartition`). A pre-P2 install whose
+  config still sits in `<repo>/.teamai` is read via the legacy branch (double-read
+  compat) until migration relocates it.
+- **migration** (`migrate.ts`, `mode: 'self'`): self CANNOT use the git-mode whole
+  directory copy→rename (that would carry the knowledge off and rename `.teamai` to
+  `.bak`, breaking "knowledge on main"). Instead it selectively relocates the A1
+  whitelist (config.yaml, state.json, env.local, env.sh, search-index.json,
+  managed-mcp.json, workspaces/) entry-by-entry, destination-first (copy to the
+  partition, then delete the source), leaving class-B knowledge and the worktrees
+  untouched and never renaming `.teamai/`. self `repo.localPath` is NOT rebased —
+  it must keep pointing at the in-repo knowledge.
+
+Acceptance: after slimming, `git status` is clean (the A1 data is physically gone,
+not merely ignored) and a teammate's fresh clone bootstraps into the partition.
+
 ## Follow-up phases (not in this PR)
 
-- **P2** — self (single-repo) mode slimming: only team knowledge (class B) stays in
-  the repo.
 - **P3** — functionize module-load-time path constants (so tests that swap `$HOME`
   at runtime take effect), then assign A1/A2 ownership per the data-classification
   table. `status --all` across partitions.

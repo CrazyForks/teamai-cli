@@ -1446,9 +1446,13 @@ export async function pull(options: GlobalOptions): Promise<void> {
   const contended = new Set<LocalConfig>();
   const heldLocks = new Map<LocalConfig, string>();
   const lockScope = async (config: LocalConfig): Promise<boolean> => {
-    // Only git-mode has a shared team clone to guard. http has no clone; self
-    // mode writes the reports orphan-branch worktree under its own reports-lock.
-    if (config.repo.kind && config.repo.kind !== 'git') return true;
+    // git-mode guards its shared team clone; self mode guards its machine-data
+    // writes (state/env/search-index) against a concurrent P2 migration relocating
+    // the same files — both contend on <getDataHome>/.sync-lock (which, for a
+    // pre-migration self install, is <repo>/.teamai/.sync-lock, exactly the path
+    // migrateSelfA1 takes). http has no clone and no machine-data relocation, so it
+    // needs no lock.
+    if (config.repo.kind === 'http') return true;
     const lock = path.join(getDataHome(config), SYNC_LOCK_FILENAME);
     if (await acquireLock(lock)) {
       heldLocks.set(config, lock);

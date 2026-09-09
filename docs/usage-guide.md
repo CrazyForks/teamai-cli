@@ -306,7 +306,14 @@ teamai init . --agent claude,codex   # non-interactive: set up Claude Code + Cod
 |------|----------------|---------------------------|
 | Knowledge: `skills/` `rules/` `docs/` `learnings/`, `teamai.yaml` | `.teamai/` on the **main** branch | ✅ Yes |
 | Reports: `members/` `sessions/` `votes/` `stats/` | `teamai-reports` **orphan branch** | Pushed to `origin` (separate history) |
-| Machine-local: `config.yaml`, `token`, `state.json`, worktrees | `.teamai/` (gitignored) | ❌ No (per-machine) |
+| Machine-local: `config.yaml`, `state.json`, search index, env backup, MCP manifests | `~/.teamai/projects/<slug>/` (**partition**, outside the repo) | ❌ No (per-machine) |
+| Disposable git worktrees (`reports-wt/`, `knowledge-wt/`) | `.teamai/` (gitignored; rebuilt on demand) | ❌ No (per-machine) |
+
+Machine-local data lives in the per-project **partition** outside the repo, so a
+single-repo `.teamai/` holds only the team knowledge committed to main — `git
+status` stays clean. Upgrading an older single-repo install relocates that machine
+data into the partition automatically on the next `init`/`pull`/`push` (the
+knowledge on main is left exactly in place).
 
 **Clone = initialized.** Because knowledge and the `mode: self` marker in `.teamai/teamai.yaml` are committed to main, a teammate who clones the repo is auto-initialized: the next `teamai` command or AI session detects the marker, and (when their git provider is already authenticated) writes their local config, injects hooks, and registers them on the reports branch — no need to re-type repo/role. If they aren't authenticated yet, teamai prompts them to run `teamai init .` once.
 

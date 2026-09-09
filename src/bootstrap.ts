@@ -64,9 +64,18 @@ export async function bootstrapSelfRepo(
   const silent = opts?.silent ?? false;
   const info = (msg: string) => { if (!silent) log.info(msg); };
 
-  // Fast path: already initialized.
-  const configPath = getConfigPath('project', businessRepoRoot);
-  if (await pathExists(configPath)) return 'already';
+  // P2 (issue #374): a self install's machine config lives in the per-project
+  // partition, not the repo. Resolve it up front and use it for the "already
+  // initialized" check and as the write target. Also honor the legacy in-repo
+  // location so a pre-P2 self install (config still under <repo>/.teamai) is
+  // recognized as already initialized and not re-bootstrapped.
+  const { resolveProjectDataHome } = await import('./config.js');
+  const partitionHome = await resolveProjectDataHome(businessRepoRoot);
+  const configPath = path.join(partitionHome, 'config.yaml');
+  const legacyConfigPath = getConfigPath('project', businessRepoRoot);
+
+  // Fast path: already initialized (partition or legacy).
+  if ((await pathExists(configPath)) || (await pathExists(legacyConfigPath))) return 'already';
 
   // Only self-mode projects auto-bootstrap.
   const marker = await readSelfModeMarker(businessRepoRoot);
@@ -145,6 +154,10 @@ export async function bootstrapSelfRepo(
       username,
       scope: 'project',
       projectRoot: businessRepoRoot,
+      // P2: machine config/state land in the partition, not the repo. localPath
+      // stays <repo>/.teamai (the class-B knowledge anchor); dataHome routes the
+      // class-A1 writes (config/state) out of the workspace.
+      dataHome: partitionHome,
       additionalRoles: [],
       ...(enabledAgents.length > 0 ? { enabledAgents } : {}),
     };
