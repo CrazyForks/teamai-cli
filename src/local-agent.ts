@@ -2401,15 +2401,46 @@ async function reconcileClaudeModels(
   const desired = claudeEnvForModel(models[0]);
   await writeModelJson(profilePath, { env: desired });
 
+  // Any of these keys, if the user already set them, means they have their own
+  // Claude gateway/model config we must not silently take over. Beyond the keys
+  // we write, this also covers auth the gateway swap would break
+  // (ANTHROPIC_API_KEY, ANTHROPIC_CUSTOM_HEADERS) and the user's model choice
+  // (ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL).
   const conflictKeys = new Set([
     ...Object.keys(desired),
     'ANTHROPIC_API_KEY',
+    'ANTHROPIC_CUSTOM_HEADERS',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   ]);
+  // The guard must see config the user set outside settings.json too. Users who
+  // run Claude via shell `export ANTHROPIC_*` keep no gateway in settings.json,
+  // so a settings-only check reads env[key] === undefined and wrongly seizes the
+  // slot — settings.json then outranks the shell env and breaks their setup.
+  // TeamAI never exports to the shell, so a non-empty process.env value for a
+  // conflict key is always the user's own and can never be reconciled away.
+  const conflictInProcessEnv = (key: string): boolean => {
+    const value = process.env[key];
+    return typeof value === 'string' && value.trim() !== '';
+  };
   const canManage = [...conflictKeys].every((key) => (
-    env[key] === undefined ||
-    (previousHashes[key] !== undefined && entryHash(env[key]) === previousHashes[key])
+    !conflictInProcessEnv(key) && (
+      env[key] === undefined ||
+      (previousHashes[key] !== undefined && entryHash(env[key]) === previousHashes[key])
+    )
   ));
   if (!canManage) {
+    const conflicts = [...conflictKeys].filter(
+      (key) => conflictInProcessEnv(key) || (
+        env[key] !== undefined &&
+        !(previousHashes[key] !== undefined && entryHash(env[key]) === previousHashes[key])
+      ),
+    );
+    await appendErrorLog({
+      apply_model_config: 'skipped claude gateway: user owns conflicting config',
+      conflicts,
+    });
     manifest.claudeEnv = {};
     return;
   }

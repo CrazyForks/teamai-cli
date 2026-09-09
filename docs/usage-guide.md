@@ -1091,7 +1091,13 @@ already present in the reporter's workspace bindings. User-owned entries with th
 model ID are preserved. Claude
 gets an explicit profile at `~/.claude/teamai-models.json`
 and also receives the gateway environment in `~/.claude/settings.json` when it has no
-conflicting user-owned Anthropic gateway configuration. Unsupported agents acknowledge
+conflicting user-owned Anthropic gateway configuration. The conflict check inspects
+both `settings.json` `env` and the process's shell environment (`export ANTHROPIC_*`),
+so a user who runs Claude via shell env keeps their own gateway — TeamAI skips the write
+and logs the skipped keys to `~/.teamai/reporter/errors.jsonl`. Protected keys are
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_MODEL_OPTION{,_NAME}`, and
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`. Unsupported agents acknowledge
 the task as failed instead of writing another agent's config. Symlinked user config
 files remain symlinks. These files are mode `0600`. A successful write is acknowledged with
 `type: "apply_model_config"`; malformed payloads are acknowledged as `failed`. Unknown
