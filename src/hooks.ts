@@ -306,20 +306,25 @@ function toZcodeEntry(def: HookDef): ZcodeHookMatcher {
   const entry: ZcodeHookEntry = {
     type: 'process',
     command: 'bash',
-    args: ['-lc', `${def.command} >/dev/null 2>&1 || true`],
+    // Stored verbatim: the shell payload must equal `def.command` exactly so
+    // managed-entry detection and the managed-hooks manifest share one command
+    // representation (the same invariant the Codex format keeps). teamai
+    // hook-dispatch is silent and failure-tolerant on its success paths, so no
+    // shell redirection is layered on top of the payload.
+    args: ['-lc', def.command],
     ...(def.timeout !== undefined ? { timeoutMs: def.timeout * 1000 } : {}),
   };
   const group: ZcodeHookMatcher = { hooks: [entry] };
   // ZCode's matcher is a case-sensitive regex on the match value; '*' is an
-  // invalid regex that would never match. Omitted matcher matches everything.
+  // invalid pattern that would never match. Omitted matcher matches everything.
   if (def.matcher && def.matcher !== '*') group.matcher = def.matcher;
   return group;
 }
 
-/** Command text of a ZCode hook entry, for teamai-marker matching. */
+/** Shell payload of a ZCode hook entry, for managed-entry matching. */
 function zcodeEntryCommand(entry: ZcodeHookMatcher): string {
   const hook = entry.hooks?.[0];
-  if (hook?.command === 'bash' && hook.args?.length) return hook.args.join(' ');
+  if (hook?.command === 'bash' && hook.args?.[0] === '-lc') return hook.args[1] ?? '';
   return hook?.command ?? '';
 }
 
@@ -536,10 +541,13 @@ async function reconcileZcodeFormat(
   await ensureDir(path.dirname(expanded));
   const cfg: ZcodeHooksJson = (await readJson<ZcodeHooksJson>(expanded)) ?? {};
   if (!cfg.hooks) cfg.hooks = {};
+  let changed = false;
   // Config-file hooks are disabled by default in ZCode; entries we write would
-  // never fire unless the runner is explicitly enabled.
-  if (!cfg.hooks.enabled) {
+  // never fire unless the runner is explicitly enabled. Persist the flip even
+  // when the event arrays are already up to date.
+  if (cfg.hooks.enabled !== true) {
     cfg.hooks.enabled = true;
+    changed = true;
   }
   if (!cfg.hooks.events) cfg.hooks.events = {};
 
@@ -556,7 +564,6 @@ async function reconcileZcodeFormat(
   const eventsMap = cfg.hooks.events;
   const events = [...eventOrder, ...Object.keys(eventsMap).filter((e) => !eventOrder.includes(e))];
 
-  let changed = false;
   for (const event of events) {
     const existing = eventsMap[event] ?? [];
     const untouched = existing.filter((e) => !isManaged(e));

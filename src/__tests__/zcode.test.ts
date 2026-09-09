@@ -7,7 +7,7 @@ import { KNOWN_AGENTS } from '../known-agents.js';
 import { getHookStatus, hasTeamaiHooks, reconcileHooks } from '../hooks.js';
 import { agentFileExtensionForTool, ALL_SUPPORTED_TOOLS } from '../resources/agent-format.js';
 import { detectMcpFormat } from '../resources/mcp-format.js';
-import { TeamaiConfigSchema } from '../types.js';
+import { HookDef, TeamaiConfigSchema } from '../types.js';
 
 describe('ZCode support', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -127,6 +127,65 @@ describe('ZCode support', () => {
       }
       expect(await hasTeamaiHooks(configPath, 'zcode')).toBe(false);
       expect(await getHookStatus(configPath, 'zcode')).toBe('missing');
+    } finally {
+      await fse.remove(home);
+    }
+  });
+
+  it('manages custom team hooks: single entry across reinjection, clean removal', async () => {
+    const home = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-zcode-test-'));
+    try {
+      const configPath = path.join(home, '.zcode', 'cli', 'config.json');
+      const manifestPath = path.join(home, 'managed-hooks.json');
+      const teamDefs: HookDef[] = [
+        {
+          source: 'team',
+          key: 'audit',
+          event: 'SessionStart',
+          command: 'sh /tmp/audit.sh',
+          description: '[teamai:hook:audit] audit',
+        },
+      ];
+      const countAudit = async () => {
+        const cfg = await fse.readJson(configPath);
+        const groups = cfg.hooks.events.SessionStart as Array<{ hooks: Array<{ args?: string[] }> }>;
+        return groups.filter((g) => g.hooks[0].args?.[1] === 'sh /tmp/audit.sh').length;
+      };
+
+      await reconcileHooks(configPath, 'zcode', teamDefs, { manifestPath });
+      expect(await countAudit()).toBe(1);
+
+      // Reinjection must recognize the stored entry via the manifest (its
+      // command carries no teamai marker) instead of appending a duplicate.
+      await reconcileHooks(configPath, 'zcode', teamDefs, { manifestPath });
+      expect(await countAudit()).toBe(1);
+
+      // Removal must strip the team entry, not just its manifest record.
+      await reconcileHooks(configPath, 'zcode', [], { removeAll: true, manifestPath });
+      expect(await countAudit()).toBe(0);
+      expect(await hasTeamaiHooks(configPath, 'zcode', manifestPath)).toBe(false);
+    } finally {
+      await fse.remove(home);
+    }
+  });
+
+  it('re-enables hooks.enabled when reinjecting an otherwise up-to-date disabled config', async () => {
+    const home = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-zcode-test-'));
+    try {
+      const configPath = path.join(home, '.zcode', 'cli', 'config.json');
+      await fse.ensureDir(path.dirname(configPath));
+
+      await reconcileHooks(configPath, 'zcode');
+      const disabled = await fse.readJson(configPath);
+      disabled.hooks.enabled = false;
+      await fse.writeJson(configPath, disabled);
+
+      await reconcileHooks(configPath, 'zcode');
+
+      const cfg = await fse.readJson(configPath);
+      expect(cfg.hooks.enabled).toBe(true);
+      expect(Object.keys(cfg.hooks.events).length).toBeGreaterThan(0);
+      expect(await getHookStatus(configPath, 'zcode')).toBe('installed');
     } finally {
       await fse.remove(home);
     }
