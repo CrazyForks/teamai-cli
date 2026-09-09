@@ -114,19 +114,19 @@ teamai push → 创建分支 + MR → reviewer 审批合并
 
 每类资源分发到每个 Agent：
 
-| 资源 | 团队仓库中的位置 | 命令 |
+| 资源 | 团队仓库中的位置 | 备注 |
 |------|------------------|------|
-| **Skills** | `skills/<name>/SKILL.md` | `teamai push` / `pull`、`teamai skill exclude` |
-| **Rules（规范）** | `rules/*.md` | `teamai push` / `pull` |
-| **Docs** | `docs/` | `teamai push` / `pull` |
-| **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
-| **Culture（团队文化）** | `culture.md` | `teamai push` / `pull` |
-| **CLAUDE.md** | `claudemd/*.md` | `teamai push` / `pull` |
-| **Env** | `env/` | `teamai env` |
-| **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
-| **MCP Server** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
-| **Packages** | `teamai.yaml` | `teamai packages` |
-| **Models（模型）** | — | session start 时由 local-agent 下发 |
+| **Skills** | `skills/<name>/SKILL.md` | |
+| **Rules** | `rules/*.md` | |
+| **Docs** | `docs/` | 项目基础文档，默认不全量加载（渐进式披露） |
+| **Agents** | `agents/<name>.yaml` | |
+| **Culture** | `culture.md` | |
+| **CLAUDE.md** | `claudemd/*.md` | |
+| **Env** | `env/` | |
+| **Hooks** | `hooks/hooks.yaml` | |
+| **MCP Server** | `mcp/mcp.yaml` | |
+| **Packages** | `teamai.yaml` | 目前只支持 npm 包和 Claude 插件 |
+| **Models** | — | 暂时没有对全部 provider 实现 |
 
 文件格式与完整工作流见[使用指南](docs/usage-guide.zh-CN.md)。
 

@@ -114,19 +114,19 @@ teamai push → create branch + MR → reviewer approves + merges
 
 Each resource is delivered to every agent:
 
-| Resource | In the team repo | Commands |
-|----------|------------------|----------|
-| **Skills** | `skills/<name>/SKILL.md` | `teamai push` / `pull`, `teamai skill exclude` |
-| **Rules** | `rules/*.md` | `teamai push` / `pull` |
-| **Docs** | `docs/` | `teamai push` / `pull` |
-| **Agents** | `agents/<name>.yaml` | `teamai push` / `pull` |
-| **Culture** | `culture.md` | `teamai push` / `pull` |
-| **CLAUDE.md** | `claudemd/*.md` | `teamai push` / `pull` |
-| **Env** | `env/` | `teamai env` |
-| **Hooks** | `hooks/hooks.yaml` | `teamai hooks list \| inject \| remove` |
-| **MCP servers** | `mcp/mcp.yaml` | `teamai mcp list \| inject \| remove` |
-| **Packages** | `teamai.yaml` | `teamai packages` |
-| **Models** | — | local-agent on session start |
+| Resource | In the team repo | Notes |
+|----------|------------------|-------|
+| **Skills** | `skills/<name>/SKILL.md` | |
+| **Rules** | `rules/*.md` | |
+| **Docs** | `docs/` | Foundational project docs; not all loaded by default (progressive disclosure) |
+| **Agents** | `agents/<name>.yaml` | |
+| **Culture** | `culture.md` | |
+| **CLAUDE.md** | `claudemd/*.md` | |
+| **Env** | `env/` | |
+| **Hooks** | `hooks/hooks.yaml` | |
+| **MCP servers** | `mcp/mcp.yaml` | |
+| **Packages** | `teamai.yaml` | Currently npm packages and Claude Code plugins only |
+| **Models** | — | Not implemented for every provider yet |
 
 For file formats and full workflows, see the [Usage Guide](docs/usage-guide.md).
 
