@@ -121,7 +121,9 @@ describe('pull with excluded skills', () => {
   it('removes a previously installed excluded skill', async () => {
     const installed = path.join(homeDir, '.claude', 'skills', 'excluded-skill');
     await fse.ensureDir(installed);
-    await fse.writeFile(path.join(installed, 'SKILL.md'), '# stale copy');
+    // Deployed copy is byte-identical to the team-repo source (a real pull copies
+    // it verbatim), so the data-safety gate lets cleanup delete it.
+    await fse.writeFile(path.join(installed, 'SKILL.md'), '---\nname: excluded-skill\ndescription: excluded\n---\n');
 
     await pull({ force: true });
 

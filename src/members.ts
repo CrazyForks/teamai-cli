@@ -22,6 +22,45 @@ export async function getMemberConfig(repoPath: string, username: string): Promi
   }
 }
 
+/**
+ * Merge a member's roster entry with newly-active role/projects, returning the
+ * updated config and whether anything changed. Projects use **append + dedupe**
+ * (the roster is "every project I've participated in" across directories);
+ * `role` is overwritten when a non-empty one is supplied. `registeredAt` is
+ * preserved for an existing member. Pure — callers persist + push the result.
+ */
+export function mergeMemberConfig(
+  existing: MemberConfig | null,
+  input: { username: string; role?: string; projects?: string[] },
+): { config: MemberConfig; changed: boolean } {
+  const prevProjects = existing?.projects ?? [];
+  const mergedProjects: string[] = [...prevProjects];
+  const seen = new Set(prevProjects);
+  for (const p of input.projects ?? []) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      mergedProjects.push(p);
+    }
+  }
+
+  const role = input.role ?? existing?.role;
+
+  const config: MemberConfig = {
+    username: input.username,
+    displayName: existing?.displayName || input.username,
+    registeredAt: existing?.registeredAt ?? new Date().toISOString(),
+    ...(role ? { role } : {}),
+    ...(mergedProjects.length > 0 ? { projects: mergedProjects } : {}),
+  };
+
+  const changed =
+    !existing ||
+    mergedProjects.length !== prevProjects.length ||
+    (role ?? '') !== (existing.role ?? '');
+
+  return { config, changed };
+}
+
 export async function listMembers(options: GlobalOptions): Promise<void> {
   const projectConfig = await detectProjectConfig();
   const localConfig = projectConfig ?? (await requireInit()).localConfig;

@@ -21,6 +21,7 @@ import {
 import { getUserHome } from './utils/home.js';
 import { describeRoles, loadRolesManifest } from './roles.js';
 import { loadProjectsManifest, listProjectIds } from './projects.js';
+import { getMemberConfig, mergeMemberConfig } from './members.js';
 import { askQuestion, askConfirmation, askSelection, closePrompt } from './utils/prompt.js';
 import {
   normalizeAgentList,
@@ -908,15 +909,21 @@ export async function initSelfRepo(options: GlobalOptions & {
       const memberDir = path.join(wt, 'members');
       await ensureDir(memberDir);
       const memberPath = path.join(memberDir, `${username}.yaml`);
-      if (!await pathExists(memberPath)) {
-        await writeFile(memberPath, YAML.stringify({
-          username,
-          displayName: username,
-          registeredAt: new Date().toISOString(),
-        }));
-        const pushed = await commitAndPushReports(localConfig, `[teamai] Register member: ${username}`, ['members/']);
+      const isNewSelfMember = !await pathExists(memberPath);
+      const existingSelfMember = await getMemberConfig(wt, username);
+      const { config: selfMemberConfig, changed: selfMemberChanged } = mergeMemberConfig(existingSelfMember, {
+        username,
+        projects: localConfig.projects,
+      });
+      if (selfMemberChanged) {
+        await writeFile(memberPath, YAML.stringify(selfMemberConfig));
+        const pushed = await commitAndPushReports(localConfig, isNewSelfMember
+          ? `[teamai] Register member: ${username}`
+          : `[teamai] Update member roster: ${username}`, ['members/']);
         if (pushed) {
-          log.success('Member registered on the teamai-reports branch');
+          log.success(isNewSelfMember
+            ? 'Member registered on the teamai-reports branch'
+            : 'Member roster updated on the teamai-reports branch');
         } else {
           log.warn('Member registration could not be pushed (no write access?). You are still set up locally.');
         }
@@ -1233,21 +1240,39 @@ export async function init(options: GlobalOptions & {
     }
   }
 
-  // Step 5: Create member file
+  // Resolve active projects (non-interactive: --project flag only) so the roster
+  // records project membership. Role selection stays in its original place below
+  // (it may prompt) — the member file's project membership is the P3 goal here.
+  let resolvedProjects: string[] = [];
+  try {
+    resolvedProjects = (await resolveActiveProjects(localPath, options.project)).projects ?? [];
+  } catch (error) {
+    // A bad --project is a user error on the main init path: fail loudly.
+    log.error((error as Error).message);
+    process.exit(1);
+  }
+
+  // Step 5: Create or update member file. Membership is the union of every
+  // project this user has init'd (append + dedupe), so re-running init in another
+  // project directory adds that project to the roster rather than being a no-op.
   const memberPath = path.join(localPath, 'members', `${username}.yaml`);
   const isNewMember = !await pathExists(memberPath);
-  if (isNewMember) {
-    const memberYaml = YAML.stringify({
-      username,
-      displayName: username,
-      registeredAt: new Date().toISOString(),
-    });
-    await writeFile(memberPath, memberYaml);
-    log.success(`Registered as team member: ${username}`);
+  const existingMember = await getMemberConfig(localPath, username);
+  const { config: memberConfig, changed: memberChanged } = mergeMemberConfig(existingMember, {
+    username,
+    projects: resolvedProjects,
+  });
+  if (memberChanged) {
+    await writeFile(memberPath, YAML.stringify(memberConfig));
+    log.success(isNewMember
+      ? `Registered as team member: ${username}`
+      : `Updated member roster: ${username}${memberConfig.projects ? ` (projects: ${memberConfig.projects.join(', ')})` : ''}`);
 
     if (!options.dryRun) {
       try {
-        await pushRepoDirectly(localPath, `[teamai] Register member: ${username}`, [
+        await pushRepoDirectly(localPath, isNewMember
+          ? `[teamai] Register member: ${username}`
+          : `[teamai] Update member roster: ${username}`, [
           'members/',
           'teamai.yaml',
           'skills/.gitkeep',
@@ -1326,13 +1351,8 @@ export async function init(options: GlobalOptions & {
     }
   }
 
-  try {
-    Object.assign(localConfig, await resolveActiveProjects(localPath, options.project));
-  } catch (error) {
-    // A bad --project is a user error on the main init path: fail loudly.
-    log.error((error as Error).message);
-    process.exit(1);
-  }
+  // Projects were already resolved (non-interactively) before member registration.
+  localConfig.projects = resolvedProjects;
 
   // Persist --agent into enabledAgents (additive across runs)
   const requestedAgents = normalizeAgentList(options.agent);

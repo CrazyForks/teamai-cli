@@ -222,6 +222,20 @@ projects:
       learnings: [hai-inference]
 ```
 
+**Commands** (low-frequency correction/query, mirroring `teamai roles …`):
+
+```bash
+teamai projects list                 # Defined projects + the ones active in this directory
+teamai projects set hai-inference    # Set active project(s) for this directory (overwrite; comma-separated or repeated; empty to clear)
+teamai projects members hai-inference # Who is registered on a project
+```
+
+Member registration is a **side-effect of `init`**: running `teamai init --project <id>`
+appends `<id>` to your `members/<user>.yaml` roster (append + dedupe across
+directories), so the team can answer "who is on project X". `teamai push --project <id>`
+pushes skills into that project's skills namespace (resolved from the manifest),
+mirroring `teamai push --role`.
+
 Example local config:
 
 ```yaml

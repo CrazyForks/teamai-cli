@@ -210,6 +210,19 @@ projects:
       learnings: [hai-inference]
 ```
 
+**命令**（低频的事后修正与查询，对标 `teamai roles …`）：
+
+```bash
+teamai projects list                 # 已定义的项目 + 本目录激活的项目
+teamai projects set hai-inference    # 设置本目录激活的项目（覆盖语义；逗号分隔或重复；留空清除）
+teamai projects members hai-inference # 查看某项目下注册了哪些成员
+```
+
+成员登记是 `init` 的**副作用**：执行 `teamai init --project <id>` 会把 `<id>`
+追加进你的 `members/<user>.yaml` 名册（跨目录 append + 去重），于是团队侧可以回答
+「谁在项目 X」。`teamai push --project <id>` 会把 skill 推送到该项目的 skills
+namespace（从 manifest 解析），对标 `teamai push --role`。
+
 本地配置示例：
 
 ```yaml

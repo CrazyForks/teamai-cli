@@ -7,6 +7,7 @@ import {
   dirContentEqual,
   getFileMtime,
   getDirLatestMtime,
+  hasVcsMetadataRecursive,
 } from '../utils/fs.js';
 
 describe('fileContentEqual', () => {
@@ -286,5 +287,64 @@ describe('dirContentEqual', () => {
     await fse.writeFile(path.join(dirB, 'CONTRIBUTORS'), 'bob\n');
 
     expect(await dirContentEqual(dirA, dirB, ['CONTRIBUTORS'])).toBe(true);
+  });
+});
+
+describe('hasVcsMetadataRecursive', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-vcs-test-'));
+  });
+
+  afterEach(async () => {
+    await fse.remove(tmpDir);
+  });
+
+  it('returns false for a plain directory tree with no VCS metadata', async () => {
+    await fse.outputFile(path.join(tmpDir, 'SKILL.md'), '# x');
+    await fse.outputFile(path.join(tmpDir, 'scripts', 'run.py'), 'x');
+    expect(await hasVcsMetadataRecursive(tmpDir)).toBe(false);
+  });
+
+  it('detects a .git directory at the root', async () => {
+    await fse.outputFile(path.join(tmpDir, 'SKILL.md'), '# x');
+    await fse.ensureDir(path.join(tmpDir, '.git'));
+    expect(await hasVcsMetadataRecursive(tmpDir)).toBe(true);
+  });
+
+  it('detects a NESTED .git directory (scripts/.git)', async () => {
+    await fse.outputFile(path.join(tmpDir, 'scripts', 'run.py'), 'x');
+    await fse.ensureDir(path.join(tmpDir, 'scripts', '.git'));
+    expect(await hasVcsMetadataRecursive(tmpDir)).toBe(true);
+  });
+
+  it('detects a .git FILE (submodule/worktree link), not just a directory', async () => {
+    await fse.outputFile(path.join(tmpDir, 'sub', '.git'), 'gitdir: /elsewhere/.git/modules/sub\n');
+    expect(await hasVcsMetadataRecursive(tmpDir)).toBe(true);
+  });
+
+  it('detects .hg and .svn too', async () => {
+    const hg = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-hg-'));
+    const svn = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-svn-'));
+    try {
+      await fse.ensureDir(path.join(hg, 'a', '.hg'));
+      await fse.ensureDir(path.join(svn, '.svn'));
+      expect(await hasVcsMetadataRecursive(hg)).toBe(true);
+      expect(await hasVcsMetadataRecursive(svn)).toBe(true);
+    } finally {
+      await fse.remove(hg);
+      await fse.remove(svn);
+    }
+  });
+
+  it('ignores .git inside node_modules (dependency noise, not user work)', async () => {
+    await fse.outputFile(path.join(tmpDir, 'SKILL.md'), '# x');
+    await fse.ensureDir(path.join(tmpDir, 'node_modules', 'dep', '.git'));
+    expect(await hasVcsMetadataRecursive(tmpDir)).toBe(false);
+  });
+
+  it('returns false for a missing directory', async () => {
+    expect(await hasVcsMetadataRecursive(path.join(tmpDir, 'nope'))).toBe(false);
   });
 });

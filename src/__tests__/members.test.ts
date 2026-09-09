@@ -32,7 +32,7 @@ vi.mock('../utils/logger.js', () => ({
   })),
 }));
 
-import { getMemberConfig, listMembers } from '../members.js';
+import { getMemberConfig, listMembers, mergeMemberConfig } from '../members.js';
 import { requireInit } from '../config.js';
 import { log } from '../utils/logger.js';
 
@@ -305,5 +305,42 @@ describe('listMembers', () => {
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).not.toContain('[readonly]');
     expect(allOutput).toContain('legacy');
+  });
+});
+
+describe('mergeMemberConfig', () => {
+  it('registers a brand-new member with projects', () => {
+    const { config, changed } = mergeMemberConfig(null, { username: 'alice', projects: ['hai'] });
+    expect(changed).toBe(true);
+    expect(config.username).toBe('alice');
+    expect(config.displayName).toBe('alice');
+    expect(config.projects).toEqual(['hai']);
+    expect(config.registeredAt).toBeTruthy();
+  });
+
+  it('appends + dedupes projects onto an existing member (union roster)', () => {
+    const existing = { username: 'alice', displayName: 'Alice', registeredAt: '2026-01-01T00:00:00Z', projects: ['hai'] };
+    const { config, changed } = mergeMemberConfig(existing, { username: 'alice', projects: ['billing', 'hai'] });
+    expect(changed).toBe(true);
+    expect(config.projects).toEqual(['hai', 'billing']); // append order preserved, hai deduped
+    expect(config.registeredAt).toBe('2026-01-01T00:00:00Z'); // preserved
+    expect(config.displayName).toBe('Alice'); // preserved
+  });
+
+  it('reports no change when the project is already on the roster', () => {
+    const existing = { username: 'alice', displayName: '', registeredAt: '2026-01-01T00:00:00Z', projects: ['hai'] };
+    const { changed } = mergeMemberConfig(existing, { username: 'alice', projects: ['hai'] });
+    expect(changed).toBe(false);
+  });
+
+  it('overwrites role when supplied, preserves it otherwise', () => {
+    const existing = { username: 'alice', displayName: '', registeredAt: '2026-01-01T00:00:00Z', role: 'dev', projects: ['hai'] };
+    expect(mergeMemberConfig(existing, { username: 'alice', role: 'pm' }).config.role).toBe('pm');
+    expect(mergeMemberConfig(existing, { username: 'alice' }).config.role).toBe('dev');
+  });
+
+  it('omits projects key entirely when there are none', () => {
+    const { config } = mergeMemberConfig(null, { username: 'bob' });
+    expect(config.projects).toBeUndefined();
   });
 });
