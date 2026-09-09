@@ -110,6 +110,38 @@ teamai push → create branch + MR → reviewer approves + merges
               SessionStart hook → teamai pull → synced to local AI tools
 ```
 
+### Team Skills
+
+A skill is a directory with `SKILL.md`. `teamai push` opens an MR; after merge, `teamai pull` delivers it to every agent.
+
+```markdown
+---
+name: deploy-helper
+description: Deploy the service the team's way
+---
+# Deploy Helper
+1. Run `npm test`
+2. Run `./deploy.sh`
+```
+
+```bash
+teamai push
+```
+
+### Team Rules
+
+Markdown conventions injected into each agent's rules. Same push → review → pull flow.
+
+```markdown
+# Code review
+- Every function needs JSDoc
+- No `any`
+```
+
+```bash
+teamai push
+```
+
 ### Team Hooks
 
 Declare custom hooks in `hooks/hooks.yaml` and `teamai pull` delivers them to every AI tool:

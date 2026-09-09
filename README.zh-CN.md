@@ -110,6 +110,38 @@ teamai push → 创建分支 + MR → reviewer 审批合并
            SessionStart hook → teamai pull → 同步到本地 AI 工具
 ```
 
+### 团队 Skills
+
+Skill 是带 `SKILL.md` 的目录。`teamai push` 开 MR，合并后 `teamai pull` 分发到每个 Agent。
+
+```markdown
+---
+name: deploy-helper
+description: 按团队方式部署服务
+---
+# Deploy Helper
+1. 运行 `npm test`
+2. 运行 `./deploy.sh`
+```
+
+```bash
+teamai push
+```
+
+### 团队规范
+
+Markdown 规范，注入到各 Agent 的 rules。同样走 push → 评审 → pull。
+
+```markdown
+# 代码审查
+- 函数需要 JSDoc
+- 禁止 `any`
+```
+
+```bash
+teamai push
+```
+
 ### 团队 Hooks
 
 在 `hooks/hooks.yaml` 中声明自定义 hooks，`teamai pull` 自动分发到所有 AI 工具：
