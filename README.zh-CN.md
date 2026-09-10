@@ -191,6 +191,7 @@ Matched: conflict | Missing: port
 teamai import --from-repo https://github.com/org/repo
 teamai import --from-org myorg              # 批量导入所有仓库
 teamai codebase --extract /path/to/repo     # 本地提取到 teamwiki/
+teamai codebase --reconcile --output /path/to/repo # 将产品文档映射到代码页面
 teamai codebase --lint --output /path/to/repo # 检查本地提取的图谱
 ```
 
@@ -243,6 +244,7 @@ teamai recall maintenance --update-quality       # 为过时 skills / docs 生�
 | `teamai recall maintenance` | 维护知识库健康：清理低置信度 learnings、回写置信度、标记过时条目 |
 | `teamai import` | 导入知识（`--dir`、`--from-repo`、`--from-org`、`--from-repo-list`、`--from-mr`） |
 | `teamai codebase --extract [path]` | 提取代码事实并在 `teamwiki/` 下构建本地图谱 |
+| `teamai codebase --reconcile` | 将产品文档与提取的代码知识进行对账 |
 | `teamai codebase --lint` | 知识图谱健康检查 |
 | `teamai ci extract-mr --url <url>` | CI：从 MR 提取知识、发评论、合并后写入 |
 | `teamai members` | 查看团队成员 |

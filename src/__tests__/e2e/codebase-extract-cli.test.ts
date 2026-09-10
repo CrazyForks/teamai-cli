@@ -121,3 +121,74 @@ describe('teamai codebase extract CLI (issue #360 slice 1)', () => {
     }
   });
 });
+
+describe('teamai codebase reconcile CLI (issue #360 slice 2)', () => {
+  it('reconciles product and code pages with the built CLI', async () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-reconcile-360-'));
+    const caller = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-reconcile-caller-'));
+    try {
+      const srcDir = path.join(fixture, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, 'a.ts'), "import { b } from './b';\nexport const a = b;\n");
+      fs.writeFileSync(path.join(srcDir, 'b.ts'), 'export const b = 1;\n');
+      const extracted = await runCLI(
+        ['codebase', '--extract', fixture, '--project', 'auth', '--json', '--max-files', '10'],
+        caller,
+      );
+      expect(extracted.code, extracted.output).toBe(0);
+
+      const productDir = path.join(fixture, 'teamwiki', 'product');
+      fs.mkdirSync(productDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(productDir, 'login.md'),
+        '# Login\n\n`component` maps to extracted code.\n',
+      );
+
+      const help = await runCLI(['codebase', '--help']);
+      expect(help.code, help.output).toBe(0);
+      expect(help.stdout).toContain('--reconcile');
+      const skill = fs.readFileSync(path.join(ROOT, 'skills/team-wiki-codebase/SKILL.md'), 'utf8');
+      const command = [...skill.matchAll(/`(teamai codebase [^`]+)`/g)]
+        .map(match => match[1])
+        .find(candidate => candidate.includes('--reconcile'));
+      expect(command).toBeDefined();
+      const reconcileArgs = command!.split(/\s+/).slice(1)
+        .map(arg => arg === '<repo>' ? fixture : arg);
+
+      const missing = await runCLI(
+        ['codebase', '--reconcile', '--output', path.join(fixture, 'missing')],
+        fixture,
+      );
+      expect(missing.code, missing.output).toBe(1);
+      expect(missing.stdout).toContain('No teamwiki found');
+
+      const graphPath = path.join(fixture, 'teamwiki', '.indices', 'graph-index.json');
+      const graphBeforePreview = fs.readFileSync(graphPath, 'utf8');
+      const preview = await runCLI(
+        ['--dry-run', ...reconcileArgs, '--json'],
+        caller,
+      );
+      expect(preview.code, preview.output).toBe(0);
+      expect(JSON.parse(preview.stdout)).toMatchObject({ mappings: 2 });
+      expect(fs.readFileSync(graphPath, 'utf8')).toBe(graphBeforePreview);
+
+      const result = await runCLI(
+        [...reconcileArgs, '--json'],
+        caller,
+      );
+      expect(result.code, result.output).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ mappings: 2 });
+
+      const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')) as {
+        nodes: Array<{ slug: string }>;
+        edges: Array<{ from: string; to: string; relation: string }>;
+      };
+      expect(graph.edges).toContainEqual(expect.objectContaining({ relation: 'MAPS_TO' }));
+      const nodeSlugs = new Set(graph.nodes.map(node => node.slug));
+      expect(graph.edges.every(edge => nodeSlugs.has(edge.from) && nodeSlugs.has(edge.to))).toBe(true);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+      fs.rmSync(caller, { recursive: true, force: true });
+    }
+  });
+});

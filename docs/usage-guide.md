@@ -1159,6 +1159,9 @@ teamai codebase --extract /path/to/repo --project my-service
 # Incremental refresh: reuse the original repository path and project slug
 teamai codebase --extract /path/to/repo --project my-service --incremental
 
+# Reconcile teamwiki/product and teamwiki/docs with extracted code pages
+teamai codebase --reconcile --output /path/to/repo
+
 # Check the local graph; --output is the repository root, not teamwiki/
 teamai codebase --lint --output /path/to/repo
 ```
