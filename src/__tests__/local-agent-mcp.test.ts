@@ -338,7 +338,8 @@ describe('local-agent: MCP install/uninstall commands', () => {
     expect(acks[0].status).toBe('success');
 
     // 检查 workspace 级配置
-    const mcpConfig = await fse.readJson(path.join(wsPath, '.codebuddy', 'mcp.json'));
+    const mcpConfig = await fse.readJson(path.join(wsPath, '.mcp.json'));
+    expect(await fse.pathExists(path.join(wsPath, '.codebuddy', 'mcp.json'))).toBe(false);
     expect(mcpConfig.mcpServers['enterprise-search']).toBeDefined();
     expect(mcpConfig.mcpServers['enterprise-search'].url).toBe('https://search.example.com/mcp');
 

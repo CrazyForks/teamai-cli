@@ -707,10 +707,22 @@ Where each tool's servers land:
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
-| codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
+| codebuddy | `~/.codebuddy/mcp.json` | `<project>/.mcp.json` |
+| workbuddy | `~/.workbuddy/mcp.json` | `<project>/.workbuddy/mcp.json` |
 | codex | `~/.codex/config.toml` | not supported |
 | qoder | `~/.qoder/settings.json` | `<project>/.qoder/settings.json` |
 | opencode | `~/.config/opencode/opencode.json` | `<project>/opencode.json` |
+
+
+CodeBuddy Code's [MCP documentation](https://www.codebuddy.ai/docs/cli/mcp)
+lists the project root's `.mcp.json` as its preferred project configuration.
+This is separate from TeamAI's user-scope `~/.codebuddy/mcp.json` target.
+Explicit `toolPaths.codebuddy.mcpProject` values in `teamai.yaml` still take
+precedence. For an existing team that pins run
+`teamai mcp remove` in the affected workspace before changing that value to
+`.mcp.json`, then run `teamai mcp inject`. Review and preserve any personal
+servers in either file; TeamAI does not migrate or delete the old file.
+Claude Code also reads the root `.mcp.json`, so this file is shared by both tools.
 
 Codex supports `stdio` and `http`; `sse` is skipped. Qoder supports the Claude-compatible `mcpServers` format in its scope-specific `.qoder/settings.json`. OpenCode supports `stdio` (written as its `type:"local"` shape) and `http` (`type:"remote"`); `sse` is skipped, and its servers live under the `mcp` key of the shared `opencode.json`. Ownership is tracked in `~/.teamai/managed-mcp.json` — hand-added servers are left alone; name collisions skip unless `--force`.
 
@@ -718,7 +730,7 @@ Codex supports `stdio` and `http`; `sse` is skipped. Qoder supports the Claude-c
 
 teamai **resolves every `${VAR}` to its value and writes it verbatim** into each tool's config (new files are created `0600`). It does not rely on any tool's own env-var expansion: that expansion is fragile — most decisively, IDEs launched from the GUI (Dock/Launchpad) never inherit your shell's exported variables, so a `${VAR}` placeholder expands to empty and the server 401s. Resolving to plaintext makes the token present no matter how the tool is started.
 
-> ⚠️ **The resolved token lands on disk.** Project-scope MCP configs (`.mcp.json`, `.cursor/mcp.json`, `.codebuddy/mcp.json`, `.codex/config.toml`, `opencode.json`) then contain the literal secret — add them to `.gitignore` and never commit them.
+> ⚠️ **The resolved token lands on disk.** Project-scope MCP configs (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, `opencode.json`) then contain the literal secret — add them to `.gitignore` and never commit them.
 
 Claude Code may show project `.mcp.json` servers as pending approval until you accept them once in an interactive session.
 

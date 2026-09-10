@@ -20,7 +20,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { reconcileMcpForConfig, resolveMcpTargets, spliceCodexBlock, codexServerNames } from '../mcp-reconcile.js';
-import type { TeamaiConfig, LocalConfig } from '../types.js';
+import { TeamaiConfigSchema, type TeamaiConfig, type LocalConfig } from '../types.js';
 
 const TOOL_PATHS = {
   claude: { skills: '.claude/skills', settings: '.claude/settings.json', mcp: '.claude.json', mcpProject: '.mcp.json' },
@@ -332,6 +332,50 @@ servers:
     expect(await fse.pathExists(path.join(projectRoot, '.codex', 'config.toml'))).toBe(false);
     expect(await fse.pathExists(path.join(projectRoot, '.tclaude', '.claude.json'))).toBe(false);
     expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
+  });
+
+  it('uses CodeBuddy project defaults without changing user scope or personal servers', async () => {
+    const projectRoot = path.join(tmpDir, 'codebuddy-project');
+    await fse.ensureDir(path.join(projectRoot, '.codebuddy'));
+    await fse.ensureDir(path.join(projectRoot, '.workbuddy'));
+    await fse.ensureDir(path.join(homeDir, '.codebuddy'));
+    const projectFile = path.join(projectRoot, '.mcp.json');
+    const userFile = path.join(homeDir, '.codebuddy', 'mcp.json');
+    const personal = { mcpServers: { personal: { command: 'my-server' } }, custom: true };
+    await fse.writeJson(projectFile, personal);
+    await fse.writeJson(userFile, personal);
+    const defaults = TeamaiConfigSchema.parse({ team: 't', repo: 'r', provider: 'git' });
+    const projectConfig: LocalConfig = { ...localConfig, scope: 'project', projectRoot };
+    await writeMcpYaml(`
+servers:
+  - name: team-codebuddy
+    transport: http
+    url: https://example.com/mcp
+    tools: [codebuddy]
+`);
+
+    const targets = await resolveMcpTargets(defaults, projectConfig);
+    expect(targets.find((target) => target.tool === 'codebuddy')?.file).toBe(projectFile);
+    expect(targets.find((target) => target.tool === 'workbuddy')?.file)
+      .toBe(path.join(projectRoot, '.workbuddy', 'mcp.json'));
+    const userTargets = await resolveMcpTargets(defaults, localConfig);
+    expect(userTargets.find((target) => target.tool === 'codebuddy')?.file).toBe(userFile);
+
+    await reconcileMcpForConfig(defaults, projectConfig);
+    expect(await fse.readJson(projectFile)).toEqual({
+      ...personal,
+      mcpServers: {
+        ...personal.mcpServers,
+        'team-codebuddy': { type: 'http', url: 'https://example.com/mcp' },
+      },
+    });
+    expect(await fse.pathExists(path.join(projectRoot, '.codebuddy', 'mcp.json'))).toBe(false);
+    expect(await fse.readJson(userFile)).toEqual(personal);
+    expect((await reconcileMcpForConfig(defaults, projectConfig)).wrote).toBe(false);
+
+    await reconcileMcpForConfig(defaults, projectConfig, { removeAll: true });
+    expect(await fse.readJson(projectFile)).toEqual(personal);
+    expect(await fse.readJson(userFile)).toEqual(personal);
   });
 
   it('resolves a project secret to plaintext in every tool, keyed off `type`', async () => {
