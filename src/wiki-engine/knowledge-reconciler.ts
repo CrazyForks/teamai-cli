@@ -8,7 +8,7 @@ import {
   toPageSlug,
   validateGraph,
 } from './core/graph-index.schema.js';
-import type { GraphIndex, GraphNode, GraphEdge, GraphEdgeSource } from './core/graph-index.schema.js';
+import type { GraphIndex, GraphNode, GraphEdge, GraphEdgeSource, RelationType } from './core/graph-index.schema.js';
 import type { WikiConfidence } from './core/wiki-protocol.js';
 import { buildConfidence } from './reconciler-v2-types.js';
 import type {
@@ -81,6 +81,18 @@ const CODE_PAGE_DOMAIN = 'code-knowledge';
 const REPAIRABLE_CODE_EDGE_SOURCES = new Set<GraphEdgeSource>(['code-ast', 'code-heuristic']);
 const MISSING_PATH_ERROR_CODE = 'ENOENT';
 const REPAIRABLE_VALIDATION_ISSUE_CODE = 'edge.missing_node';
+const SELF_LOOP_VALIDATION_ISSUE_CODE = 'edge.self_loop';
+// The extractor deliberately emits a file-level IMPLEMENTS self-loop when a
+// class implements an interface defined in the same file (edges are
+// file-to-file, not symbol-to-symbol). validateGraph flags every self-loop as
+// an issue with no reference back to the edge, so this repeats its own
+// from === to + source/relation check rather than broadening what validateGraph
+// itself treats as fatal for every other caller.
+function isExpectedSelfLoop(edge: GraphEdge): boolean {
+  return edge.from === edge.to
+    && edge.relation === ('IMPLEMENTS' satisfies RelationType)
+    && !!edge.source && REPAIRABLE_CODE_EDGE_SOURCES.has(edge.source);
+}
 
 async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
   const graphPath = path.join(wikiRoot, '.indices', 'graph-index.json');
@@ -93,7 +105,13 @@ async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
     graph.nodes,
     graph.edges.filter(edge => edge.source !== BRIDGE_EDGE_SOURCE),
   );
-  if (validateGraph(base).issues.some(issue => issue.code !== REPAIRABLE_VALIDATION_ISSUE_CODE)) {
+  const hasUnexpectedSelfLoop = base.edges.some(edge => edge.from === edge.to && !isExpectedSelfLoop(edge));
+  if (
+    hasUnexpectedSelfLoop
+    || validateGraph(base).issues.some(issue =>
+      issue.code !== REPAIRABLE_VALIDATION_ISSUE_CODE && issue.code !== SELF_LOOP_VALIDATION_ISSUE_CODE,
+    )
+  ) {
     throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
   }
   const nodeSlugs = new Set(base.nodes.map(node => node.slug));
@@ -114,7 +132,9 @@ async function loadReconciliationBase(wikiRoot: string): Promise<GraphIndex> {
     }
   }
   const repaired = mergeGraphs(base, createGraphIndex(endpointNodes));
-  if (!validateGraph(repaired).valid) {
+  if (
+    validateGraph(repaired).issues.some(issue => issue.code !== SELF_LOOP_VALIDATION_ISSUE_CODE)
+  ) {
     throw new Error(`Cannot reconcile invalid graph index at ${graphPath}`);
   }
   return repaired;

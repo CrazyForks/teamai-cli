@@ -424,4 +424,30 @@ describe('codebase reconciliation', () => {
     expect(result.graphEdges).toHaveLength(2);
     expect(result.mappings).toBe(2);
   });
+
+  it('reconciles a graph containing an extractor-generated same-file IMPLEMENTS self-loop (#475)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-reconcile-self-loop-'));
+    temporaryDirectories.push(root);
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'teamwiki', 'product'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'src', 'auth.ts'),
+      'export interface AuthService { login(): void; }\nexport class LocalAuth implements AuthService { login(): void {} }\n',
+    );
+    fs.writeFileSync(path.join(root, 'teamwiki', 'product', 'auth.md'), '# Auth\nUse `AuthService` for login.\n');
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await codebaseCmd({ extract: root, project: 'auth', json: true });
+    const extracted = await loadGraphIndex(path.join(root, 'teamwiki'));
+    expect(extracted?.edges).toContainEqual(
+      expect.objectContaining({ from: 'src/auth.ts', to: 'src/auth.ts', relation: 'IMPLEMENTS', source: 'code-ast' }),
+    );
+
+    await expect(codebaseCmd({ reconcile: true, output: root, json: true })).resolves.toBeUndefined();
+
+    const reconciled = await loadGraphIndex(path.join(root, 'teamwiki'));
+    expect(reconciled?.edges).toContainEqual(
+      expect.objectContaining({ from: 'src/auth.ts', to: 'src/auth.ts', relation: 'IMPLEMENTS' }),
+    );
+  });
 });
