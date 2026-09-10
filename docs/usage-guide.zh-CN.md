@@ -692,10 +692,22 @@ servers:
 |---|---|---|
 | claude | `~/.claude.json` | `<project>/.mcp.json` |
 | cursor | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
-| codebuddy / workbuddy | `~/.<tool>/mcp.json` | `<project>/.<tool>/mcp.json` |
+| codebuddy | `~/.codebuddy/mcp.json` | `<project>/.mcp.json` |
+| workbuddy | `~/.workbuddy/mcp.json` | `<project>/.workbuddy/mcp.json` |
 | codex | `~/.codex/config.toml` | 不支持 |
 | qoder | `~/.qoder/settings.json` | `<project>/.qoder/settings.json` |
 | opencode | `~/.config/opencode/opencode.json` | `<project>/opencode.json` |
+
+
+CodeBuddy Code 的 [MCP 文档](https://www.codebuddy.cn/docs/cli/mcp)
+明确将项目根目录的 `.mcp.json` 列为首选项目配置。
+该路径与 TeamAI 的用户级目标 `~/.codebuddy/mcp.json` 相互独立。
+`teamai.yaml` 中显式设置的 `toolPaths.codebuddy.mcpProject` 仍然优先生效。
+已有团队若固定使用 `.codebuddy/mcp.json`，请先在对应工作区执行
+`teamai mcp remove`，再将该值改为 `.mcp.json`，最后运行
+`teamai mcp inject`。请检查并保留两处文件中自行添加的服务；
+TeamAI 不会迁移或删除旧文件。Claude Code 也读取根目录的 `.mcp.json`，
+因此两个工具共享该文件。
 
 Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。Qoder 使用对应作用域 `.qoder/settings.json` 中与 Claude 兼容的 `mcpServers` 格式。OpenCode 支持 `stdio`（写成其 `type:"local"` 形态）与 `http`（`type:"remote"`），`sse` 会被跳过，其 server 位于共享 `opencode.json` 的 `mcp` 键下。归属记录在 `~/.teamai/managed-mcp.json`——手动添加的 server 不动；与手写同名则跳过，除非 `--force`。
 
@@ -703,7 +715,7 @@ Codex 支持 `stdio` 与 `http`，`sse` 会被跳过。Qoder 使用对应作用�
 
 teamai 会**把每个 `${VAR}` 解析成取值后原样写入**各工具的配置文件（新建文件权限为 `0600`）。它不依赖任何工具自身的环境变量展开——因为那种展开很脆弱：最典型的是，以 GUI 方式（Dock/Launchpad）启动的 IDE 不会继承你 shell 中 `export` 的变量，`${VAR}` 占位符会展开为空、导致服务端 401。解析成明文可以保证无论工具如何启动，token 都在。
 
-> ⚠️ **解析后的 token 会落盘。** 项目级 MCP 配置（`.mcp.json`、`.cursor/mcp.json`、`.codebuddy/mcp.json`、`.codex/config.toml`、`opencode.json`）因此含有明文密钥——请把它们加入 `.gitignore`，切勿提交。
+> ⚠️ **解析后的 token 会落盘。** 项目级 MCP 配置（`.mcp.json`、`.cursor/mcp.json`、`.codex/config.toml`、`opencode.json`）因此含有明文密钥——请把它们加入 `.gitignore`，切勿提交。
 
 Claude Code 可能把来自仓库的 `.mcp.json` 标为待批准，需在交互式会话中确认一次。
 
