@@ -151,13 +151,15 @@ export async function status(options: GlobalOptions): Promise<void> {
  * auto-collects orphans (a renamed/moved/deleted project leaves its partition
  * behind), so this is how a user finds partitions safe to delete by hand.
  *
- * For each partition we recover the original project path — preferring the
- * `anchor` reverse-lookup file, falling back to the persisted
- * repo.businessRepoRoot / projectRoot in config.yaml (an older partition may
- * predate anchor files) — and mark it:
- *   - active  : the project path still exists on disk
- *   - orphan  : the path is gone (project deleted/moved) → safe to delete
- *   - unknown : no anchor and no usable config path → cannot tell
+ * The verdict rests on the `anchor` reverse-lookup file — the shared project
+ * anchor this partition is keyed by. The persisted repo.businessRepoRoot /
+ * projectRoot in config.yaml is read only as a DISPLAY fallback (an older
+ * partition may predate anchor files); it is a workspace path that can point at a
+ * linked worktree, so it must never drive the orphan verdict. We mark it:
+ *   - active  : anchor exists on disk
+ *   - orphan  : anchor is gone (project deleted/moved) → safe to delete
+ *   - unknown : no anchor → cannot confirm orphan (partition may still be active,
+ *               e.g. a pre-P3 partition still loaded by its main checkout)
  *   - corrupt : the dir name does not match slug(anchor) → tampered/half-written
  */
 async function statusAll(): Promise<void> {
@@ -177,7 +179,9 @@ async function statusAll(): Promise<void> {
     const partitionDir = path.join(root, slug);
     const anchor = await readAnchorFile(partitionDir);
 
-    // Recover the project path + read a bit of config for context.
+    // Recover the project path + read a bit of config for DISPLAY context. The
+    // anchor is the trustworthy source; the config's businessRepoRoot/projectRoot
+    // is only a display fallback (see the orphan-verdict note below).
     let projectPath = anchor;
     let scope: string | undefined;
     let kind: string | undefined;
@@ -191,13 +195,21 @@ async function statusAll(): Promise<void> {
       } catch { /* unreadable config — leave fields undefined */ }
     }
 
+    // The orphan verdict must rest ONLY on the anchor — it is the shared project
+    // anchor this partition is keyed by (projectSlug(anchor)). The config's
+    // businessRepoRoot/projectRoot is a persisted *workspace* path that may point
+    // at a linked worktree; its disappearance does NOT prove the shared partition
+    // (still used by the main checkout) is orphaned. So without a trustworthy
+    // anchor we never recommend deletion — classify as unknown.
     let state: string;
-    if (!projectPath) {
-      state = 'unknown (no anchor / project path)';
-    } else if (!(await pathExists(projectPath))) {
+    if (!anchor) {
+      state = projectPath
+        ? 'unknown — no anchor; cannot confirm orphan (partition may still be active)'
+        : 'unknown (no anchor / project path)';
+    } else if (!(await pathExists(anchor))) {
       state = 'ORPHAN — project path is gone, safe to delete';
       orphanCount++;
-    } else if (anchor && projectSlug(anchor) !== slug) {
+    } else if (projectSlug(anchor) !== slug) {
       state = 'corrupt — dir name does not match anchor';
     } else {
       state = 'active';

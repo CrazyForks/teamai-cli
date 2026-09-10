@@ -8,6 +8,23 @@ import fse from 'fs-extra';
 
 // ─── issue #374 P3: constant functionization + anchor-on-save ───────────────
 
+// Capture status --all output. Every line log.info/log.warn emits is collected
+// so the orphan/unknown verdict can be asserted.
+const logLines: string[] = [];
+vi.mock('../utils/logger.js', () => ({
+  log: {
+    info: (m: string) => { logLines.push(m); },
+    warn: (m: string) => { logLines.push(m); },
+    success: (m: string) => { logLines.push(m); },
+    error: (m: string) => { logLines.push(m); },
+    debug: () => {},
+    dim: (m: string) => { logLines.push(m); },
+  },
+  spinner: () => ({
+    start: () => ({ succeed() {}, fail() {}, warn() {}, info() {}, stop() {} }),
+  }),
+}));
+
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
 }
@@ -101,5 +118,70 @@ describe('P3 saveLocalConfigForScope writes an anchor into a partition', () => {
     } as never;
     await saveLocalConfigForScope(cfg, 'user');
     expect(await fse.pathExists(path.join(home, '.teamai', 'anchor'))).toBe(false);
+  });
+});
+
+describe('P3 status --all orphan verdict rests on the anchor, not a persisted workspace path', () => {
+  beforeEach(() => { logLines.length = 0; });
+
+  it('a pre-P3 partition (no anchor) whose config projectRoot points at a removed worktree is unknown, NOT orphan', async () => {
+    const { projectDataHome } = await import('../utils/partition.js');
+    // The shared project anchor (main checkout) still exists; the partition is
+    // keyed by it. This is what detectProjectConfig(mainCheckout) would load.
+    const mainCheckout = path.join(base, 'main-checkout');
+    fs.mkdirSync(mainCheckout, { recursive: true });
+    // A now-removed linked worktree, persisted in the pre-P3 config as projectRoot.
+    const removedWorktree = path.join(base, 'gone-worktree'); // never created
+
+    const partition = projectDataHome(mainCheckout);
+    fs.mkdirSync(partition, { recursive: true });
+    // Pre-P3 config: NO anchor file was written; projectRoot points at the worktree.
+    fs.writeFileSync(
+      path.join(partition, 'config.yaml'),
+      `repo:\n  localPath: ${path.join(partition, 'team-repo')}\n  remote: r\n  kind: git\nusername: u\nscope: project\nprojectRoot: ${removedWorktree}\n`,
+      'utf-8',
+    );
+
+    const { status } = await import('../status.js');
+    await status({ all: true } as never);
+
+    const out = logLines.join('\n');
+    // The removed worktree path must NOT trigger an ORPHAN "safe to delete" verdict.
+    expect(out).not.toContain('ORPHAN');
+    expect(out).not.toContain('safe to delete');
+    expect(out).toMatch(/unknown/);
+    // No orphan summary / rm -rf hint should be printed.
+    expect(out).not.toContain('rm -rf');
+  });
+
+  it('a partition whose anchor path is gone IS flagged orphan', async () => {
+    const { projectDataHome, writeAnchorFile } = await import('../utils/partition.js');
+    const goneProject = path.join(base, 'deleted-project'); // never created
+    const partition = projectDataHome(goneProject);
+    fs.mkdirSync(partition, { recursive: true });
+    await writeAnchorFile(partition, goneProject);
+
+    const { status } = await import('../status.js');
+    await status({ all: true } as never);
+
+    const out = logLines.join('\n');
+    expect(out).toContain('ORPHAN');
+    expect(out).toContain('rm -rf');
+  });
+
+  it('a partition whose anchor path still exists is active', async () => {
+    const { projectDataHome, writeAnchorFile } = await import('../utils/partition.js');
+    const liveProject = path.join(base, 'live-project');
+    fs.mkdirSync(liveProject, { recursive: true });
+    const partition = projectDataHome(liveProject);
+    fs.mkdirSync(partition, { recursive: true });
+    await writeAnchorFile(partition, liveProject);
+
+    const { status } = await import('../status.js');
+    await status({ all: true } as never);
+
+    const out = logLines.join('\n');
+    expect(out).toMatch(/\[active\]/);
+    expect(out).not.toContain('ORPHAN');
   });
 });

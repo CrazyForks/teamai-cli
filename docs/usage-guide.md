@@ -553,8 +553,11 @@ teamai status --all  # List every project data partition under ~/.teamai/project
 
 `--all` enumerates every project's machine-data partition and flags each as
 **active** (project still on disk), **ORPHAN** (project moved/deleted — its
-partition is safe to `rm -rf`), or **unknown**. teamai never garbage-collects
-orphans automatically, so this is how you find partitions to delete by hand.
+partition is safe to `rm -rf`), or **unknown** (no `anchor` file, so it cannot be
+confirmed orphaned — never recommended for deletion). The ORPHAN verdict rests
+only on the anchor, so a partition is never flagged for deletion on a hunch. teamai
+never garbage-collects orphans automatically, so this is how you find partitions to
+delete by hand.
 
 ### Role management
 

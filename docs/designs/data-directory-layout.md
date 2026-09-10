@@ -264,12 +264,17 @@ now writes it whenever the config lands in a partition (via the shared
 `writeAnchorFile`), so every partition can be resolved back to its project.
 
 **`status --all`.** Extends the existing `status` command with an `--all` flag that
-enumerates every partition under `~/.teamai/projects/`, recovers each project path
-(anchor file, falling back to the config's businessRepoRoot/projectRoot), and marks
-it active / ORPHAN (project path gone → safe to delete) / unknown / corrupt. teamai
-never auto-collects orphans (a renamed or deleted project leaves its partition
-behind — a `gc` command is explicitly out of scope), so this is how a user finds
-partitions safe to `rm -rf` by hand.
+enumerates every partition under `~/.teamai/projects/` and marks each
+active / ORPHAN (project path gone → safe to delete) / unknown / corrupt. The
+verdict rests **only on the `anchor` file** — the shared project anchor the
+partition is keyed by. The config's businessRepoRoot/projectRoot is read purely as
+a display fallback: it is a persisted *workspace* path that may point at a linked
+worktree, so its disappearance does not prove the shared partition is orphaned. A
+partition with no anchor (e.g. one written before anchor-on-save) is therefore
+`unknown`, never ORPHAN — we never recommend deleting data we cannot confirm is
+dead. teamai never auto-collects orphans (a renamed or deleted project leaves its
+partition behind — a `gc` command is explicitly out of scope), so this is how a
+user finds partitions safe to `rm -rf` by hand.
 
 ### Explicitly out of scope
 
