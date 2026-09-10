@@ -11,7 +11,7 @@ import { savePendingLearning } from './utils/pending-learnings.js';
 import { isSafeNamespaceSegment, resolveActiveLearningsNamespaces } from './projects.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
 import { LEARNINGS_LOCAL_DIR, getDataHome } from './types.js';
-import { mirrorLearnings } from './utils/learnings-mirror.js';
+import { addLearningToCache, mirrorLearnings } from './utils/learnings-mirror.js';
 
 /**
  * Rebuild this scope's local search index so the freshly-written contribution
@@ -255,10 +255,12 @@ export async function contribute(
  * PR from an isolated knowledge worktree instead of pushing to main directly.
  *
  * The user's active working tree is never written to. For immediate local recall,
- * we mirror the worktree's learnings/ (committed main learnings + the new one)
- * into the machine-local LEARNINGS_LOCAL_DIR and index from there — the same
- * pattern user scope uses. The contribution lands in the active tree only when the
- * PR merges and the user pulls.
+ * we additively copy just the new file into the machine-local LEARNINGS_LOCAL_DIR
+ * and index from there. The worktree is a disposable snapshot scoped to
+ * origin/<default>, not the full cache's source of truth, so it must never drive
+ * a deleting mirror there: doing so wiped out other projects' cached learnings
+ * and any still-unmerged prior contribution (#472). The contribution lands in
+ * the active tree only when the PR merges and the user pulls.
  */
 async function contributeSelf(
   localConfig: LocalConfig,
@@ -303,12 +305,11 @@ async function contributeSelf(
       // This matches the other index-build sites (pull.ts / recall.ts).
       try {
         const { pathExists } = await import('./utils/fs.js');
-        const wtLearnings = path.join(wtRepo, 'learnings');
         const activeLearningsNamespaces = await resolveActiveLearningsNamespaces(
           localConfig.repo.localPath,
           localConfig.projects ?? [],
         );
-        await mirrorLearnings(wtLearnings, LEARNINGS_LOCAL_DIR, activeLearningsNamespaces);
+        await addLearningToCache(destAbs, LEARNINGS_LOCAL_DIR, relPath.slice('learnings/'.length));
 
         const repoPath = localConfig.repo.localPath; // persistent active-tree .teamai
         const docsDir = path.join(repoPath, 'docs');
