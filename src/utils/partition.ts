@@ -119,3 +119,30 @@ export function projectSlug(anchor: string): string {
 export function projectDataHome(anchor: string): string {
   return path.join(getUserHome(), '.teamai', 'projects', projectSlug(anchor));
 }
+
+/** Root dir holding every project partition: `~/.teamai/projects`. */
+export function projectsRootDir(): string {
+  return path.join(getUserHome(), '.teamai', 'projects');
+}
+
+/**
+ * The `anchor` reverse-lookup file inside a partition. The slug is a one-way
+ * sha256, so this file is the ONLY way back to the original projectAnchor path;
+ * it lives inside the partition (off the workspace), preserving zero-residue.
+ * Written on both init and migration so every partition carries it (issue #374).
+ */
+export async function writeAnchorFile(partitionDir: string, anchor: string): Promise<void> {
+  await fs.promises.mkdir(partitionDir, { recursive: true });
+  await fs.promises.writeFile(path.join(partitionDir, 'anchor'), `${anchor}\n`, 'utf-8');
+}
+
+/** Read a partition's `anchor` file (trimmed), or null when absent/unreadable. */
+export async function readAnchorFile(partitionDir: string): Promise<string | null> {
+  try {
+    const raw = await fs.promises.readFile(path.join(partitionDir, 'anchor'), 'utf-8');
+    const trimmed = raw.trim();
+    return trimmed || null;
+  } catch {
+    return null;
+  }
+}

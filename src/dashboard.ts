@@ -7,8 +7,6 @@ import { readEvents, rebuildSessions, appendEvent } from './dashboard-collector.
 import { isProcessAlive } from './pid-monitor.js';
 import {
   DASHBOARD_DEFAULT_PORT,
-  DASHBOARD_EVENTS_PATH,
-  DASHBOARD_EVENTS_DIR,
   DASHBOARD_PID_CHECK_INTERVAL_MS,
   type DashboardEvent,
 } from './types.js';

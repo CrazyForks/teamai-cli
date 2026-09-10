@@ -10,7 +10,7 @@ import { markContributed } from './contribute-check.js';
 import { savePendingLearning } from './utils/pending-learnings.js';
 import { isSafeNamespaceSegment, resolveActiveLearningsNamespaces } from './projects.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
-import { LEARNINGS_LOCAL_DIR, getDataHome } from './types.js';
+import { getUserLearningsDir, getDataHome } from './types.js';
 import { addLearningToCache, mirrorLearnings } from './utils/learnings-mirror.js';
 
 /**
@@ -64,8 +64,8 @@ async function rebuildIndexAfterContribute(localConfig: LocalConfig): Promise<vo
     localConfig.projects ?? [],
   );
   if (localConfig.scope === 'user') {
-    await mirrorLearnings(learningsRepoDir, LEARNINGS_LOCAL_DIR, activeLearningsNamespaces);
-    effectiveLearningsDir = (await pathExists(LEARNINGS_LOCAL_DIR)) ? LEARNINGS_LOCAL_DIR : undefined;
+    await mirrorLearnings(learningsRepoDir, getUserLearningsDir(), activeLearningsNamespaces);
+    effectiveLearningsDir = (await pathExists(getUserLearningsDir())) ? getUserLearningsDir() : undefined;
   } else {
     effectiveLearningsDir = (await pathExists(learningsRepoDir)) ? learningsRepoDir : undefined;
   }
@@ -255,7 +255,7 @@ export async function contribute(
  * PR from an isolated knowledge worktree instead of pushing to main directly.
  *
  * The user's active working tree is never written to. For immediate local recall,
- * we additively copy just the new file into the machine-local LEARNINGS_LOCAL_DIR
+ * we additively copy just the new file into the machine-local getUserLearningsDir()
  * and index from there. The worktree is a disposable snapshot scoped to
  * origin/<default>, not the full cache's source of truth, so it must never drive
  * a deleting mirror there: doing so wiped out other projects' cached learnings
@@ -301,7 +301,7 @@ async function contributeSelf(
       // worktree — withKnowledgeWorktree deletes wtRepo on teardown, and buildIndex
       // bakes absolute paths into search-index.json, so worktree paths would leave
       // recall printing `File: <deleted>` pointers. learnings come from the
-      // persistent LEARNINGS_LOCAL_DIR mirror; votes from the reports worktree.
+      // persistent getUserLearningsDir() mirror; votes from the reports worktree.
       // This matches the other index-build sites (pull.ts / recall.ts).
       try {
         const { pathExists } = await import('./utils/fs.js');
@@ -309,7 +309,7 @@ async function contributeSelf(
           localConfig.repo.localPath,
           localConfig.projects ?? [],
         );
-        await addLearningToCache(destAbs, LEARNINGS_LOCAL_DIR, relPath.slice('learnings/'.length));
+        await addLearningToCache(destAbs, getUserLearningsDir(), relPath.slice('learnings/'.length));
 
         const repoPath = localConfig.repo.localPath; // persistent active-tree .teamai
         const docsDir = path.join(repoPath, 'docs');
@@ -327,7 +327,7 @@ async function contributeSelf(
         const teamaiHome = getDataHome(localConfig);
         const { buildIndex } = await import('./utils/search-index.js');
         await buildIndex({
-          learningsDir: await pathExists(LEARNINGS_LOCAL_DIR) ? LEARNINGS_LOCAL_DIR : undefined,
+          learningsDir: await pathExists(getUserLearningsDir()) ? getUserLearningsDir() : undefined,
           learningsNamespaces: activeLearningsNamespaces,
           docsDir: await pathExists(docsDir) ? docsDir : undefined,
           rulesDir: await pathExists(rulesDir) ? rulesDir : undefined,

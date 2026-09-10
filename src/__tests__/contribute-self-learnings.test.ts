@@ -44,7 +44,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 const { contribute } = await import('../contribute.js');
-const { LEARNINGS_LOCAL_DIR } = await import('../types.js');
+const { getUserLearningsDir } = await import('../types.js');
 
 function git(args: string[], cwd: string) {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
@@ -54,7 +54,7 @@ describe('contributeSelf — machine-local learnings cache (issue #472)', () => 
   beforeEach(async () => {
     fs.rmSync(businessRoot, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
-    fs.rmSync(LEARNINGS_LOCAL_DIR, { recursive: true, force: true });
+    fs.rmSync(getUserLearningsDir(), { recursive: true, force: true });
 
     fs.mkdirSync(businessRoot, { recursive: true });
     git(['init', '--bare', remote], testRoot);
@@ -72,10 +72,10 @@ describe('contributeSelf — machine-local learnings cache (issue #472)', () => 
     // Pre-existing cache content this contribution must never touch: another
     // project's shared root learning, plus a namespace directory unrelated to
     // this project's own (empty) namespace set.
-    fs.mkdirSync(LEARNINGS_LOCAL_DIR, { recursive: true });
-    fs.writeFileSync(path.join(LEARNINGS_LOCAL_DIR, 'other-team.md'), '# other team knowledge');
-    fs.mkdirSync(path.join(LEARNINGS_LOCAL_DIR, 'other-namespace'), { recursive: true });
-    fs.writeFileSync(path.join(LEARNINGS_LOCAL_DIR, 'other-namespace', 'note.md'), '# unrelated namespace');
+    fs.mkdirSync(getUserLearningsDir(), { recursive: true });
+    fs.writeFileSync(path.join(getUserLearningsDir(), 'other-team.md'), '# other team knowledge');
+    fs.mkdirSync(path.join(getUserLearningsDir(), 'other-namespace'), { recursive: true });
+    fs.writeFileSync(path.join(getUserLearningsDir(), 'other-namespace', 'note.md'), '# unrelated namespace');
   });
 
   afterEach(() => {
@@ -84,7 +84,7 @@ describe('contributeSelf — machine-local learnings cache (issue #472)', () => 
   });
 
   function cacheFiles(): string[] {
-    return fs.readdirSync(LEARNINGS_LOCAL_DIR).sort();
+    return fs.readdirSync(getUserLearningsDir()).sort();
   }
 
   function noteFile(text: string): string {
@@ -96,8 +96,8 @@ describe('contributeSelf — machine-local learnings cache (issue #472)', () => 
   it('adds a new contribution without deleting unrelated cache entries', async () => {
     await contribute({ scope: 'project', title: 'first-pending', file: noteFile('first unique knowledge') });
 
-    expect(fs.existsSync(path.join(LEARNINGS_LOCAL_DIR, 'other-team.md'))).toBe(true);
-    expect(fs.existsSync(path.join(LEARNINGS_LOCAL_DIR, 'other-namespace', 'note.md'))).toBe(true);
+    expect(fs.existsSync(path.join(getUserLearningsDir(), 'other-team.md'))).toBe(true);
+    expect(fs.existsSync(path.join(getUserLearningsDir(), 'other-namespace', 'note.md'))).toBe(true);
     expect(cacheFiles().some((f) => f.startsWith('first-pending-'))).toBe(true);
   });
 

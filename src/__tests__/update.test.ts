@@ -48,7 +48,7 @@ vi.mock('../utils/fs.js', () => ({
 }));
 
 vi.mock('../types.js', () => ({
-  TEAMAI_UPDATE_LOCK_PATH: '/tmp/test-update-lock',
+  getUpdateLockPath: () => '/tmp/test-update-lock',
 }));
 
 let readlineAnswer = 'n';

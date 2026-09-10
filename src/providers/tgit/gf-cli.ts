@@ -4,12 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathExists, ensureDir } from '../../utils/fs.js';
 import { log, spinner } from '../../utils/logger.js';
-import { TEAMAI_HOME } from '../../types.js';
+import { getTeamaiHomeDir } from '../../types.js';
 import { tgitFetch, tgitGitCloneUrl } from './rest-auth.js';
 
 /** Path where gf CLI is installed */
-const GF_INSTALL_DIR = path.join(TEAMAI_HOME, 'gf');
-const GF_BIN_PATH = path.join(GF_INSTALL_DIR, 'gf', 'bin', 'gf');
+function gfInstallDir(): string {
+  return path.join(getTeamaiHomeDir(), 'gf');
+}
+function gfBinPath(): string {
+  return path.join(gfInstallDir(), 'gf', 'bin', 'gf');
+}
 
 /** Download base URL for gf CLI tarballs */
 const GF_DOWNLOAD_BASE = 'http://mirrors.tencent.com/repository/generic/gongfeng-cli/files/channels/stable';
@@ -72,11 +76,11 @@ export function gfExec(
 function getGfPath(): string {
   // Prefer our managed install
   try {
-    const stat = execSync(`test -x "${GF_BIN_PATH}" && echo ok`, {
+    const stat = execSync(`test -x "${gfBinPath()}" && echo ok`, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    if (stat.trim() === 'ok') return GF_BIN_PATH;
+    if (stat.trim() === 'ok') return gfBinPath();
   } catch {
     // not installed locally
   }
@@ -149,22 +153,22 @@ export async function ensureGfInstalled(): Promise<void> {
   const spin = spinner('Installing gf CLI (工蜂命令行工具)...').start();
 
   try {
-    await ensureDir(GF_INSTALL_DIR);
+    await ensureDir(gfInstallDir());
 
     // Download and extract tarball
     execSync(
-      `curl -fsSL "${url}" | tar xz -C "${GF_INSTALL_DIR}"`,
+      `curl -fsSL "${url}" | tar xz -C "${gfInstallDir()}"`,
       { stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 },
     );
 
     // Verify installation
-    execSync(`test -x "${GF_BIN_PATH}"`, { stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`test -x "${gfBinPath()}"`, { stdio: ['pipe', 'pipe', 'pipe'] });
 
-    spin.succeed(`gf CLI installed to ${GF_INSTALL_DIR}`);
+    spin.succeed(`gf CLI installed to ${gfInstallDir()}`);
   } catch (e) {
     spin.fail(`Failed to install gf CLI: ${(e as Error).message}`);
     log.info(`You can install it manually from: ${url}`);
-    log.info(`Extract to: ${GF_INSTALL_DIR}`);
+    log.info(`Extract to: ${gfInstallDir()}`);
     throw e;
   }
 }

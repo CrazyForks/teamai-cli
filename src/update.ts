@@ -7,7 +7,7 @@ import { loadState, saveState, loadLocalConfig, loadTeamConfig } from './config.
 import { resolveEffectiveUpdatePolicy } from './update-policy.js';
 import { log } from './utils/logger.js';
 import { expandHome, ensureDir } from './utils/fs.js';
-import { TEAMAI_UPDATE_LOCK_PATH } from './types.js';
+import { getUpdateLockPath } from './types.js';
 import { askConfirmation } from './utils/prompt.js';
 
 // `getCurrentVersion` and `getCurrentPackageName` live in `./package-info.ts`
@@ -253,7 +253,7 @@ async function acquireReclaimSentinel(sentinel: string, owner: string): Promise<
  * sentinel's dead-pid recovery bounds that.)
  */
 export async function acquireLock(lockPath?: string): Promise<boolean> {
-  const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const resolved = lockPath ?? expandHome(getUpdateLockPath());
   const owner = randomUUID();
   const payload = JSON.stringify({
     pid: process.pid,
@@ -310,7 +310,7 @@ export async function acquireLock(lockPath?: string): Promise<boolean> {
  * after ours went stale, so we leave the new holder's lock alone.
  */
 export async function releaseLock(lockPath?: string): Promise<void> {
-  const resolved = lockPath ?? expandHome(TEAMAI_UPDATE_LOCK_PATH);
+  const resolved = lockPath ?? expandHome(getUpdateLockPath());
   const ourOwner = heldLockOwners.get(resolved);
   if (!ourOwner) return;
   try {

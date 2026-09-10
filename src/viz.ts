@@ -13,9 +13,10 @@ import { loadIndex, buildIndex } from './utils/search-index.js';
 import { loadUserVotes } from './votes.js';
 import { detectProjectConfig, loadLocalConfig } from './config.js';
 import {
-  VOTES_LOCAL_DIR,
-  SEARCH_INDEX_PATH,
-  LEARNINGS_LOCAL_DIR,
+  getTeamaiHomeDir,
+  getUserVotesDir,
+  getUserSearchIndexPath,
+  getUserLearningsDir,
   getKnowledgeDir,
   getReportsDir,
   getDataHome,
@@ -165,7 +166,7 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
     const teamaiHome = useProjectScope ? getDataHome(config) : getTeamaiHome('user');
     const learningsDir = useProjectScope
       ? path.join(knowledgeRoot, 'learnings')
-      : LEARNINGS_LOCAL_DIR;
+      : getUserLearningsDir();
     const source: VizSource = config.repo.kind === 'self'
       ? { scope: 'local', label: 'Personal repo · your recalls only' }
       : { scope: 'team', label: 'Team repo · aggregated across the team' };
@@ -181,14 +182,14 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
   }
 
   // Pure local / no team repo configured: fall back to ~/.teamai.
-  const teamaiHome = path.dirname(VOTES_LOCAL_DIR);
+  const teamaiHome = getTeamaiHomeDir();
   return {
     root: teamaiHome,
     knowledgeRoot: teamaiHome,
-    votesDir: VOTES_LOCAL_DIR,
-    learningsDir: LEARNINGS_LOCAL_DIR,
+    votesDir: getUserVotesDir(),
+    learningsDir: getUserLearningsDir(),
     statsDir: path.join(teamaiHome, 'stats'),
-    indexPath: SEARCH_INDEX_PATH,
+    indexPath: getUserSearchIndexPath(),
     source: { scope: 'local', label: 'Local ~/.teamai · your recalls only' },
   };
 }

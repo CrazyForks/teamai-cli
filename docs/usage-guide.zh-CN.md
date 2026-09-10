@@ -533,7 +533,13 @@ Choose namespace [1-3] (default: 1 = common):
 
 ```bash
 teamai status        # 当前 scope、同步时间、资源统计
+teamai status --all  # 列出 ~/.teamai/projects 下所有项目数据分区
 ```
+
+`--all` 会枚举每个项目的机器数据分区，并标注为 **active**（项目仍在磁盘上）、
+**ORPHAN**（项目已移动/删除——该分区可安全 `rm -rf`）或 **unknown**（无 `anchor`
+文件，无法确认是否孤儿——绝不建议删除）。ORPHAN 判定只依据 anchor，因此绝不会凭猜测
+把分区标记为可删除。teamai 从不自动回收孤儿分区，因此这是你找出可手动删除分区的方式。
 
 ### 角色管理
 

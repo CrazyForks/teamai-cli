@@ -9,7 +9,7 @@ import { getProvider, detectProviderForInit, RepoNotFoundError } from './provide
 import { ensureDir, writeFile, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
 import {
-  TEAMAI_HOME,
+  getTeamaiHomeDir,
   REPORTS_BRANCH,
   type GlobalOptions,
   type LocalConfig,
@@ -397,7 +397,7 @@ export async function initHttp(
   if (scope === 'project') {
     await saveLocalConfigForScope(localConfig, scope, projectRoot);
   } else {
-    await ensureDir(TEAMAI_HOME);
+    await ensureDir(getTeamaiHomeDir());
     await saveLocalConfig(localConfig);
   }
   log.success(`Local config saved to ${teamaiHome}/config.yaml`);
@@ -1412,9 +1412,9 @@ export async function init(options: GlobalOptions & {
       log.debug('Generated .teamai/.gitignore for project scope');
     }
   } else {
-    await ensureDir(TEAMAI_HOME);
+    await ensureDir(getTeamaiHomeDir());
     await saveLocalConfig(localConfig);
-    log.success(`Local config saved to ${TEAMAI_HOME}/config.yaml`);
+    log.success(`Local config saved to ${getTeamaiHomeDir()}/config.yaml`);
   }
 
   // Step 6.5: Invalidate pull cache so next pull does full sync with cleanup

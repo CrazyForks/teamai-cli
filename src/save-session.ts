@@ -27,7 +27,7 @@ import {
 } from './session-collector.js';
 import { log, spinner } from './utils/logger.js';
 import { withTimeout } from './utils/async.js';
-import { SESSION_LOGS_LOCAL_DIR } from './types.js';
+import { getSessionLogsDir } from './types.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
 
 export interface SaveSessionOptions extends GlobalOptions {
@@ -75,17 +75,17 @@ export async function saveSession(options: SaveSessionOptions): Promise<void> {
     log.info(
       `[dry-run] Would record session ${sessionId.slice(0, 8)} ` +
         `(${summary.toolTotal} tools, ${summary.interventionCount} interventions, ` +
-        `valuable=${summary.valuable}) to ${SESSION_LOGS_LOCAL_DIR}/${monthKey(summary)}.md`,
+        `valuable=${summary.valuable}) to ${getSessionLogsDir()}/${monthKey(summary)}.md`,
     );
   } else {
     // Local logs live on the user's own machine, so keep the redacted prompt line.
-    const written = await appendMonthlyLog(SESSION_LOGS_LOCAL_DIR, summary, { includePrompt: true });
+    const written = await appendMonthlyLog(getSessionLogsDir(), summary, { includePrompt: true });
     if (written) {
       log.info(`Recorded session to ${written}`);
     } else {
       log.info(`Session ${sessionId.slice(0, 8)} already recorded this month.`);
     }
-    await pruneMonthlyLogs(SESSION_LOGS_LOCAL_DIR, new Date()).catch(() => []);
+    await pruneMonthlyLogs(getSessionLogsDir(), new Date()).catch(() => []);
   }
 
   if (!options.push) return;

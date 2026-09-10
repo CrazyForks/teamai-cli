@@ -1,8 +1,8 @@
 # Design: teamai data directory layout — global home + per-project partitioning
 
-> Status: **P0 + P1 + P2 implemented** (issue #374). P1 shipped as PRs #397 / #402 /
+> Status: **P0 + P1 + P2 + P3 implemented** (issue #374 complete). P1 shipped as PRs #397 / #402 /
 > #406 / #414 / #417 (partition routing) and #439 (P1-3 auto-migration). P2 (self
-> mode slimming) is below. P3 is a follow-up phase, tracked below.
+> mode slimming, #455) and P3 (constant functionization + `status --all`) are below.
 
 ## Problem
 
@@ -237,11 +237,44 @@ too (git worktrees must live in the same repo; they anchor on `localPath`, not
 Acceptance: after slimming, `git status` is clean (the A1 data is physically gone,
 not merely ignored) and a teammate's fresh clone bootstraps into the partition.
 
-## Follow-up phases (not in this PR)
+## P3 — constant functionization + `status --all` (implemented)
 
-- **P3** — functionize module-load-time path constants (so tests that swap `$HOME`
-  at runtime take effect), then assign A1/A2 ownership per the data-classification
-  table. `status --all` across partitions.
+**Functionization.** A handful of top-level path constants were computed once at
+module import: `export const TEAMAI_HOME = path.join(getUserHome(), '.teamai')` and
+its derivatives (config/state/token/update-lock/session-logs/learnings/votes/
+search-index). Because they froze at import, a test that later swapped `HOME` never
+saw the new value — so `HOME`-based isolation silently failed (tests worked around
+it with `vi.resetModules()` or `vi.mock('../types.js')`). P3 converts them to
+call-time getters (`getTeamaiHomeDir()`, `getUserVotesDir()`, `getSessionLogsDir()`,
+…), matching the existing `getUserHome()` / `getDataHome()` pattern, so isolation
+just works. Seven consts that already had runtime getters and no live consumers
+(`TEAMAI_SOURCES_DIR`, `TEAMAI_USAGE_PATH`, `TEAMAI_KNOWN_SKILLS_PATH`,
+`TEAMAI_PUSHIGNORE_PATH`, `CONTRIBUTE_SESSIONS_DIR`, `DASHBOARD_EVENTS_DIR/PATH`)
+were removed.
+
+**Functionization ≠ project-scoping.** All of these are class-A2 (machine-level):
+the getters still return `~/.teamai/...`, unchanged. The project-scoped equivalents
+already route through `getDataHome()`. The dashboard is likewise an A2 singleton
+(events carry `cwd`/`sessionId`); "two projects' events don't mix" is satisfied by
+`getEventsPath()` reading `HOME` at call time, not by per-project dirs.
+
+**`anchor` on save.** Previously only migration wrote a partition's `anchor`
+reverse-lookup file, so freshly-init'd partitions had none. `saveLocalConfigForScope`
+now writes it whenever the config lands in a partition (via the shared
+`writeAnchorFile`), so every partition can be resolved back to its project.
+
+**`status --all`.** Extends the existing `status` command with an `--all` flag that
+enumerates every partition under `~/.teamai/projects/` and marks each
+active / ORPHAN (project path gone → safe to delete) / unknown / corrupt. The
+verdict rests **only on the `anchor` file** — the shared project anchor the
+partition is keyed by. The config's businessRepoRoot/projectRoot is read purely as
+a display fallback: it is a persisted *workspace* path that may point at a linked
+worktree, so its disappearance does not prove the shared partition is orphaned. A
+partition with no anchor (e.g. one written before anchor-on-save) is therefore
+`unknown`, never ORPHAN — we never recommend deleting data we cannot confirm is
+dead. teamai never auto-collects orphans (a renamed or deleted project leaves its
+partition behind — a `gc` command is explicitly out of scope), so this is how a
+user finds partitions safe to `rm -rf` by hand.
 
 ### Explicitly out of scope
 

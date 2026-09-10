@@ -548,7 +548,16 @@ Choose namespace [1-3] (default: 1 = common):
 
 ```bash
 teamai status        # Current scope, last sync time, resource stats
+teamai status --all  # List every project data partition under ~/.teamai/projects
 ```
+
+`--all` enumerates every project's machine-data partition and flags each as
+**active** (project still on disk), **ORPHAN** (project moved/deleted — its
+partition is safe to `rm -rf`), or **unknown** (no `anchor` file, so it cannot be
+confirmed orphaned — never recommended for deletion). The ORPHAN verdict rests
+only on the anchor, so a partition is never flagged for deletion on a hunch. teamai
+never garbage-collects orphans automatically, so this is how you find partitions to
+delete by hand.
 
 ### Role management
 

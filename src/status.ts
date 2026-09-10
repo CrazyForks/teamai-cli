@@ -16,7 +16,8 @@ import {
   truncate,
   type AgentSkillsView,
 } from './agent-skills.js';
-import { RESOURCE_TYPES, getDataHome, type GlobalOptions, type ResourceType } from './types.js';
+import { RESOURCE_TYPES, LocalConfigSchema, getDataHome, type GlobalOptions, type ResourceType } from './types.js';
+import { projectsRootDir, readAnchorFile, projectSlug } from './utils/partition.js';
 import { maskEnvValue } from './resources/env.js';
 import { parseTeamMcpServers } from './resources/mcp.js';
 import { parseHooksYaml } from './resources/hooks.js';
@@ -32,6 +33,10 @@ export interface ListOptions extends GlobalOptions {
 }
 
 export async function status(options: GlobalOptions): Promise<void> {
+  if (options.all) {
+    await statusAll();
+    return;
+  }
   // Auto-detect scope
   const { localConfig, teamConfig } = await autoDetectInit();
   const scopeLabel = localConfig.scope;
@@ -138,6 +143,91 @@ export async function status(options: GlobalOptions): Promise<void> {
   }
 
   console.log('');
+}
+
+/**
+ * `teamai status --all` — enumerate every project data partition under
+ * ~/.teamai/projects and flag the stale/orphan ones (issue #374 P3). teamai never
+ * auto-collects orphans (a renamed/moved/deleted project leaves its partition
+ * behind), so this is how a user finds partitions safe to delete by hand.
+ *
+ * The verdict rests on the `anchor` reverse-lookup file — the shared project
+ * anchor this partition is keyed by. The persisted repo.businessRepoRoot /
+ * projectRoot in config.yaml is read only as a DISPLAY fallback (an older
+ * partition may predate anchor files); it is a workspace path that can point at a
+ * linked worktree, so it must never drive the orphan verdict. We mark it:
+ *   - active  : anchor exists on disk
+ *   - orphan  : anchor is gone (project deleted/moved) → safe to delete
+ *   - unknown : no anchor → cannot confirm orphan (partition may still be active,
+ *               e.g. a pre-P3 partition still loaded by its main checkout)
+ *   - corrupt : the dir name does not match slug(anchor) → tampered/half-written
+ */
+async function statusAll(): Promise<void> {
+  const root = projectsRootDir();
+  const slugs = await listDirs(root);
+
+  console.log('');
+  log.info(`Project data partitions (${root}):`);
+  if (slugs.length === 0) {
+    log.info('  (none — no project has been initialized or migrated on this machine)');
+    console.log('');
+    return;
+  }
+
+  let orphanCount = 0;
+  for (const slug of slugs.sort()) {
+    const partitionDir = path.join(root, slug);
+    const anchor = await readAnchorFile(partitionDir);
+
+    // Recover the project path + read a bit of config for DISPLAY context. The
+    // anchor is the trustworthy source; the config's businessRepoRoot/projectRoot
+    // is only a display fallback (see the orphan-verdict note below).
+    let projectPath = anchor;
+    let scope: string | undefined;
+    let kind: string | undefined;
+    const cfgRaw = await readFileSafe(path.join(partitionDir, 'config.yaml'));
+    if (cfgRaw) {
+      try {
+        const parsed = LocalConfigSchema.parse(YAML.parse(cfgRaw));
+        scope = parsed.scope;
+        kind = parsed.repo.kind;
+        if (!projectPath) projectPath = parsed.repo.businessRepoRoot ?? parsed.projectRoot ?? null;
+      } catch { /* unreadable config — leave fields undefined */ }
+    }
+
+    // The orphan verdict must rest ONLY on the anchor — it is the shared project
+    // anchor this partition is keyed by (projectSlug(anchor)). The config's
+    // businessRepoRoot/projectRoot is a persisted *workspace* path that may point
+    // at a linked worktree; its disappearance does NOT prove the shared partition
+    // (still used by the main checkout) is orphaned. So without a trustworthy
+    // anchor we never recommend deletion — classify as unknown.
+    let state: string;
+    if (!anchor) {
+      state = projectPath
+        ? 'unknown — no anchor; cannot confirm orphan (partition may still be active)'
+        : 'unknown (no anchor / project path)';
+    } else if (!(await pathExists(anchor))) {
+      state = 'ORPHAN — project path is gone, safe to delete';
+      orphanCount++;
+    } else if (projectSlug(anchor) !== slug) {
+      state = 'corrupt — dir name does not match anchor';
+    } else {
+      state = 'active';
+    }
+
+    const kindLabel = kind ? ` ${kind}` : '';
+    log.info(`  ${slug}  [${state}]`);
+    log.info(`    project: ${projectPath ?? '(unresolved)'}${scope ? `  (${scope}${kindLabel})` : ''}`);
+  }
+
+  console.log('');
+  if (orphanCount > 0) {
+    log.warn(
+      `${orphanCount} orphan partition(s) found. teamai never deletes them automatically; ` +
+        `remove one with:  rm -rf "${root}/<slug>"`,
+    );
+    console.log('');
+  }
 }
 
 export async function list(type: string | undefined, options: ListOptions): Promise<void> {

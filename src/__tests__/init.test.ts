@@ -165,7 +165,9 @@ vi.mock('../types.js', async (importOriginal) => {
   const original = await importOriginal() as Record<string, unknown>;
   return {
     ...original,
-    TEAMAI_HOME: '/tmp/test-teamai-home',
+    // The machine home is now a runtime getter (issue #374 P3), so override the
+    // getter instead of the removed TEAMAI_HOME const to isolate onto /tmp.
+    getTeamaiHomeDir: () => '/tmp/test-teamai-home',
   };
 });
 

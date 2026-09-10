@@ -100,10 +100,11 @@ program
 program
   .command('status')
   .description('Show local vs team repo diff')
-  .action(async () => {
+  .option('--all', 'List every project data partition under ~/.teamai/projects (flags stale/orphan ones)')
+  .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { status } = await import('./status.js');
-    await status(globalOpts);
+    await status({ ...globalOpts, ...cmdOpts });
   });
 
 program

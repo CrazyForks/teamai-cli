@@ -13,7 +13,7 @@ import { loadTagsConfig, filterByTags } from './utils/tags.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, TagsConfig } from './types.js';
 import {
-  LEARNINGS_LOCAL_DIR,
+  getUserLearningsDir,
   TEAMAI_CULTURE_START,
   TEAMAI_CULTURE_END,
   TEAMAI_CLAUDEMD_START,
@@ -866,13 +866,13 @@ async function pullForScope(
       if (localConfig.scope === 'user') {
         await mirrorLearnings(
           learningsRepoDir,
-          LEARNINGS_LOCAL_DIR,
+          getUserLearningsDir(),
           activeLearningsNamespaces,
         );
         if (await pathExists(learningsRepoDir)) {
           learningsCount = await countLearnings(learningsRepoDir);
         }
-        effectiveLearningsDir = await pathExists(LEARNINGS_LOCAL_DIR) ? LEARNINGS_LOCAL_DIR : undefined;
+        effectiveLearningsDir = await pathExists(getUserLearningsDir()) ? getUserLearningsDir() : undefined;
       } else {
         effectiveLearningsDir = await pathExists(learningsRepoDir) ? learningsRepoDir : undefined;
         if (effectiveLearningsDir) {
