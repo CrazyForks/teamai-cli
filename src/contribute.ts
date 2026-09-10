@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import fse from 'fs-extra';
 import { requireInit, detectProjectConfig, loadTeamConfig, loadLocalConfigForScope } from './config.js';
 import { assertNotReadOnly } from './read-only.js';
 import { pushRepoDirectly, pullRepo } from './utils/git.js';
@@ -12,6 +11,7 @@ import { savePendingLearning } from './utils/pending-learnings.js';
 import { isSafeNamespaceSegment, resolveActiveLearningsNamespaces } from './projects.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
 import { LEARNINGS_LOCAL_DIR, getDataHome } from './types.js';
+import { mirrorLearnings } from './utils/learnings-mirror.js';
 
 /**
  * Rebuild this scope's local search index so the freshly-written contribution
@@ -59,13 +59,12 @@ async function rebuildIndexAfterContribute(localConfig: LocalConfig): Promise<vo
   // user scope mirrors learnings/ into ~/.teamai/learnings/ (legacy behavior,
   // same as pull.ts); project scope indexes the repo's learnings/ directly.
   let effectiveLearningsDir: string | undefined;
+  const activeLearningsNamespaces = await resolveActiveLearningsNamespaces(
+    repoPath,
+    localConfig.projects ?? [],
+  );
   if (localConfig.scope === 'user') {
-    if (await pathExists(learningsRepoDir)) {
-      await fse.copy(learningsRepoDir, LEARNINGS_LOCAL_DIR, {
-        overwrite: true,
-        filter: (src: string) => !path.basename(src).startsWith('.'),
-      });
-    }
+    await mirrorLearnings(learningsRepoDir, LEARNINGS_LOCAL_DIR, activeLearningsNamespaces);
     effectiveLearningsDir = (await pathExists(LEARNINGS_LOCAL_DIR)) ? LEARNINGS_LOCAL_DIR : undefined;
   } else {
     effectiveLearningsDir = (await pathExists(learningsRepoDir)) ? learningsRepoDir : undefined;
@@ -78,7 +77,7 @@ async function rebuildIndexAfterContribute(localConfig: LocalConfig): Promise<vo
     learningsDir: effectiveLearningsDir,
     // Manifest-resolved namespaces — MUST match what pull indexes by, or a
     // contribute-time rebuild drops the project's other learnings from recall.
-    learningsNamespaces: await resolveActiveLearningsNamespaces(repoPath, localConfig.projects ?? []),
+    learningsNamespaces: activeLearningsNamespaces,
     docsDir: (await pathExists(docsRepoDir)) ? docsRepoDir : undefined,
     rulesDir: (await pathExists(rulesRepoDir)) ? rulesRepoDir : undefined,
     skillsDir: (await pathExists(skillsRepoDir)) ? skillsRepoDir : undefined,
@@ -305,10 +304,11 @@ async function contributeSelf(
       try {
         const { pathExists } = await import('./utils/fs.js');
         const wtLearnings = path.join(wtRepo, 'learnings');
-        await fse.copy(wtLearnings, LEARNINGS_LOCAL_DIR, {
-          overwrite: true,
-          filter: (src: string) => !path.basename(src).startsWith('.'),
-        });
+        const activeLearningsNamespaces = await resolveActiveLearningsNamespaces(
+          localConfig.repo.localPath,
+          localConfig.projects ?? [],
+        );
+        await mirrorLearnings(wtLearnings, LEARNINGS_LOCAL_DIR, activeLearningsNamespaces);
 
         const repoPath = localConfig.repo.localPath; // persistent active-tree .teamai
         const docsDir = path.join(repoPath, 'docs');
@@ -327,7 +327,7 @@ async function contributeSelf(
         const { buildIndex } = await import('./utils/search-index.js');
         await buildIndex({
           learningsDir: await pathExists(LEARNINGS_LOCAL_DIR) ? LEARNINGS_LOCAL_DIR : undefined,
-          learningsNamespaces: await resolveActiveLearningsNamespaces(repoPath, localConfig.projects ?? []),
+          learningsNamespaces: activeLearningsNamespaces,
           docsDir: await pathExists(docsDir) ? docsDir : undefined,
           rulesDir: await pathExists(rulesDir) ? rulesDir : undefined,
           skillsDir: await pathExists(skillsDir) ? skillsDir : undefined,
