@@ -17,10 +17,31 @@ vi.mock('../utils/logger.js', () => ({
 let home: string;
 let originalHome: string | undefined;
 
+// The Claude gateway guard treats any user-set ANTHROPIC_* shell var as
+// user-owned config and skips the write. Clear them so a runner's own shell
+// env (a common setup for Claude power users) can't turn these tests flaky.
+const GUARDED_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_CUSTOM_HEADERS',
+  'ANTHROPIC_CUSTOM_MODEL_OPTION',
+  'ANTHROPIC_CUSTOM_MODEL_OPTION_NAME',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+];
+let originalGuardedEnv: Record<string, string | undefined>;
+
 beforeEach(async () => {
   home = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-model-config-'));
   originalHome = process.env.HOME;
   process.env.HOME = home;
+  originalGuardedEnv = {};
+  for (const key of GUARDED_ENV_KEYS) {
+    originalGuardedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
   await fse.outputJson(path.join(home, '.teamai/local-agent/config.json'), {
     endpoint: 'https://clawpro.example.com',
     token: 'reporter-token',
@@ -32,6 +53,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.env.HOME = originalHome;
+  for (const key of GUARDED_ENV_KEYS) {
+    const value = originalGuardedEnv[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   vi.restoreAllMocks();
   await fse.remove(home);
 });
@@ -622,6 +648,108 @@ describe('local-agent: apply_model_config', () => {
     await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
 
     expect((await fse.readJson(settingsPath)).env).toEqual(edited.env);
+  });
+
+  it('does not seize the Claude gateway when the user configures it via shell env', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.model.haihub.cn';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'sk-user-shell-token';
+    const acks = stubSync({
+      id: 32,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    // The gateway is user-owned via the shell, so settings.json is left alone.
+    expect(await fse.pathExists(path.join(home, '.claude/settings.json'))).toBe(false);
+    expect(await fse.pathExists(path.join(home, '.claude/teamai-models.json'))).toBe(true);
+    expect(acks[0]?.status).toBe('success');
+
+    const errorLog = await fse.readFile(
+      path.join(home, '.teamai/reporter/errors.jsonl'),
+      'utf-8',
+    );
+    expect(errorLog).toContain('skipped claude gateway');
+    expect(errorLog).toContain('ANTHROPIC_BASE_URL');
+  });
+
+  it('does not seize the Claude gateway when the user pins a default model via shell env', async () => {
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
+    stubSync({
+      id: 33,
+      type: 'apply_model_config',
+      cmd: JSON.stringify(deliveredModel),
+    });
+
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    expect(await fse.pathExists(path.join(home, '.claude/settings.json'))).toBe(false);
+    const errorLog = await fse.readFile(
+      path.join(home, '.teamai/reporter/errors.jsonl'),
+      'utf-8',
+    );
+    expect(errorLog).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL');
+  });
+
+  // Regression: Claude injects settings.json.env into the hook's own process
+  // environment, so a managed value we wrote last sync reappears in process.env.
+  // The guard must recognise its own re-injected value and NOT treat it as a
+  // user conflict — otherwise every follow-up sync is skipped and the managed
+  // record is wiped, stranding the user on stale gateway/token forever.
+  it('updates a managed gateway even when settings.json.env is re-injected into the hook env', async () => {
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+
+    // First delivery, clean env: seeds the managed gateway.
+    stubSync({ id: 40, type: 'apply_model_config', cmd: JSON.stringify(deliveredModel) });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+    expect((await fse.readJson(settingsPath)).env.ANTHROPIC_BASE_URL).toBe('https://proxy.example.com');
+
+    // Simulate Claude re-injecting the just-written settings.json.env into the
+    // hook subprocess before the next sync.
+    const written = (await fse.readJson(settingsPath)).env as Record<string, string>;
+    for (const [key, value] of Object.entries(written)) process.env[key] = value;
+
+    // Second delivery: a NEW gateway must go through despite the re-injection.
+    const newModel = {
+      ...deliveredModel,
+      model_id: 'kimi-k2',
+      name: 'Kimi K2',
+      base_url: 'https://new-proxy.example.com/v1',
+      api_key: 'new-proxy-token',
+    };
+    const acks = stubSync({ id: 41, type: 'apply_model_config', cmd: JSON.stringify(newModel) });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    const after = await fse.readJson(settingsPath);
+    expect(after.env.ANTHROPIC_BASE_URL).toBe('https://new-proxy.example.com');
+    expect(after.env.ANTHROPIC_AUTH_TOKEN).toBe('new-proxy-token');
+    expect(acks[0]?.status).toBe('success');
+
+    // Managed record must survive so future syncs can keep reconciling.
+    const manifest = await fse.readJson(path.join(home, '.teamai/local-agent/model-manifest.json'));
+    expect(Object.keys(manifest.claudeEnv ?? {}).length).toBeGreaterThan(0);
+  });
+
+  it('removes a managed gateway on empty delivery even when it is re-injected into the hook env', async () => {
+    const { reportAndSyncLocalAgent } = await import('../local-agent.js');
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+
+    stubSync({ id: 42, type: 'apply_model_config', cmd: JSON.stringify(deliveredModel) });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    const written = (await fse.readJson(settingsPath)).env as Record<string, string>;
+    for (const [key, value] of Object.entries(written)) process.env[key] = value;
+
+    stubSync({ id: 43, type: 'apply_model_config', cmd: JSON.stringify({ models: [] }) });
+    await reportAndSyncLocalAgent({ tool: 'claude', status: 'running' });
+
+    const after = await fse.readJson(settingsPath);
+    expect(after.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(after.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
   });
 });
 

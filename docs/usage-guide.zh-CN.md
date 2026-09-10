@@ -1070,8 +1070,14 @@ WorkBuddy 使用 `~/.workbuddy/models.json`；当前 `{ "models": [...] }` 和�
 `<workspace>/.codebuddy/models.json`，与产品内嵌模型加载器一致；该含凭证文件会被加入
 `<workspace>/.codebuddy/.gitignore`。仅当目标路径已存在于 reporter 的 workspace bindings 中时，
 才接受 workspace 级下发。若同一模型 ID 已由用户配置，则保留用户条目。
-Claude 侧会生成独立配置 `~/.claude/teamai-models.json`；仅当 `~/.claude/settings.json` 中不存在冲突的用户
-Anthropic 网关配置时，才把网关环境变量写入默认 settings。不支持的 agent 会回执失败，不会误写其他
+Claude 侧会生成独立配置 `~/.claude/teamai-models.json`；仅当不存在冲突的用户 Anthropic 网关配置时，
+才把网关环境变量写入默认 settings。冲突检测会**同时**检查 `~/.claude/settings.json` 的 `env` 和当前进程的
+shell 环境变量（`export ANTHROPIC_*`），因此通过 shell 环境变量使用 Claude 的用户会保留自己的网关——
+TeamAI 跳过写入，并把跳过的 key 记入 `~/.teamai/reporter/errors.jsonl`。受保护的 key 包括
+`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_CUSTOM_HEADERS`、
+`ANTHROPIC_CUSTOM_MODEL_OPTION{,_NAME}` 以及 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`。
+若某个 shell 值与 TeamAI 上次写入的值一致（Claude 会把 `settings.json` 的 `env` 回注到 hook 进程），
+则识别为托管值而非用户冲突，因此后续同步仍可更新或删除托管网关。不支持的 agent 会回执失败，不会误写其他
 agent 的配置。用户配置文件是符号链接时会保留链接。以上含凭证文件权限均为 `0600`。落盘成功后以
 `type: "apply_model_config"` 回执；非法 payload 回执 `failed`。未来未知任务类型会静默跳过，以保持协议向后兼容。
 

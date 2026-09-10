@@ -2401,10 +2401,52 @@ async function reconcileClaudeModels(
   const desired = claudeEnvForModel(models[0]);
   await writeModelJson(profilePath, { env: desired });
 
+  // Any of these keys, if the user already set them, means they have their own
+  // Claude gateway/model config we must not silently take over. Beyond the keys
+  // we write, this also covers auth the gateway swap would break
+  // (ANTHROPIC_API_KEY, ANTHROPIC_CUSTOM_HEADERS) and the user's model choice
+  // (ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL).
   const conflictKeys = new Set([
     ...Object.keys(desired),
     'ANTHROPIC_API_KEY',
+    'ANTHROPIC_CUSTOM_HEADERS',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   ]);
+  // A value is TeamAI-managed if it matches what we recorded last time or the
+  // value currently in settings.json (settings.json is our own output, so a
+  // process.env var equal to it is Claude re-injecting settings.json.env into
+  // the hook, not a user's independent shell config).
+  const isManagedValue = (key: string, value: unknown): boolean => (
+    (previousHashes[key] !== undefined && entryHash(value) === previousHashes[key]) ||
+    (env[key] !== undefined && entryHash(value) === entryHash(env[key]))
+  );
+  // The guard must see config the user set outside settings.json too. Users who
+  // run Claude via shell `export ANTHROPIC_*` keep no gateway in settings.json,
+  // so a settings-only check reads env[key] === undefined and wrongly seizes the
+  // slot — settings.json then outranks the shell env and breaks their setup.
+  // But Claude injects settings.json.env into the hook's own environment, so we
+  // must NOT treat our own re-injected managed values as a user conflict — doing
+  // so would block every follow-up sync and strand the user on stale config.
+  const userOwnsInShell = (key: string): boolean => {
+    const value = process.env[key];
+    if (typeof value !== 'string' || value.trim() === '') return false;
+    return !isManagedValue(key, value);
+  };
+  const shellConflicts = [...conflictKeys].filter(userOwnsInShell);
+  if (shellConflicts.length > 0) {
+    // The user has their own gateway/model config in the shell. Skip the write,
+    // but keep manifest.claudeEnv intact: this is not the user editing our
+    // managed settings.json entry, so we must stay able to reconcile once the
+    // shell config goes away.
+    await appendErrorLog({
+      apply_model_config: 'skipped claude gateway: user owns conflicting shell env',
+      conflicts: shellConflicts,
+    });
+    return;
+  }
+
   const canManage = [...conflictKeys].every((key) => (
     env[key] === undefined ||
     (previousHashes[key] !== undefined && entryHash(env[key]) === previousHashes[key])
