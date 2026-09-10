@@ -104,8 +104,12 @@ export function computeDailyStatsDelta(
     const bucket = delta[date] ?? emptyDaily();
     if (!previous) {
       bucket.sessionsEnded += 1;
-      bucket.sessionsSucceeded += snapshot.succeeded;
     }
+    // Signed, not positiveDelta: unlike the monotonic counters below, a
+    // session can flip from succeeded to failed on a later report (resumed
+    // after an interruption/correction), and that must claw back the earlier
+    // sessionsSucceeded increment, not just skip adding a new one (#473).
+    bucket.sessionsSucceeded += snapshot.succeeded - (previous?.succeeded ?? 0);
     bucket.promptTurns += positiveDelta(snapshot.prompts, previous?.prompts);
     bucket.durationMs += positiveDelta(snapshot.durationMs, previous?.durationMs);
     bucket.sessionsCorrected += positiveDelta(snapshot.corrected, previous?.corrected);

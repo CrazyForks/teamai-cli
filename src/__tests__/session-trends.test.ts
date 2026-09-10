@@ -61,6 +61,29 @@ describe('daily session trends', () => {
     expect(second.delta['2026-09-03']).toMatchObject({ pricedRequests: 1, costMicros: 150, sessionsEnded: 0 });
   });
 
+  it('claws back sessionsSucceeded when a resumed session later fails (#473)', () => {
+    const succeeded = new Map([
+      ['s1', { date: '2026-09-02', prompts: 1, durationMs: 60_000, succeeded: 1 as const, corrected: 0 as const, requestDaily: {} }],
+    ]);
+    const first = computeDailyStatsDelta(succeeded, {});
+    expect(first.delta['2026-09-02']).toMatchObject({ sessionsEnded: 1, sessionsSucceeded: 1 });
+    const merged = mergeDailyStats(undefined, first.delta);
+    expect(merged['2026-09-02']).toMatchObject({ sessionsEnded: 1, sessionsSucceeded: 1 });
+
+    const interrupted = new Map([
+      ['s1', { ...succeeded.get('s1')!, succeeded: 0 as const, corrected: 1 as const }],
+    ]);
+    const second = computeDailyStatsDelta(interrupted, first.nextReported);
+    expect(second.delta['2026-09-02']).toMatchObject({ sessionsEnded: 0, sessionsSucceeded: -1, sessionsCorrected: 1 });
+    const remerged = mergeDailyStats(merged, second.delta);
+    expect(remerged['2026-09-02']).toMatchObject({ sessionsEnded: 1, sessionsSucceeded: 0 });
+
+    // A later, unrelated re-report of the same now-failed state must not
+    // double-subtract: the delta settles back to 0 once the baseline catches up.
+    const third = computeDailyStatsDelta(interrupted, second.nextReported);
+    expect(third.delta['2026-09-02']).toMatchObject({ sessionsEnded: 0, sessionsSucceeded: 0 });
+  });
+
   it('compares the latest seven UTC days with the prior seven days', () => {
     const daily: Record<string, DailyUserStats> = {
       '2026-08-27': { sessionsEnded: 10, sessionsSucceeded: 5, promptTurns: 80, durationMs: 600_000, sessionsCorrected: 4, pricedRequests: 10, costMicros: 1_000_000, cacheReadTokens: 20, cacheEligibleInputTokens: 100 },

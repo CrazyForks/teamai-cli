@@ -298,7 +298,10 @@ async function writeReportedDailySessions(data: ReportedDailySessions): Promise<
 
 function hasDailyDelta(delta: ReturnType<typeof computeDailyStatsDelta>['delta']): boolean {
   return Object.values(delta).some((bucket) =>
-    bucket.sessionsEnded > 0 || bucket.sessionsSucceeded > 0 || bucket.promptTurns > 0
+    // sessionsSucceeded can be negative (a resumed session that later failed
+    // claws back an earlier increment), so it must not be checked with the
+    // same "> 0" as the other, purely monotonic counters (#473).
+    bucket.sessionsEnded > 0 || bucket.sessionsSucceeded !== 0 || bucket.promptTurns > 0
     || bucket.durationMs > 0 || bucket.sessionsCorrected > 0 || bucket.pricedRequests > 0
     || bucket.costMicros > 0 || bucket.cacheReadTokens > 0 || bucket.cacheEligibleInputTokens > 0,
   );
