@@ -34,6 +34,11 @@ describe('team-wiki-codebase builtin skill (issue #360 slice 1)', () => {
     }
   });
 
+  it('tells agents to run teamai codebase --deep-enrich', () => {
+    const skill = fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf8');
+    expect(skill).toMatch(/`teamai codebase --deep-enrich --project <slug> --output <repo>`/);
+  });
+
   it('does not point at GRAPH-CAPABILITIES.md', () => {
     for (const file of SKILL_FILES) {
       const text = fs.readFileSync(file, 'utf8');

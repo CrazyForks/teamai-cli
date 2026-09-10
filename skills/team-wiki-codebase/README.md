@@ -23,6 +23,7 @@
 - 每次生成后有准确性统计，超标自动警告
 - AI 读知识库而非读源码，**约 1/50 的 token 消耗**获得全局架构认知
 - Phase 0 可用 `teamai codebase --extract` 生成可证据化的结构边（TS/JS/Python/Go AST + 多语言 heuristic）
+- 提取后可用 `teamai codebase --deep-enrich --project <slug> --output <repo>` 生成确定性图谱文档（G1/G2/G3）与深度知识；无需单独的 team-wiki CLI
 
 ---
 

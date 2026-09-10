@@ -1158,6 +1158,9 @@ teamai codebase --extract /path/to/repo --project my-service
 # 增量刷新：复用首次提取的仓库路径和项目名
 teamai codebase --extract /path/to/repo --project my-service --incremental
 
+# 从已提取的 evidence 生成深度知识文档（--output 指向仓库根目录）
+teamai codebase --deep-enrich --project my-service --output /path/to/repo
+
 # 将 teamwiki/product 和 teamwiki/docs 与提取的代码页面进行对账
 teamai codebase --reconcile --output /path/to/repo
 

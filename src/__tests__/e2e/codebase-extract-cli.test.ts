@@ -192,3 +192,30 @@ describe('teamai codebase reconcile CLI (issue #360 slice 2)', () => {
     }
   });
 });
+
+describe('teamai codebase deep-enrich CLI (issue #360 slice 3)', () => {
+  it('lists --deep-enrich, documents it in the skill, and fails when teamwiki is missing', async () => {
+    const help = await runCLI(['codebase', '--help']);
+    expect(help.code, help.output).toBe(0);
+    expect(help.stdout).toContain('--deep-enrich');
+
+    const skill = fs.readFileSync(path.join(ROOT, 'skills/team-wiki-codebase/SKILL.md'), 'utf8');
+    const command = [...skill.matchAll(/`(teamai codebase [^`]+)`/g)]
+      .map(match => match[1])
+      .find(candidate => candidate.includes('--deep-enrich'));
+    expect(command).toBeDefined();
+
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-deep-enrich-360-'));
+    try {
+      const missingRoot = path.join(fixture, 'missing');
+      const enrichArgs = command!.split(/\s+/).slice(1)
+        .map(arg => arg === '<repo>' ? missingRoot : arg === '<slug>' ? 'slice360' : arg);
+      const missing = await runCLI(enrichArgs, fixture);
+      expect(missing.code, missing.output).toBe(1);
+      expect(missing.stdout).toContain('No teamwiki found');
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+});
+

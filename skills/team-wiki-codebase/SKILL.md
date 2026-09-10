@@ -889,6 +889,7 @@ _review/                                ← 过程文件（不入知识库）
 | 阶段 | 命令 / 路径 |
 |------|-------------|
 | Phase 0 结构基线 | `teamai codebase --extract <repo> --project <slug>`（writes `<repo>/teamwiki/`） |
+| Deep knowledge | Use `teamai codebase --deep-enrich --project <slug> --output <repo>` after extract has written `teamwiki/evidence/code/<slug>/`. `--output` is the repository root, not the `teamwiki/` directory. Prefix with `teamai --dry-run` to preview without writing. TeamAI does not ship a separate team-wiki CLI. No extra plugin is required. |
 | K3 后编译进 wiki | Skip. TeamAI does not ship a separate team-wiki CLI. Continue with this skill using `teamai` and the files under this skill directory. No extra plugin is required. |
 | 产品文档入图 | Skip. Same English note as above. |
 | 产品↔代码桥接 | Use `teamai codebase --reconcile --output <repo>` after product pages and extracted code pages are under `<repo>/teamwiki/`. Prefix with `teamai --dry-run` to preview without updating the graph. |

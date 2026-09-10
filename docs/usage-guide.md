@@ -1189,6 +1189,9 @@ teamai codebase --extract /path/to/repo --project my-service
 # Incremental refresh: reuse the original repository path and project slug
 teamai codebase --extract /path/to/repo --project my-service --incremental
 
+# Generate deep knowledge docs from extracted evidence (--output is the repository root)
+teamai codebase --deep-enrich --project my-service --output /path/to/repo
+
 # Reconcile teamwiki/product and teamwiki/docs with extracted code pages
 teamai codebase --reconcile --output /path/to/repo
 
