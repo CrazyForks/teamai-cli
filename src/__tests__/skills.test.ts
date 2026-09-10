@@ -1138,6 +1138,79 @@ describe('SkillsHandler.pullItem honors disabledAgents', () => {
   });
 });
 
+describe('SkillsHandler.pullItem skips hermes when not installed', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let handler: SkillsHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+  let sourcePath: string;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-skills-pull-hermes-'));
+    homeDir = path.join(tmpDir, 'home');
+    const repoPath = path.join(tmpDir, 'team-repo');
+
+    sourcePath = path.join(repoPath, 'skills', 'team-skill');
+    await fse.ensureDir(sourcePath);
+    await fse.writeFile(path.join(sourcePath, 'SKILL.md'), '---\nname: team-skill\ndescription: X\n---\n');
+
+    vi.stubEnv('HOME', homeDir);
+    handler = new SkillsHandler();
+
+    teamConfig = {
+      team: 'test',
+      description: '',
+      repo: 'https://git.woa.com/test/repo.git',
+      provider: 'tgit' as const,
+      reviewers: [],
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: {
+        hermes: { skills: '.hermes/skills' },
+      },
+    };
+
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+      updatePolicy: 'auto',
+      additionalRoles: [],
+      scope: 'user',
+      disabledAgents: [],
+    };
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  const item = () => ({
+    name: 'team-skill',
+    type: 'skills' as const,
+    sourcePath,
+    relativePath: 'skills/team-skill',
+  });
+
+  it('does not create a hermes home that was never installed', async () => {
+    vi.stubEnv('HERMES_HOME', path.join(homeDir, '.hermes'));
+
+    await handler.pullItem(item(), teamConfig, localConfig);
+
+    expect(await fse.pathExists(path.join(homeDir, '.hermes'))).toBe(false);
+  });
+
+  it('syncs normally when the hermes home exists', async () => {
+    const hermesHome = path.join(homeDir, '.hermes');
+    await fse.ensureDir(hermesHome);
+    vi.stubEnv('HERMES_HOME', hermesHome);
+
+    await handler.pullItem(item(), teamConfig, localConfig);
+
+    expect(await fse.pathExists(path.join(hermesHome, 'skills', 'team-skill', 'SKILL.md'))).toBe(true);
+  });
+});
+
 describe('SkillsHandler.pullItem Codex shared skills', () => {
   let tmpDir: string;
 
