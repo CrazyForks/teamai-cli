@@ -81,3 +81,19 @@ export async function mirrorLearnings(
     },
   });
 }
+
+/**
+ * Add a single learning file to the machine-local cache without touching
+ * anything else there. Unlike mirrorLearnings, this never deletes: it's for
+ * sources that are only a partial, disposable snapshot (e.g. contributeSelf's
+ * knowledge worktree, checked out at origin/<default>) and would otherwise
+ * wipe out cached entries the snapshot simply doesn't happen to contain, such
+ * as other projects' cache or a still-unmerged prior contribution (#472).
+ */
+export async function addLearningToCache(
+  sourceFile: string,
+  destinationDir: string,
+  relativePath: string,
+): Promise<void> {
+  await fse.copy(sourceFile, path.join(destinationDir, relativePath), { overwrite: true });
+}
