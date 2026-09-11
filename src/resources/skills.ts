@@ -481,6 +481,13 @@ export class SkillsHandler extends ResourceHandler {
         }
         dest = path.join(wsDir, 'skills', item.name);
       } else if (tool === 'hermes') {
+        // Like every other tool, skip when not installed: getHermesHome()
+        // always resolves (HERMES_HOME or ~/.hermes), so without this check
+        // every pull creates a hermes home the user never asked for.
+        if (!await pathExists(getHermesHome())) {
+          log.debug(`Skipping skill sync for ${tool}: tool not installed`);
+          continue;
+        }
         dest = path.join(getHermesHome(), 'skills', item.name);
       } else {
         if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) {
