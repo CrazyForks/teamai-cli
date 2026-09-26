@@ -86,7 +86,7 @@ async function runStatus(opts: CacheCmdOptions): Promise<void> {
     console.log('');
 
     if (result.entryCount === 0) {
-        console.log(chalk.gray('（无缓存条目）'));
+        console.log(chalk.gray('(no cache entries)'));
         return;
     }
 
@@ -118,7 +118,7 @@ async function runStatus(opts: CacheCmdOptions): Promise<void> {
 
     console.log('');
     console.log(
-        chalk.bold(`总计: ${result.entryCount} 个仓库，占用 ${formatBytes(result.totalBytes)}`),
+        chalk.bold(`Total: ${result.entryCount} repo(s), ${formatBytes(result.totalBytes)}`),
     );
     console.log('');
 }
@@ -155,20 +155,21 @@ async function runGc(opts: CacheCmdOptions): Promise<void> {
     const dryRunTag = opts.dryRun ? chalk.yellow('[dry-run] ') : '';
 
     console.log('');
-    console.log(chalk.bold(`${dryRunTag}GC 执行结果`));
+    console.log(chalk.bold(`${dryRunTag}GC result`));
     console.log('');
     console.log(
-        `前: ${result.before.entryCount} 个仓库，${formatBytes(result.before.totalBytes)}`,
+        `Before: ${result.before.entryCount} repo(s), ${formatBytes(result.before.totalBytes)}`,
     );
     console.log(
-        `后: ${result.after.entryCount} 个仓库，${formatBytes(result.after.totalBytes)}`,
+        `After: ${result.after.entryCount} repo(s), ${formatBytes(result.after.totalBytes)}`,
     );
     console.log('');
 
     if (result.removed.length === 0) {
-        console.log(chalk.green('无需清理'));
+        console.log(chalk.green('Nothing to clean up'));
     } else {
-        console.log(chalk.bold(`清理列表（${result.removed.length} 项）:`));
+        const removedLabel = opts.dryRun ? 'Would remove' : 'Removed';
+        console.log(chalk.bold(`${removedLabel} (${result.removed.length}):`));
         for (const item of result.removed) {
             const tag = item.reason === 'stale' ? chalk.yellow('[stale]') : chalk.red('[over-cap]');
             console.log(`  ${tag} ${item.key}  (${formatBytes(item.size_bytes)})`);
@@ -177,7 +178,7 @@ async function runGc(opts: CacheCmdOptions): Promise<void> {
 
     if (result.skipped.length > 0) {
         console.log('');
-        console.log(chalk.bold(chalk.red(`跳过列表（${result.skipped.length} 项，需人工排查）:`)));
+        console.log(chalk.bold(chalk.red(`Skipped (${result.skipped.length}, needs manual review):`)));
         for (const item of result.skipped) {
             console.log(`  ${chalk.red('[skip]')} ${item.key}: ${item.reason}`);
         }

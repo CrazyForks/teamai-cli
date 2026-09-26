@@ -109,13 +109,13 @@ export async function loadCacheIndex(): Promise<CacheIndex> {
         const raw = await fs.readFile(indexPath, 'utf8');
         const parsed = JSON.parse(raw) as CacheIndex;
         if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
-            log.debug('[cache-index] 索引格式不符，返回空索引');
+            log.debug('[cache-index] Unrecognized index format; using an empty index');
             return emptyIndex();
         }
         return parsed;
     } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-            log.debug(`[cache-index] 读取索引失败，返回空索引: ${String(err)}`);
+            log.debug(`[cache-index] Failed to read the index; using an empty index: ${String(err)}`);
         }
         return emptyIndex();
     }
@@ -151,7 +151,7 @@ export async function statDirSize(absPath: string): Promise<number> {
     try {
         stat = await fs.lstat(absPath);
     } catch (err) {
-        log.debug(`[cache-index] statDirSize lstat 失败，跳过 ${absPath}: ${String(err)}`);
+        log.debug(`[cache-index] statDirSize: lstat failed, skipping ${absPath}: ${String(err)}`);
         return 0;
     }
 
@@ -171,7 +171,7 @@ export async function statDirSize(absPath: string): Promise<number> {
     try {
         entries = await fs.readdir(absPath, { withFileTypes: true });
     } catch (err) {
-        log.debug(`[cache-index] statDirSize readdir 失败，跳过 ${absPath}: ${String(err)}`);
+        log.debug(`[cache-index] statDirSize: readdir failed, skipping ${absPath}: ${String(err)}`);
         return 0;
     }
 
@@ -187,7 +187,7 @@ export async function statDirSize(absPath: string): Promise<number> {
                 const childStat = await fs.lstat(childPath);
                 total += childStat.size;
             } catch (err) {
-                log.debug(`[cache-index] statDirSize 子文件 stat 失败，跳过: ${String(err)}`);
+                log.debug(`[cache-index] statDirSize: stat failed for a file, skipping: ${String(err)}`);
             }
         }
     }
@@ -304,8 +304,8 @@ export async function gcCache(opts?: GcOptions): Promise<GcResult> {
                     await fs.remove(absPath);
                     removed.push({ key: entry.key, size_bytes: entry.size_bytes, reason: 'stale' });
                 } catch (err) {
-                    log.debug(`[gc] 删除失败，跳过 ${entry.key}: ${String(err)}`);
-                    skipped.push({ key: entry.key, reason: `删除失败: ${String(err)}` });
+                    log.debug(`[gc] Failed to delete ${entry.key}, skipping: ${String(err)}`);
+                    skipped.push({ key: entry.key, reason: `failed to delete: ${String(err)}` });
                     remaining.push(entry);
                 }
             } else {
@@ -338,8 +338,8 @@ export async function gcCache(opts?: GcOptions): Promise<GcResult> {
                     removed.push({ key: entry.key, size_bytes: entry.size_bytes, reason: 'over-cap' });
                     currentTotal -= entry.size_bytes;
                 } catch (err) {
-                    log.debug(`[gc] 删除失败，跳过 ${entry.key}: ${String(err)}`);
-                    skipped.push({ key: entry.key, reason: `删除失败: ${String(err)}` });
+                    log.debug(`[gc] Failed to delete ${entry.key}, skipping: ${String(err)}`);
+                    skipped.push({ key: entry.key, reason: `failed to delete: ${String(err)}` });
                     toKeep.push(entry);
                 }
             } else {
@@ -407,7 +407,7 @@ export async function getCacheStatus(): Promise<{
         if (exists) {
             validEntries.push(entry);
         } else {
-            log.debug(`[cache-status] 磁盘已不存在，自动剪除条目: ${entry.key}`);
+            log.debug(`[cache-status] ${entry.key} is no longer on disk; removed it from the index`);
             dirty = true;
         }
     }
