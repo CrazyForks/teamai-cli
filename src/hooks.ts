@@ -1384,6 +1384,39 @@ async function isPiInstalled(baseDir: string, installedBaseDir?: string): Promis
 }
 
 /**
+ * Pi cannot run custom team hooks — it supports built-in lifecycle hooks only —
+ * so anything the team scoped to Pi is skipped, and a real reconcile says so.
+ * Extracted from the reconcile loop so a dry run, which stops before the
+ * per-tool stage, prints the same report without writing anything and its
+ * "Would apply" line does not promise hooks no tool will run.
+ *
+ * Only warns when Pi is actually installed: Pi is in every team's default
+ * toolPaths, so without this gate teammates who never use Pi see this warning
+ * on every reconcile whenever the team defines a Pi-targeted hook.
+ */
+async function reportPiSkippedTeamHooks(
+  defs: HookDef[],
+  baseDir: string,
+  installedBaseDir: string | undefined,
+  builtinOverride: BuiltinHookOverride | undefined,
+): Promise<void> {
+  if (!await isPiInstalled(baseDir, installedBaseDir)) return;
+  const applicableTeamDefs = teamDefsForTool(defs, 'pi');
+  if (applicableTeamDefs.length > 0) {
+    log.warn(
+      `Pi supports built-in lifecycle hooks only; skipping ${applicableTeamDefs.length} custom team hook(s) from hooks/hooks.yaml`,
+    );
+  }
+  const builtinOverrideCount = (builtinOverride?.disabled?.length ?? 0)
+    + Object.keys(builtinOverride?.overrides ?? {}).length;
+  if (builtinOverrideCount > 0) {
+    log.warn(
+      `Pi supports built-in lifecycle hooks only; skipping ${builtinOverrideCount} built-in hook override(s) from hooks/hooks.yaml`,
+    );
+  }
+}
+
+/**
  * Reconcile the single TeamAI Pi extension in the user agent directory. Pi
  * also auto-loads a project extensions dir with absolute-path dedup, so
  * writing a second copy there would dispatch every event twice (the same
@@ -1626,24 +1659,8 @@ export async function reconcileHooksToAllTools(
     if (tool === 'pi') {
       if (opts.settingsOnly) continue;
       try {
-        // Only warn about skipped team/override hooks when Pi is actually
-        // installed — Pi is in every team's default toolPaths, so without this
-        // gate teammates who never use Pi see this warning on every
-        // reconcile whenever the team defines a Pi-targeted hook.
-        if (!opts.removeAll && await isPiInstalled(baseDir, opts.installedBaseDir)) {
-          const applicableTeamDefs = teamDefsForTool(defs, 'pi');
-          if (applicableTeamDefs.length > 0) {
-            log.warn(
-              `Pi supports built-in lifecycle hooks only; skipping ${applicableTeamDefs.length} custom team hook(s) from hooks/hooks.yaml`,
-            );
-          }
-          const builtinOverrideCount = (opts.builtinOverride?.disabled?.length ?? 0)
-            + Object.keys(opts.builtinOverride?.overrides ?? {}).length;
-          if (builtinOverrideCount > 0) {
-            log.warn(
-              `Pi supports built-in lifecycle hooks only; skipping ${builtinOverrideCount} built-in hook override(s) from hooks/hooks.yaml`,
-            );
-          }
+        if (!opts.removeAll) {
+          await reportPiSkippedTeamHooks(defs, baseDir, opts.installedBaseDir, opts.builtinOverride);
         }
         await reconcilePiExtension(baseDir, opts.removeAll, opts.installedBaseDir);
       } catch (e) {
@@ -1791,13 +1808,17 @@ export type TeamHooksReconcile =
 export async function reconcileTeamHooksForConfig(
   teamConfig: TeamaiConfig,
   localConfig: LocalConfig,
-  opts: { removeAll?: boolean; auto?: boolean; silent?: boolean; filterAgents?: string[] } = {},
+  opts: { removeAll?: boolean; auto?: boolean; silent?: boolean; filterAgents?: string[]; dryRun?: boolean } = {},
 ): Promise<TeamHooksReconcile> {
   const resolved: Awaited<ReturnType<typeof resolveTeamHooks>> = opts.removeAll
     ? { ok: true, defs: [], builtin: undefined }
     : await resolveTeamHooks(teamConfig, localConfig, {
         auto: opts.auto,
         silent: opts.silent,
+        // Resolve and report, then stop: a dry run must show the entry warnings
+        // and the hooks it would apply without touching any tool's settings
+        // (#822).
+        preview: opts.dryRun,
       });
   // The team's hooks could not be resolved (reported by resolveTeamHooks).
   // Reconciling the team set now would remove every installed team hook, so
@@ -1820,7 +1841,24 @@ export async function reconcileTeamHooksForConfig(
   // Resolve the tool paths at the scope hooks actually live in, not at the
   // config's scope: a non-self project scope puts hooks in HOME, so its paths
   // must be the user-scope ones.
-  await reconcileHooksToAllTools(scopedToolPaths(teamConfig, { ...localConfig, scope: hookScope }), baseDir, teamDefs, manifestPath, {
+  //
+  // A dry run stops here. The resolution above already reported the entry
+  // warnings and the hooks it would apply; everything below writes a tool's
+  // settings or the managed-hooks manifest. The result mirrors what a real
+  // reconcile would report, so a caller cannot tell them apart by the shape.
+  //
+  // One report happens below the stop point and a dry run must still make it:
+  // a tool that cannot run team hooks says so during the per-tool pass, and
+  // the preview is only honest when the dry run repeats it — for the tools the
+  // pass would actually reach, which is what hookToolPaths decides below too.
+  const hookToolPaths = scopedToolPaths(teamConfig, { ...localConfig, scope: hookScope });
+  if (opts.dryRun) {
+    if (!opts.removeAll && 'pi' in hookToolPaths && (!filterAgents || filterAgents.includes('pi'))) {
+      await reportPiSkippedTeamHooks(teamDefs, baseDir, localConfig.scope === 'project' ? (localConfig.projectRoot ?? baseDir) : undefined, builtin);
+    }
+    return resolved.ok ? { ok: true, defs: teamDefs } : { ok: false, builtins: builtinsOnly ?? 'with-overrides' };
+  }
+  await reconcileHooksToAllTools(hookToolPaths, baseDir, teamDefs, manifestPath, {
     removeAll: opts.removeAll,
     builtinOverride: builtin,
     filterAgents,

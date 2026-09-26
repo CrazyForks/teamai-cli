@@ -2126,7 +2126,10 @@ async function reconcileHooksAllScopes(
   projectConfig: LocalConfig | null,
   options: GlobalOptions,
 ): Promise<void> {
-  if (options.dryRun) return;
+  // A dry run still resolves the entries, so the warnings a maintainer runs
+  // `--dry-run` to see — an unknown id, a deprecated per-entry `roles:`, a
+  // hooks.yaml that does not parse — are reported; only the writes are skipped,
+  // inside reconcileTeamHooksForConfig (#822).
   const scopes = [userConfig, projectConfig].filter((c): c is LocalConfig => !!c);
   for (const localConfig of scopes) {
     try {
@@ -2137,9 +2140,13 @@ async function reconcileHooksAllScopes(
         auto: true,
         silent: options.silent,
         filterAgents: localConfig.enabledAgents,
+        dryRun: options.dryRun,
       });
       if (reconciled.ok && reconciled.defs.length > 0) {
-        log.debug(`[${localConfig.scope}] Reconciled ${reconciled.defs.length} team hook(s)`);
+        // Same preview rule as the user-facing line: a dry run resolved and
+        // reported the entries but wrote nothing, so the debug trail must not
+        // claim a reconcile that did not happen.
+        log.debug(`[${localConfig.scope}] ${options.dryRun ? 'Would apply' : 'Reconciled'} ${reconciled.defs.length} team hook(s)`);
       }
     } catch (e) {
       log.debug(`[${localConfig.scope}] Hook reconcile skipped: ${(e as Error).message}`);
@@ -2157,14 +2164,17 @@ async function reconcileMcpAllScopes(
   projectConfig: LocalConfig | null,
   options: GlobalOptions,
 ): Promise<void> {
-  if (options.dryRun) return;
+  // Same contract as the hooks stage: resolve and report the entry warnings on
+  // a dry run, skip the writes. `reconcileMcpForConfig` already gates every
+  // write on `dryRun` (the `mcp inject --dry-run` path uses it), so this only
+  // forwards it (#822).
   const scopes = [userConfig, projectConfig].filter((c): c is LocalConfig => !!c);
   for (const localConfig of scopes) {
     try {
       const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
       if (!teamConfig) continue;
       const { reconcileMcpForConfig } = await import('./mcp-reconcile.js');
-      const { changes } = await reconcileMcpForConfig(teamConfig, localConfig, { force: options.force });
+      const { changes } = await reconcileMcpForConfig(teamConfig, localConfig, { force: options.force, dryRun: options.dryRun });
 
       const applied = changes.filter((c) => c.action !== 'skipped');
       for (const c of changes) {
@@ -2172,7 +2182,14 @@ async function reconcileMcpAllScopes(
       }
       if (applied.length > 0 && !options.silent) {
         const servers = [...new Set(applied.map((c) => c.server))];
-        log.info(`MCP: ${applied.length} change(s) across ${servers.length} server(s). Restart your AI tool session to load them.`);
+        // A dry run reports the changes it would make (`wrote` stays false), so
+        // the summary must not read as a completed apply, nor tell the member to
+        // restart a session that has nothing new to load.
+        if (options.dryRun) {
+          log.info(`MCP: [dry-run] Would make ${applied.length} change(s) across ${servers.length} server(s)`);
+        } else {
+          log.info(`MCP: ${applied.length} change(s) across ${servers.length} server(s). Restart your AI tool session to load them.`);
+        }
       }
     } catch (e) {
       log.debug(`[${localConfig.scope}] MCP reconcile skipped: ${(e as Error).message}`);
