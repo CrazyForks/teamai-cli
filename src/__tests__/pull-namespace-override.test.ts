@@ -270,7 +270,12 @@ describe('pull: an active namespace item replaces the root item of the same name
 
     // The admin edits the root rule and adds its namespace override in one push:
     // the member's copy is the version of the last pull, not a member edit.
-    it('withdraws the replaced root rule\'s copy when the root rule changed in the same push, and names an edited one', async () => {
+    // HOME's copy may come from a project pull that inherits the user scope,
+    // which records its revision apart from the user scope's own (#823).
+    it.each([
+      ['the last pull', (rev: string) => ({ lastPullRev: rev })],
+      ['an inherited pull', (rev: string) => ({ lastPullRev: null, lastInheritedPullRev: rev })],
+    ])('withdraws the replaced root rule\'s copy when the root rule changed in the same push since %s, and names an edited one', async (_case, delivered) => {
       const base = await loadTeamConfig(repoPath);
       if (!base) throw new Error('no team config');
       vi.mocked(loadTeamConfig).mockResolvedValue({
@@ -294,7 +299,7 @@ describe('pull: an active namespace item replaces the root item of the same name
       await team('rules/frontend/tone.md', '# Front tone\n');
       git('add', '-A');
       git('commit', '-q', '-m', 'v2');
-      vi.mocked(loadStateForScope).mockResolvedValue({ lastPull: null, lastPullRev: v1 } as never);
+      vi.mocked(loadStateForScope).mockResolvedValue({ lastPull: null, ...delivered(v1) } as never);
       try {
         await pull({});
       } finally {

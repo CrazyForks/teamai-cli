@@ -494,7 +494,7 @@ knowledge on main is left exactly in place).
    - `.teamai/agents/` — subagent definitions (`<name>.yaml`, or legacy `<name>.md`)
    - `.teamai/env/env.yaml` — shared env vars
 
-   `teamai push` scans all of these plus your AI tool dirs, and only surfaces genuine additions or edits (already-committed content is skipped). If you rename an agent's extension (e.g. `helper.md` → `helper.yaml`), delete the old file — `teamai push` won't remove it for you, and two files with the same stem would collide on pull.
+   `teamai push` scans all of these plus your AI tool dirs, and only surfaces genuine additions or edits (already-committed content is skipped). A rule or skill under `.teamai/` that matches an older version of the team's file, as it does when your branch is behind the default branch, is not an edit either: push skips it with a warning rather than revert a teammate's update. If you rename an agent's extension (e.g. `helper.md` → `helper.yaml`), delete the old file — `teamai push` won't remove it for you, and two files with the same stem would collide on pull.
 4. **docs / hooks / mcp** are contributed by editing their file directly — they don't go through `teamai push`; a normal `git commit` + push ships them:
    - `.teamai/docs/` — team docs
    - `.teamai/hooks/hooks.yaml` — team hooks

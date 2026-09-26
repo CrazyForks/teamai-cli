@@ -63,7 +63,7 @@ vi.mock('../update.js', () => ({
   releaseLock: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { pull } from '../pull.js';
+import { checkoutKey, pull } from '../pull.js';
 import { detectProjectConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from '../config.js';
 import { log } from '../utils/logger.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
@@ -208,6 +208,23 @@ describe('pull reports what reached the tool directory (#585)', () => {
         expect(vi.mocked(log.warn).mock.calls.flat()).toContainEqual(expect.stringContaining(`[${scope}] Failed to sync docs:`));
       }
     }
+  });
+
+  it('adds the revision a pull delivered to the checkout\'s push bases when its docs mirror fails (#823)', async () => {
+    const projectRoot = path.join(tmpDir, 'project');
+    await fse.ensureDir(projectRoot);
+    vi.mocked(detectProjectConfig).mockResolvedValue({ ...localConfig, scope: 'project', projectRoot });
+    const key = await checkoutKey(projectRoot);
+    const state = await loadStateForScope(localConfig);
+    state.lastPullByWorkspace = { [key]: { rev: 'old1234', targets: [] } };
+    await fse.outputFile(path.join(projectRoot, 'docs'), 'blocks docs directory');
+
+    await pull({ silent: true, force: true });
+
+    expect(vi.mocked(log.warn).mock.calls.flat()).toContainEqual(expect.stringContaining('[project] Failed to sync docs:'));
+    // The marker stays cleared for a retry, and the record keeps its rev.
+    expect(state.lastPullRev).toBeNull();
+    expect(state.lastPullByWorkspace?.[key]).toEqual({ rev: 'old1234', targets: [], pushBaseRevs: ['abc1234'] });
   });
 
   it.each(['empty', 'missing'])('prunes only stale empty directories when the team bundle is %s', async (state) => {

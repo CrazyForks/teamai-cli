@@ -2,9 +2,10 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { isToolInstalledForConfig, ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, DeliveryTarget, TeamaiConfig, LocalConfig } from '../types.js';
-import { getPushignorePath, isAgentExcluded, resolveToolBaseDir, scopedToolPaths } from '../types.js';
+import { getPushignorePath, isAgentExcluded, resolveToolBaseDir, scopedToolPaths, SELF_KNOWLEDGE_SCAN_KEY } from '../types.js';
 import { listDirs, listFilesRecursive, pathExists, copyDir, remove, pruneEmptyDirs, dirContentEqual, dirTeamSubsetEqual, fileContentEqual, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
+import { getFileContentWhenAdded, isPastVersionOf } from '../utils/git.js';
 import { isCliOwnedSkillName } from '../builtin-skills.js';
 import { resolveOpenclawWorkspaceDir } from '../openclaw-hooks.js';
 import { getHermesHome } from '../hermes-home.js';
@@ -426,6 +427,31 @@ async function removeLeftoverVersionFiles(source: string, dest: string, otherVer
   if (removed) await pruneEmptyDirs(dest);
 }
 
+/**
+ * Whether every team file of the skill at `teamDir` (`teamRelDir` in the team
+ * repo at `repoPath`) whose copy under `localDir` differs is an older version
+ * of that team file. A team file missing locally is one a teammate added since
+ * when the active branch at `activeRoot` never added it, and the member's
+ * deletion otherwise. Files only the member has are ignored, as
+ * dirTeamSubsetEqual ignores them.
+ */
+async function isPastSkillVersion(
+  repoPath: string, activeRoot: string, localDir: string, teamDir: string, teamRelDir: string,
+): Promise<boolean> {
+  for (const rel of await listFilesRecursive(teamDir)) {
+    if (rel.split('/').includes(CONTRIBUTORS_FILE)) continue;
+    const localFile = path.join(localDir, rel);
+    if (await fileContentEqual(localFile, path.join(teamDir, rel))) continue;
+    if (!await pathExists(localFile)) {
+      const activeRel = path.relative(activeRoot, localFile).split(path.sep).join('/');
+      if (await getFileContentWhenAdded(activeRoot, activeRel) === null) continue;
+      return false;
+    }
+    if (!await isPastVersionOf(repoPath, localFile, `${teamRelDir}/${rel}`)) return false;
+  }
+  return true;
+}
+
 export class SkillsHandler extends ResourceHandler {
   readonly type = 'skills' as const;
 
@@ -546,6 +572,19 @@ export class SkillsHandler extends ResourceHandler {
           const teamDirPath = teamSkills.get(dir)!.dir;
           const equal = await dirTeamSubsetEqual(localDirPath, teamDirPath, [CONTRIBUTORS_FILE]);
           if (equal) continue; // This tool dir's copy is identical, skip
+          // Single-repo mode: like `.teamai/rules` (see the rules scan), the
+          // active tree's `.teamai/skills` is never refreshed, and a branch
+          // behind the default branch holds older copies nobody edited (#823).
+          const teamRelDir = path.relative(localConfig.repo.localPath, teamDirPath).split(path.sep).join('/');
+          if (tool === SELF_KNOWLEDGE_SCAN_KEY && localConfig.projectRoot
+            && await isPastSkillVersion(localConfig.repo.localPath, localConfig.projectRoot, localDirPath, teamDirPath, teamRelDir)) {
+            log.warn(
+              `[skills] Skipped ${dir}: ${path.relative(resolveToolBaseDir(tool, localConfig), localDirPath)} is an older `
+              + `version of ${teamRelDir}, which has changed on the team since. `
+              + 'Copy the current files over it (or delete it) before editing.',
+            );
+            continue;
+          }
 
           // Content differs — candidate for "modified"
           const mtime = await getDirLatestMtime(localDirPath);

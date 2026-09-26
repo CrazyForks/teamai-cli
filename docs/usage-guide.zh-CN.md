@@ -435,7 +435,7 @@ main 的团队知识 —— `git status` 保持干净。旧版单仓装升级后
    - `.teamai/agents/` —— subagent 定义（`<name>.yaml`，或旧版 `<name>.md`）
    - `.teamai/env/env.yaml` —— 共享环境变量
 
-   `teamai push` 会同时扫描这些目录和你的 AI 工具目录，只呈现真正的新增或修改（已提交的内容会被跳过）。如果你改了某个 agent 的扩展名（如 `helper.md` → `helper.yaml`），请手动删掉旧文件 —— `teamai push` 不会替你删除，同 stem 的两个文件会在 pull 时冲突。
+   `teamai push` 会同时扫描这些目录和你的 AI 工具目录，只呈现真正的新增或修改（已提交的内容会被跳过）。`.teamai/` 下的规则或 skill 如果与团队文件的某个旧版本一致（你的分支落后于默认分支时就会这样），也不算修改：push 会给出警告并跳过它，而不会覆盖队友的更新。如果你改了某个 agent 的扩展名（如 `helper.md` → `helper.yaml`），请手动删掉旧文件 —— `teamai push` 不会替你删除，同 stem 的两个文件会在 pull 时冲突。
 4. **docs / hooks / mcp** 通过直接编辑对应文件来贡献 —— 它们不走 `teamai push`，用普通的 `git commit` + push 即可分发：
    - `.teamai/docs/` —— 团队文档
    - `.teamai/hooks/hooks.yaml` —— 团队 hooks

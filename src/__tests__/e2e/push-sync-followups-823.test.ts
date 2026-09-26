@@ -11,6 +11,20 @@
  * Item 3: an agent this machine placed with --role/--project was compared with
  * the project's shared lastPullRev, which a pull in another checkout moves past
  * a copy a stale worktree still holds unedited (the #812 revert, for agents).
+ *
+ * Item 4: a user-scope install kept no push base, so after a push synced HOME's
+ * copy to a teammate's update, the next push compared it with the revision the
+ * last pull delivered and offered it back over the teammate's next update.
+ *
+ * Item 19: a project pull that inherits the user scope moves HOME's copies
+ * without moving the user scope's push bases, with the same result. So did a
+ * pull whose docs mirror failed, and an upgraded install whose last inherited
+ * pull an older CLI ran.
+ *
+ * Item 10: in single-repo mode the active tree's .teamai/rules and
+ * .teamai/skills are push sources themselves. On a branch behind the default
+ * branch they hold an older team version nobody edited, and push listed it as
+ * modified, ready to revert the teammate's update.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
@@ -18,6 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { StateSchema } from '../../types.js';
 import { projectSlug } from '../../utils/partition.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,7 +75,7 @@ function requireCli(): void {
   }
 }
 
-describe('pre-push sync in single-repo mode (#823 item 2)', () => {
+describe('pre-push sync in single-repo mode (#823 items 2 and 10)', () => {
   let sandbox: string;
   let home: string;
   let projectRoot: string;
@@ -68,7 +83,10 @@ describe('pre-push sync in single-repo mode (#823 item 2)', () => {
 
   const R1 = '# Team rule\n\nVersion one.\n';
   const R2 = '# Team rule\n\nVersion two, from a teammate.\n';
+  const S1 = '---\nname: team-skill\ndescription: Team skill\n---\n\nVersion one.\n';
   const localRule = () => path.join(projectRoot, '.claude', 'rules', 'team-rule.md');
+  const activeRule = () => path.join(projectRoot, '.teamai', 'rules', 'team-rule.md');
+  const activeSkill = () => path.join(projectRoot, '.teamai', 'skills', 'team-skill');
 
   beforeEach(() => {
     requireCli();
@@ -91,6 +109,8 @@ describe('pre-push sync in single-repo mode (#823 item 2)', () => {
       '',
     ].join('\n'));
     fs.writeFileSync(path.join(projectRoot, '.teamai', 'rules', 'team-rule.md'), R1);
+    fs.mkdirSync(path.join(projectRoot, '.teamai', 'skills', 'team-skill'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, '.teamai', 'skills', 'team-skill', 'SKILL.md'), S1);
     git(['init', '-q', '-b', 'main'], projectRoot);
     git(['add', '-A'], projectRoot);
     git(['commit', '-q', '-m', 'project'], projectRoot);
@@ -150,6 +170,283 @@ describe('pre-push sync in single-repo mode (#823 item 2)', () => {
 
     const push = await run(['--dry-run', 'push']);
     expect(push).toContain('[rules] team-rule (modified)');
+  });
+
+  /** A teammate lands `content` at `file` on the default branch; the member fetches it but stays on their branch. */
+  const teammateLandsOnMain = (file: string, content: string): void => {
+    fs.writeFileSync(path.join(teammate, file), content);
+    git(['add', '-A'], teammate);
+    git(['commit', '-q', '-m', `teammate: ${file}`], teammate);
+    git(['push', '-q', 'origin', 'main'], teammate);
+    git(['fetch', '-q', 'origin'], projectRoot);
+  };
+  const HELD = 'which has changed on the team since';
+
+  it('holds a stale .teamai/rules copy on a branch behind a teammate\'s update (#823 item 10)', async () => {
+    await run(['pull']);
+    teammateLandsOnMain('.teamai/rules/team-rule.md', R2);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(push).toContain(`[rules] Skipped team-rule: .teamai/rules/team-rule.md is an older version of rules/team-rule.md, ${HELD}`);
+    expect(fs.readFileSync(activeRule(), 'utf8')).toBe(R1);
+  });
+
+  it('still lists a genuine edit of a stale .teamai/rules copy as modified (#823 item 10)', async () => {
+    await run(['pull']);
+    teammateLandsOnMain('.teamai/rules/team-rule.md', R2);
+    fs.writeFileSync(activeRule(), `${R1}\nA local edit.\n`);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).toContain('[rules] team-rule (modified)');
+    expect(push).not.toContain(HELD);
+  });
+
+  it('holds a stale .teamai/skills copy on a branch behind a teammate\'s update (#823 item 10)', async () => {
+    await run(['pull']);
+    teammateLandsOnMain('.teamai/skills/team-skill/SKILL.md', S1.replace('Version one.', 'Version two, from a teammate.'));
+    // A file only the member has does not make the copy an edit.
+    fs.writeFileSync(path.join(activeSkill(), 'notes.md'), 'Member notes.\n');
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-skill (modified)');
+    expect(push).toContain(`[skills] Skipped team-skill: .teamai/skills/team-skill is an older version of skills/team-skill, ${HELD}`);
+    expect(fs.readFileSync(path.join(activeSkill(), 'SKILL.md'), 'utf8')).toBe(S1);
+  });
+
+  it('holds a stale .teamai/skills copy that lacks a file a teammate added (#823 item 10)', async () => {
+    await run(['pull']);
+    teammateLandsOnMain('.teamai/skills/team-skill/reference.md', 'Added by a teammate.\n');
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-skill (modified)');
+    expect(push).toContain(`[skills] Skipped team-skill: .teamai/skills/team-skill is an older version of skills/team-skill, ${HELD}`);
+  });
+
+  it('still lists a stale .teamai/skills copy whose branch file the member deleted as modified (#823 item 10)', async () => {
+    await run(['pull']);
+    // The member's branch has the teammate's file, then falls behind again.
+    teammateLandsOnMain('.teamai/skills/team-skill/reference.md', 'On the branch.\n');
+    git(['merge', '-q', '--no-edit', 'origin/main'], projectRoot);
+    teammateLandsOnMain('.teamai/skills/team-skill/SKILL.md', S1.replace('Version one.', 'Version two, from a teammate.'));
+    fs.rmSync(path.join(activeSkill(), 'reference.md'));
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).toContain('[skills] team-skill (modified)');
+    expect(push).not.toContain(HELD);
+  });
+
+  it('still lists a genuine edit of a stale .teamai/skills copy as modified (#823 item 10)', async () => {
+    await run(['pull']);
+    teammateLandsOnMain('.teamai/skills/team-skill/SKILL.md', S1.replace('Version one.', 'Version two, from a teammate.'));
+    fs.writeFileSync(path.join(activeSkill(), 'SKILL.md'), `${S1}\nA local edit.\n`);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).toContain('[skills] team-skill (modified)');
+    expect(push).not.toContain(HELD);
+  });
+});
+
+describe('push base in user scope (#823 item 4)', () => {
+  let sandbox: string;
+  let home: string;
+  let work: string;
+  let teammate: string;
+
+  const R1 = '# Team rule\n\nVersion one.\n';
+  const localRule = () => path.join(home, '.claude', 'rules', 'team-rule.md');
+  const userState = () => StateSchema.parse(JSON.parse(fs.readFileSync(path.join(home, '.teamai', 'state.json'), 'utf8')));
+
+  beforeEach(() => {
+    requireCli();
+    sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-issue823-user-e2e-')));
+    home = path.join(sandbox, 'home');
+    work = path.join(sandbox, 'work');
+    teammate = path.join(sandbox, 'teammate');
+    const seed = path.join(sandbox, 'seed');
+    const remote = path.join(sandbox, 'team-remote.git');
+    const teamRepo = path.join(home, '.teamai', 'team-repo');
+
+    fs.mkdirSync(work, { recursive: true });
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(seed, 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(seed, 'teamai.yaml'), [
+      'team: issue-823-user-e2e',
+      'repo: https://example.com/team.git',
+      'provider: tgit',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(seed, 'rules', 'team-rule.md'), R1);
+    git(['init', '-q', '-b', 'main'], seed);
+    git(['add', '-A'], seed);
+    git(['commit', '-q', '-m', 'seed'], seed);
+    git(['clone', '-q', '--bare', seed, remote], sandbox);
+    git(['clone', '-q', remote, teammate], sandbox);
+    git(['clone', '-q', remote, teamRepo], sandbox);
+    fs.writeFileSync(path.join(home, '.teamai', 'config.yaml'), [
+      'repo:',
+      `  localPath: ${teamRepo}`,
+      `  remote: ${remote}`,
+      'username: ci-823-user',
+      'updatePolicy: auto',
+      'scope: user',
+      'enabledAgents: [claude]',
+      '',
+    ].join('\n'));
+  });
+
+  afterEach(() => {
+    if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  const run = async (args: string[]): Promise<string> => {
+    const r = await runCLI(args, work, home);
+    expect(r.code, r.output).toBe(0);
+    return r.output;
+  };
+  const teammatePublishes = (rule: string): void => {
+    fs.writeFileSync(path.join(teammate, 'rules', 'team-rule.md'), rule);
+    git(['commit', '-q', '-am', 'rule update'], teammate);
+    git(['push', '-q', 'origin', 'main'], teammate);
+  };
+
+  it('compares the next push with the revision the last push synced HOME\'s copy to', async () => {
+    await run(['pull']);
+    expect(fs.readFileSync(localRule(), 'utf8')).toBe(R1);
+    expect(await run(['pull'])).toContain('Already synced');
+
+    // A push syncs the unedited copy to a teammate's R2; a teammate then
+    // publishes R3 before any pull.
+    teammatePublishes('# Team rule\n\nVersion two, from a teammate.\n');
+    await run(['--dry-run', 'push']);
+    expect(fs.readFileSync(localRule(), 'utf8')).toContain('Version two');
+    const R3 = '# Team rule\n\nVersion three, from a teammate.\n';
+    teammatePublishes(R3);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(fs.readFileSync(localRule(), 'utf8'), push).toBe(R3);
+    // HOME is the user scope's one checkout: one record, holding both bases.
+    const records = Object.values(userState().lastPullByWorkspace ?? {});
+    expect(records).toHaveLength(1);
+    expect(records[0]?.pushBaseRevs).toHaveLength(2);
+  });
+
+  const dropUserRecord = (): void => {
+    const { lastPullByWorkspace: _dropped, ...rest } = userState();
+    fs.writeFileSync(path.join(home, '.teamai', 'state.json'), `${JSON.stringify(rest, null, 2)}\n`);
+  };
+
+  it.each([
+    ['a user-scope pull recorded HOME', 'never'],
+    ['no pull has recorded HOME (upgraded install)', 'before'],
+    ['a CLI that kept no record ran that pull (upgraded install)', 'after'],
+  ] as const)('compares the next push with the revision an inheriting project\'s pull moved HOME\'s copy to, when %s (#823 item 19)', async (_case, dropRecord) => {
+    await run(['pull']);
+    if (dropRecord === 'before') dropUserRecord();
+    const project = path.join(sandbox, 'project');
+    const projectTeamRepo = path.join(project, '.teamai', 'team-repo');
+    git(['clone', '-q', path.join(sandbox, 'team-remote.git'), projectTeamRepo], sandbox);
+    fs.writeFileSync(path.join(project, '.teamai', 'config.yaml'), [
+      'repo:',
+      `  localPath: ${projectTeamRepo}`,
+      `  remote: ${path.join(sandbox, 'team-remote.git')}`,
+      'username: ci-823-project',
+      'scope: project',
+      `projectRoot: ${project}`,
+      'inheritUserScope: true',
+      'enabledAgents: [claude]',
+      '',
+    ].join('\n'));
+
+    // The project's pull inherits the user scope and moves HOME's copy to R2;
+    // a teammate then publishes R3 before any user-scope pull.
+    teammatePublishes('# Team rule\n\nVersion two, from a teammate.\n');
+    const inherited = await runCLI(['pull'], project, home);
+    expect(inherited.code, inherited.output).toBe(0);
+    expect(fs.readFileSync(localRule(), 'utf8'), inherited.output).toContain('Version two');
+    // lastPullRev still names R1 and lastInheritedPullRev R2, the revision
+    // HOME's copy is at.
+    if (dropRecord === 'after') dropUserRecord();
+    const R3 = '# Team rule\n\nVersion three, from a teammate.\n';
+    teammatePublishes(R3);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(fs.readFileSync(localRule(), 'utf8'), push).toBe(R3);
+  });
+
+  it('compares the next push with the revision a pull moved HOME\'s copy to when its docs mirror failed', async () => {
+    fs.mkdirSync(path.join(teammate, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(teammate, 'docs', 'guide.md'), '# Guide\n');
+    git(['add', '-A'], teammate);
+    git(['commit', '-q', '-m', 'docs'], teammate);
+    git(['push', '-q', 'origin', 'main'], teammate);
+    await run(['pull']);
+    expect(fs.readFileSync(localRule(), 'utf8')).toBe(R1);
+
+    // The next pull updates the rule to a teammate's R2, then fails to mirror
+    // the docs (a file stands where the docs directory goes); a teammate then
+    // publishes R3 before any other pull.
+    fs.rmSync(path.join(home, '.teamai', 'docs'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(home, '.teamai', 'docs'), 'not a directory\n');
+    teammatePublishes('# Team rule\n\nVersion two, from a teammate.\n');
+    const pull = await runCLI(['pull'], work, home);
+    expect(pull.output).toContain('Failed to sync docs');
+    expect(fs.readFileSync(localRule(), 'utf8'), pull.output).toContain('Version two');
+    const R3 = '# Team rule\n\nVersion three, from a teammate.\n';
+    teammatePublishes(R3);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(fs.readFileSync(localRule(), 'utf8'), push).toBe(R3);
+    // The failed mirror still leaves the revision marker cleared for a retry.
+    expect(userState().lastPullRev).toBeNull();
+  });
+
+  it('keeps comparing with the last pull\'s revision in an install no pull has recorded', async () => {
+    await run(['pull']);
+    // An install upgraded from a CLI that kept no user-scope record.
+    const statePath = path.join(home, '.teamai', 'state.json');
+    const { lastPullByWorkspace: _dropped, ...unrecorded } = userState();
+    fs.writeFileSync(statePath, `${JSON.stringify(unrecorded, null, 2)}\n`);
+    expect(await run(['pull'])).toContain('Already synced');
+
+    const R2 = '# Team rule\n\nVersion two, from a teammate.\n';
+    teammatePublishes(R2);
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(push).not.toContain('no pull record yet');
+    expect(fs.readFileSync(localRule(), 'utf8'), push).toBe(R2);
+
+    // HOME is the user scope's only checkout, so lastPullRev is its own: an
+    // edit is pushed, not refused as it is in an unrecorded project checkout.
+    fs.writeFileSync(localRule(), `${R2}\nA local edit.\n`);
+    const edited = await run(['--dry-run', 'push']);
+    expect(edited).toContain('[rules] team-rule (modified)');
+  });
+
+  it('records the revision a push synced HOME\'s copy to in an install no pull has recorded', async () => {
+    await run(['pull']);
+    const { lastPullByWorkspace: _dropped, ...unrecorded } = userState();
+    fs.writeFileSync(path.join(home, '.teamai', 'state.json'), `${JSON.stringify(unrecorded, null, 2)}\n`);
+
+    // The first push syncs the unedited copy from R1 to a teammate's R2; a
+    // teammate then publishes R3 before any pull.
+    teammatePublishes('# Team rule\n\nVersion two, from a teammate.\n');
+    await run(['--dry-run', 'push']);
+    expect(fs.readFileSync(localRule(), 'utf8')).toContain('Version two');
+    const R3 = '# Team rule\n\nVersion three, from a teammate.\n';
+    teammatePublishes(R3);
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-rule (modified)');
+    expect(fs.readFileSync(localRule(), 'utf8'), push).toBe(R3);
+    // The record starts from the last pull's revision and keeps both pushes'.
+    const records = Object.values(userState().lastPullByWorkspace ?? {});
+    expect(records).toHaveLength(1);
+    expect(records[0]?.rev).toBe(unrecorded.lastPullRev);
+    expect(records[0]?.pushBaseRevs).toHaveLength(2);
   });
 });
 
@@ -304,5 +601,117 @@ describe('placed agent in a stale linked worktree (#823 item 3)', () => {
     const push = await run(['--dry-run', 'push'], projectRoot);
     expect(push).toContain(HELD);
     expect(fs.readFileSync(agentIn(projectRoot), 'utf8')).toBe(A1);
+  }, 60_000);
+});
+
+describe('skills a pull held on a namespace collision (#823)', () => {
+  let sandbox: string;
+  let home: string;
+  let teammate: string;
+
+  const skillMd = (body: string): string => `---\nname: team-skill\ndescription: Team skill\n---\n\n${body}\n`;
+  const S1 = skillMd('Version one.');
+
+  beforeEach(() => {
+    requireCli();
+    sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-issue823-held-e2e-')));
+    home = path.join(sandbox, 'home');
+    teammate = path.join(sandbox, 'teammate');
+    const seed = path.join(sandbox, 'seed');
+    const remote = path.join(sandbox, 'team-remote.git');
+
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(seed, 'manifest'), { recursive: true });
+    fs.mkdirSync(path.join(seed, 'skills', 'alpha', 'team-skill'), { recursive: true });
+    fs.writeFileSync(path.join(seed, 'teamai.yaml'), [
+      'team: issue-823-held-e2e',
+      'repo: https://example.com/team.git',
+      'provider: tgit',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(seed, 'manifest', 'roles.yaml'), [
+      'version: 1',
+      'roles:',
+      '  - id: dev',
+      '    resources:',
+      '      knowledge: []',
+      '      skills: [alpha, beta]',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(seed, 'skills', 'alpha', 'team-skill', 'SKILL.md'), S1);
+    git(['init', '-q', '-b', 'main'], seed);
+    git(['add', '-A'], seed);
+    git(['commit', '-q', '-m', 'seed'], seed);
+    git(['clone', '-q', '--bare', seed, remote], sandbox);
+    git(['clone', '-q', remote, teammate], sandbox);
+  });
+
+  afterEach(() => {
+    if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  /** Clone the team repo for `scope` and return where the scope runs and delivers. */
+  const install = (scope: 'user' | 'project'): { cwd: string; skill: string } => {
+    const remote = path.join(sandbox, 'team-remote.git');
+    const cwd = scope === 'user' ? path.join(sandbox, 'work') : path.join(sandbox, 'project');
+    const dataHome = scope === 'user' ? path.join(home, '.teamai') : path.join(cwd, '.teamai');
+    const teamRepo = path.join(dataHome, 'team-repo');
+    fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
+    git(['clone', '-q', remote, teamRepo], sandbox);
+    fs.writeFileSync(path.join(dataHome, 'config.yaml'), [
+      'repo:',
+      `  localPath: ${teamRepo}`,
+      `  remote: ${remote}`,
+      'username: ci-823-held',
+      'updatePolicy: auto',
+      `scope: ${scope}`,
+      ...(scope === 'project' ? [`projectRoot: ${cwd}`] : []),
+      'primaryRole: dev',
+      'enabledAgents: [claude]',
+      '',
+    ].join('\n'));
+    const skillsHome = scope === 'user' ? home : cwd;
+    return { cwd, skill: path.join(skillsHome, '.claude', 'skills', 'team-skill', 'SKILL.md') };
+  };
+  const teammateCommits = (message: string, change: () => void): void => {
+    change();
+    git(['add', '-A'], teammate);
+    git(['commit', '-q', '-m', message], teammate);
+    git(['push', '-q', 'origin', 'main'], teammate);
+  };
+
+  it.each(['user', 'project'] as const)('keeps the base of a %s-scope skill a pull held, so push does not list it as modified', async (scope) => {
+    const { cwd, skill } = install(scope);
+    const run = async (args: string[]): Promise<string> => {
+      const r = await runCLI(args, cwd, home);
+      expect(r.code, r.output).toBe(0);
+      return r.output;
+    };
+    const first = await run(['pull']);
+    expect(fs.existsSync(skill), first).toBe(true);
+    expect(fs.readFileSync(skill, 'utf8')).toBe(S1);
+
+    // A teammate updates the skill and adds a second one of the same name to
+    // another active namespace: the next pull holds skills, so the copy stays
+    // at S1 while the pull records the new revision.
+    teammateCommits('update and collide', () => {
+      fs.writeFileSync(path.join(teammate, 'skills', 'alpha', 'team-skill', 'SKILL.md'), skillMd('Version two.'));
+      fs.mkdirSync(path.join(teammate, 'skills', 'beta', 'team-skill'), { recursive: true });
+      fs.writeFileSync(path.join(teammate, 'skills', 'beta', 'team-skill', 'SKILL.md'), skillMd('Another one.'));
+    });
+    const held = await run(['pull']);
+    expect(held).toContain('Skills were not updated this run');
+    expect(fs.readFileSync(skill, 'utf8')).toBe(S1);
+
+    // The teammate resolves the collision and updates the skill again.
+    const S3 = skillMd('Version three.');
+    teammateCommits('resolve collision', () => {
+      fs.rmSync(path.join(teammate, 'skills', 'beta'), { recursive: true, force: true });
+      fs.writeFileSync(path.join(teammate, 'skills', 'alpha', 'team-skill', 'SKILL.md'), S3);
+    });
+
+    const push = await run(['--dry-run', 'push']);
+    expect(push).not.toContain('team-skill (modified)');
+    expect(fs.readFileSync(skill, 'utf8'), push).toBe(S3);
   }, 60_000);
 });

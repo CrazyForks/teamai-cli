@@ -1014,24 +1014,15 @@ async function pushCore(
     // Compare with the revisions THIS checkout synced: state.json is shared by
     // every worktree, and a pull in another checkout moves the shared
     // lastPullRev past a copy this checkout still holds unedited (#812).
-    const { checkoutKey, checkoutBaseRevs, addPushBaseRev } = await import('./pull.js');
-    const key = localConfig.scope === 'project' && localConfig.projectRoot
-      ? await checkoutKey(localConfig.projectRoot)
-      : undefined;
-    const checkoutRecord = key ? state.lastPullByWorkspace?.[key] : undefined;
-    unrecordedCheckout = key !== undefined && !checkoutRecord;
+    const { resolveCheckoutBases, addPushBaseRev, userScopeRecord } = await import('./pull.js');
+    const bases = await resolveCheckoutBases(localConfig, state);
+    unrecordedCheckout = bases.source === 'shared' && bases.unrecorded;
     placedRules = state.placedRules;
-    const checkoutBases = checkoutBaseRevs(checkoutRecord);
     try {
       // placedRules redirects a root-authored rule to the rules/<ns>/ file push
       // put it in, so a teammate's newer version syncs down instead of being
       // overwritten by the stale root copy the scan would otherwise call modified.
-      await syncTeamUpdatesToLocal(
-        teamConfig,
-        localConfig,
-        checkoutBases.length > 0 ? checkoutBases : state.lastPullRev,
-        state.placedRules,
-      );
+      await syncTeamUpdatesToLocal(teamConfig, localConfig, bases.revs, state.placedRules);
     } catch (e) {
       preSyncFailure = e instanceof Error ? e.message : String(e);
     }
@@ -1040,12 +1031,14 @@ async function pushCore(
     // (the copies it did not reach still match an older base) and even under
     // --dry-run (the sync has already written the files). The pull record's
     // `rev` stays, or the next pull would skip the docs and agents of this
-    // revision.
-    const syncedRev = checkoutRecord && checkoutBases.length > 0 && !teamRepoStale
+    // revision. HOME gets a record here if it has none yet; an unrecorded
+    // project checkout does not, as its fallback base may be another's.
+    const recordsBase = bases.source === 'checkout' || localConfig.scope === 'user';
+    const syncedRev = recordsBase && !teamRepoStale
       ? await getHeadCommit(localConfig.repo.localPath)
       : null;
-    if (checkoutRecord && syncedRev) {
-      addPushBaseRev(checkoutRecord, syncedRev);
+    if (syncedRev) {
+      addPushBaseRev(bases.source === 'checkout' ? bases.record : await userScopeRecord(state), syncedRev);
       try {
         await saveStateForScope(state, localConfig);
       } catch (e) {

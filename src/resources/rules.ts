@@ -125,12 +125,13 @@ export class RulesHandler extends ResourceHandler {
               ? copilotInstructionsBodyEqualsTeamMd(localRule, teamRule)
             : await fileContentEqual(localFilePath, teamFilePath);
           if (equal) continue; // This tool dir's copy is identical, skip
-          // Single-repo mode: nothing refreshes the author's `.teamai/rules`
-          // copy of a rule placed under a namespace — pull deploys to tool
-          // dirs and the pre-push sync covers those — so a copy equal to an
-          // OLDER version of the team file is one nobody edited, and pushing
-          // it would revert whoever changed the rule since (#649 review).
-          if (tool === SELF_KNOWLEDGE_SCAN_KEY && teamFileName === placedName
+          // Single-repo mode: nothing refreshes the active tree's
+          // `.teamai/rules` — pull deploys to tool dirs and the pre-push sync
+          // covers those — and a branch behind the default branch holds its
+          // older copies. A copy equal to an OLDER version of the team file is
+          // one nobody edited, and pushing it would revert whoever changed the
+          // rule since (#649 review, #823).
+          if (tool === SELF_KNOWLEDGE_SCAN_KEY
             && await isPastVersionOf(localConfig.repo.localPath, localFilePath, teamRelPath)) {
             log.warn(
               `[rules] Skipped ${name}: ${path.relative(resolveToolBaseDir(tool, localConfig), localFilePath)} is an `
@@ -472,7 +473,8 @@ export class RulesHandler extends ResourceHandler {
     // and only while the team file it points at still exists. Before the PR
     // merges there is no record yet — the placement is on the pending entry —
     // and the copy is just as much ours then.
-    const { placedRules, pendingPushes, lastPullRev } = await loadStateForScope(localConfig);
+    const state = await loadStateForScope(localConfig);
+    const { placedRules, pendingPushes } = state;
     for (const name of Object.keys(placedRules ?? {})) {
       const placed = placedResourcePath(placedRules, 'rules', name);
       if (placed && await pathExists(path.join(localConfig.repo.localPath, placed))) {
@@ -492,6 +494,11 @@ export class RulesHandler extends ResourceHandler {
     }
     const tombstones = await this.readTombstones(localConfig);
     const replacedByName = new Map(replacedRoots.map((rule) => [rule.name, rule]));
+    // The revisions this checkout's copies can be at: the shared lastPullRev
+    // may be another checkout's, and HOME's copy an inherited pull's (#823).
+    const deliveredRevs = replacedRoots.length > 0
+      ? (await (await import('../pull.js')).resolveCheckoutBases(localConfig, state)).revs
+      : [];
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!toolPath.rules) continue;
       // `pullItem` above skips excluded tools, so this pass must skip them too.
@@ -519,7 +526,7 @@ export class RulesHandler extends ResourceHandler {
           const replaced = teamRuleNames.has(ruleName) ? undefined : replacedByName.get(ruleName);
           if (replaced === undefined || localFile !== `${ruleName}${ext}`) continue;
           const deployed = path.join(destDir, localFile);
-          if (await isDeliveredRender(tool, deployed, replaced, localConfig.repo.localPath, lastPullRev ?? null)) {
+          if (await isDeliveredRender(tool, deployed, replaced, localConfig.repo.localPath, deliveredRevs)) {
             await remove(deployed);
             log.debug(`Removed ${localFile} from ${tool}: a namespace rule replaces it`);
           } else {
@@ -672,23 +679,26 @@ function renderRuleForTool(tool: string, source: string): string {
 
 /**
  * Whether `deployed` holds exactly what pull renders for `tool` from the team
- * rule, as it is now or as it was at the last pull: a root rule edited in the
- * same push that adds its namespace override leaves the older render behind,
- * which nobody edited.
+ * rule, as it is now or as it was at one of `deliveredRevs`: a root rule
+ * edited in the same push that adds its namespace override leaves the older
+ * render behind, which nobody edited.
  */
 async function isDeliveredRender(
   tool: string,
   deployed: string,
   rule: ResourceItem,
   repoPath: string,
-  lastPullRev: string | null,
+  deliveredRevs: readonly string[],
 ): Promise<boolean> {
   const current = await readFileSafe(deployed);
   if (current === null) return false;
   const team = await readFileSafe(rule.sourcePath);
   if (team !== null && current === renderRuleForTool(tool, team)) return true;
-  const atLastPull = lastPullRev ? await getFileContentAtRev(repoPath, lastPullRev, `./${rule.relativePath}`) : null;
-  return atLastPull !== null && current === renderRuleForTool(tool, atLastPull.toString('utf-8'));
+  for (const rev of deliveredRevs) {
+    const delivered = await getFileContentAtRev(repoPath, rev, `./${rule.relativePath}`);
+    if (delivered !== null && current === renderRuleForTool(tool, delivered.toString('utf-8'))) return true;
+  }
+  return false;
 }
 
 /**
