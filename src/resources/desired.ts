@@ -317,7 +317,7 @@ export async function indexedSkills(
   const desired = await resolveDesiredSkills(teamConfig, localConfig, roleContext);
   return desired.kind === 'resolved'
     ? { kind: 'dirs', dirs: desired.items.map((item) => item.sourcePath) }
-    : { kind: 'keep-indexed' };
+    : { kind: 'keep-indexed', reason: describeDeliveryConflict(desired) };
 }
 
 /** The rules recall indexes, relative to `rules/`: the rules pull delivers. */

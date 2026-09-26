@@ -1,8 +1,11 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import matter from 'gray-matter';
 
-import { listLearningFiles } from './learnings-roots.js';
+import { isSafeNamespaceSegment } from '../manifest-schema.js';
+import { listFilesRecursive, pathExists } from './fs.js';
+import { listLearningFiles, type LearningFile } from './learnings-roots.js';
 import { log } from './logger.js';
 
 /** 英文停用词集合 */
@@ -89,23 +92,52 @@ async function resolveDocDate(filePath: string, filename: string): Promise<Date>
 }
 
 /**
- * 查找与草稿关键词高度重叠的已有 learning 文件。
- *
- * 扫描 learningsDir 下 withinDays 天内的 .md 文件，
- * 返回 Jaccard 相似度 ≥ 0.6 的条目，按 overlap 降序排列。
+ * The learnings recall would find here: each root's `.md` files, plus those
+ * under `<root>/<ns>/` for each active namespace, first root winning for one
+ * relative path. Paths are relative to the root, namespace-prefixed.
  */
-export async function findSupersededLearnings(
+async function listComparableLearnings(
+  learningsDirs: readonly string[],
+  namespaces: readonly string[],
+): Promise<LearningFile[]> {
+  const out = await listLearningFiles(learningsDirs);
+  const claimed = new Set(out.map(({ file }) => file));
+  for (const root of learningsDirs) {
+    for (const ns of namespaces) {
+      // A namespace is one path segment, as the index requires.
+      if (!isSafeNamespaceSegment(ns)) continue;
+      const nsDir = path.join(root, ns);
+      if (!await pathExists(nsDir)) continue;
+      for (const rel of await listFilesRecursive(nsDir)) {
+        const file = path.join(ns, rel);
+        if (!rel.endsWith('.md') || claimed.has(file)) continue;
+        claimed.add(file);
+        out.push({ file, absPath: path.join(nsDir, rel), root });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Find existing learnings whose keywords overlap the draft's.
+ *
+ * Reads the `.md` files of each root and its active namespaces dated within
+ * `withinDays`, and returns those with a Jaccard similarity of 0.6 or more,
+ * highest overlap first.
+ */
+export async function findOverlappingLearnings(
   draftKeywords: Set<string>,
   learningsDirs: readonly string[],
-  withinDays: number = 14,
+  { namespaces = [], withinDays = 14 }: { namespaces?: readonly string[]; withinDays?: number } = {},
 ): Promise<Array<{ filename: string; overlap: number }>> {
-  const mdFiles = await listLearningFiles(learningsDirs);
+  const mdFiles = await listComparableLearnings(learningsDirs, namespaces);
   const cutoffDate = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
   const results: Array<{ filename: string; overlap: number }> = [];
 
   for (const { file: filename, absPath: filePath } of mdFiles) {
     try {
-      const docDate = await resolveDocDate(filePath, filename);
+      const docDate = await resolveDocDate(filePath, path.basename(filename));
       if (docDate < cutoffDate) {
         continue;
       }

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { requireInit, detectProjectConfig, describeUnreadableConfig, loadLocalConfigForScope } from './config.js';
 import { loadIndex, buildIndex, search, isLegacyIndex } from './utils/search-index.js';
-import type { SearchResult } from './utils/search-index.js';
+import type { BuildIndexOptions, SearchResult } from './utils/search-index.js';
 import { readFileSafe, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions, SearchIndex, LocalConfig } from './types.js';
@@ -275,11 +275,13 @@ export async function autoUpvote(
  * - project scope: learnings live only in the git repo (pull does not mirror them); the index is at getProjectSearchIndexPath
  *
  * 返回索引和 learnings 文件的实际基础路径（供 formatResults 输出正确的 File: 路径）。
+ * `build-failed` when there was nothing to load and the build failed, which it
+ * has already said.
  */
 async function loadOrBuildScopeIndex(
   localConfig: LocalConfig,
   scopeLabel: 'user' | 'project',
-): Promise<{ index: SearchIndex; learningsBase: string } | null> {
+): Promise<{ index: SearchIndex; learningsBase: string } | 'build-failed' | null> {
   // Route the project branch through getProjectSearchIndexPath (partition-aware,
   // per checkout in self mode), but preserve the historical fallback to ~/.teamai
   // when a project scope config lacks projectRoot: getDataHome → getTeamaiHome throws in that
@@ -331,14 +333,43 @@ async function loadOrBuildScopeIndex(
     }
     // Same namespaces pull indexes by. Omitting them, as this used to, dropped
     // every project-private learning from a recall-triggered rebuild.
+    // A manifest that cannot be read leaves out what depends on it, never the
+    // learnings, and recall says so once: the index it builds is saved (#823).
     const { resolveActiveLearningsNamespaces } = await import('./projects.js');
-    const learningsNamespaces = await resolveActiveLearningsNamespaces(
-      localConfig.repo.localPath,
-      localConfig.projects ?? [],
-    );
-
+    const { deliveredIndexSources } = await import('./resources/desired.js');
+    // Empty lists, not undefined: undefined would index the whole trees.
+    const nothingDelivered: Pick<BuildIndexOptions, 'docFiles' | 'ruleFiles' | 'skills'> = {
+      docFiles: [], ruleFiles: [], skills: { kind: 'dirs', dirs: [] },
+    };
+    const projects = localConfig.projects ?? [];
+    let learningsNamespaces: string[] = [];
+    let delivered: Pick<BuildIndexOptions, 'docFiles' | 'ruleFiles' | 'skills'> | undefined;
     try {
-      const { deliveredIndexSources } = await import('./resources/desired.js');
+      learningsNamespaces = await resolveActiveLearningsNamespaces(localConfig.repo.localPath, projects);
+    } catch (e) {
+      // The shared root only: every namespace would expose other projects' learnings.
+      // What pull delivers reads the same file, so it is left out in the same warning.
+      log.warn(`Recall indexed the shared learnings only: ${e instanceof Error ? e.message : String(e)}. `
+        + `The learnings of ${projects.length === 1 ? 'project' : 'projects'} ${projects.join(', ')}, and docs, rules and skills, `
+        + 'stay out of recall until manifest/projects.yaml is fixed and `teamai pull` rebuilds the index; `teamai doctor` shows the problem.');
+      delivered = nothingDelivered;
+    }
+    try {
+      delivered ??= await deliveredIndexSources(localConfig);
+    } catch (e) {
+      log.warn(`Recall indexed learnings only: ${e instanceof Error ? e.message : String(e)}. `
+        + 'Docs, rules and skills stay out of recall until the team manifest is fixed and `teamai pull` rebuilds the index; '
+        + '`teamai doctor` shows the problem.');
+      delivered = nothingDelivered;
+    }
+    // With no skills to keep (no index, or an older one), a collision would index none quietly.
+    if (delivered.skills?.kind === 'keep-indexed' && !index?.entries.some((entry) => entry.type === 'skills')) {
+      log.warn(`Skills stay out of recall: ${delivered.skills.reason}. Fix the collision and run \`teamai pull\`.`);
+    }
+
+    // Smaller by design: an older index kept by the shrink guard would serve what the warning left out.
+    const partial = delivered === nothingDelivered;
+    try {
       // Without another repository's learnings checkout, if one sits where
       // this project's would (#808). The probe runs only here, when an index
       // is built, never on a plain recall.
@@ -349,14 +380,24 @@ async function loadOrBuildScopeIndex(
         docsDir: await pathExists(docsDir) ? docsDir : undefined,
         rulesDir: await pathExists(rulesDir) ? rulesDir : undefined,
         // The docs and skills pull delivers here, not the whole trees (#707).
-        ...await deliveredIndexSources(localConfig),
+        ...delivered,
         codebaseDir: undefined, // codebase now served by teamwiki/ graph engine
         votesDir: votesExist ? votesDir : undefined,
         indexPath,
+        partial,
       });
       index = await loadIndex(indexPath);
     } catch (e) {
-      log.debug(`Index build failed for ${scopeLabel}: ${(e as Error).message}`);
+      const cause = e instanceof Error ? e.message : String(e);
+      if (partial && index) {
+        // The index on disk predates the broken manifest and holds what the warning above left out.
+        log.warn(`Recall could not build the ${scopeLabel} search index: ${cause}. `
+          + `Recall skips the older index at ${indexPath}, which would return what the manifest error leaves out. `
+          + 'Resolve that error, fix the manifest, and run `teamai pull` to rebuild it.');
+        return 'build-failed';
+      }
+      log.warn(`Recall could not build the ${scopeLabel} search index: ${cause}`);
+      if (!index) return 'build-failed';
     }
   }
 
@@ -452,12 +493,15 @@ export async function recall(
   // Scope isolation (issue #73) remains the default. Projects may explicitly
   // opt into searching the user index after the project index.
   const scopeIndexes: Array<{ index: SearchIndex; scope: 'user' | 'project'; config: LocalConfig; learningsBase: string }> = [];
+  // A failed build has named its cause; "no learnings" would misdirect to pull.
+  let indexBuildFailed = false;
 
   if (projectConfig) {
     // Project mode: project scope first.
     try {
       const result = await loadOrBuildScopeIndex(projectConfig, 'project');
-      if (result && result.index.entries.length > 0) {
+      if (result === 'build-failed') indexBuildFailed = true;
+      else if (result && result.index.entries.length > 0) {
         scopeIndexes.push({ index: result.index, scope: 'project', config: projectConfig, learningsBase: result.learningsBase });
       }
     } catch (e) {
@@ -469,7 +513,8 @@ export async function recall(
         const userConfig = await loadLocalConfigForScope('user');
         if (userConfig) {
           const result = await loadOrBuildScopeIndex(userConfig, 'user');
-          if (result && result.index.entries.length > 0) {
+          if (result === 'build-failed') indexBuildFailed = true;
+          else if (result && result.index.entries.length > 0) {
             scopeIndexes.push({ index: result.index, scope: 'user', config: userConfig, learningsBase: result.learningsBase });
           }
         }
@@ -482,7 +527,8 @@ export async function recall(
     try {
       const { localConfig: userConfig } = await requireInit();
       const result = await loadOrBuildScopeIndex(userConfig, 'user');
-      if (result && result.index.entries.length > 0) {
+      if (result === 'build-failed') indexBuildFailed = true;
+      else if (result && result.index.entries.length > 0) {
         scopeIndexes.push({ index: result.index, scope: 'user', config: userConfig, learningsBase: result.learningsBase });
       }
     } catch (e) {
@@ -502,7 +548,7 @@ export async function recall(
       emitCheckVerdict(0);
       return;
     }
-    log.info('No learnings available. Run `teamai pull` first to sync team knowledge.');
+    if (!indexBuildFailed) log.info('No learnings available. Run `teamai pull` first to sync team knowledge.');
     return;
   }
 

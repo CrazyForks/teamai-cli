@@ -752,8 +752,9 @@ async function pullForScope(
     try {
       return await indexedSkills(freshConfig, localConfig, roleContext);
     } catch (e) {
-      log.debug(`[${scopeLabel}] Skills in the search index left as they were: ${e instanceof Error ? e.message : String(e)}`);
-      return { kind: 'keep-indexed' };
+      const reason = e instanceof Error ? e.message : String(e);
+      log.debug(`[${scopeLabel}] Skills in the search index left as they were: ${reason}`);
+      return { kind: 'keep-indexed', reason };
     }
   };
 

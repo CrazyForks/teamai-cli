@@ -9,15 +9,12 @@ import { fetchGitLabMR } from './providers/gitlab/mr-fetch.js';
 import { fetchTGitMR } from './providers/tgit/mr-fetch.js';
 import type { MRData, LearningDraft } from './types.js';
 import { callClaude } from './utils/ai-client.js';
-import { extractKeywords, findSupersededLearnings } from './utils/dedup.js';
+import { extractKeywords, findOverlappingLearnings } from './utils/dedup.js';
 import { log, spinner } from './utils/logger.js';
 import { getUserHome } from './utils/home.js';
 
 /** Default directory for storing learnings. */
 const DEFAULT_LEARNINGS_DIR = path.join(getUserHome(), '.teamai', 'learnings');
-
-/** Dedup similarity threshold. */
-const SUPERSEDE_THRESHOLD = 0.6;
 
 /**
  * Auto-detects the provider from the URL and fetches MR data.
@@ -172,7 +169,8 @@ function extractRepoUrlFromMrUrl(mrUrl: string): string {
  * Implements P0.5: fetch MR data → AI extraction → dedup → interactive confirm → write file.
  *
  * @param opts.url          Full MR / PR URL (required)
- * @param opts.learningsDirs Directories scanned for a superseded draft
+ * @param opts.learningsDirs Learnings roots compared with the draft for a possible duplicate
+ * @param opts.learningsNamespaces The active project namespaces compared under each root
  * @param opts.all          Skip interactive confirmation, accept all
  * @param opts.outputDir    Output mode: write to this directory (learning.md)
  * @param opts.queueLearning  Queues a new learning (its file name, its content) when outputDir is not set, returning the file written
@@ -181,8 +179,10 @@ function extractRepoUrlFromMrUrl(mrUrl: string): string {
  */
 export async function importFromMR(opts: {
   url: string;
-  /** Learnings roots to scan for a superseded draft, highest precedence first. */
+  /** Learnings roots compared with the draft, highest precedence first. */
   learningsDirs?: readonly string[];
+  /** The active project namespaces: recall finds their learnings here, and no others. */
+  learningsNamespaces?: readonly string[];
   all?: boolean;
   outputDir?: string;
   queueLearning?: (filename: string, content: string) => Promise<string>;
@@ -222,15 +222,12 @@ export async function importFromMR(opts: {
   const learningTitle = (frontmatter['title'] as string | undefined) ?? mr.title;
 
   const draftKeywords = extractKeywords(learningContent);
-  const supersededEntries = await findSupersededLearnings(draftKeywords, learningsDirs);
-  const supersedes = supersededEntries
-    .filter((entry) => entry.overlap >= SUPERSEDE_THRESHOLD)
+  const possibleDuplicates = (await findOverlappingLearnings(draftKeywords, learningsDirs, { namespaces: opts.learningsNamespaces }))
     .map((entry) => entry.filename);
 
   const learning: LearningDraft = {
     title: learningTitle,
     content: learningContent,
-    supersedes: supersedes.length > 0 ? supersedes : undefined,
   };
 
   // ── 步骤 4：打印摘要 ────────────────────────────────────
@@ -241,8 +238,9 @@ export async function importFromMR(opts: {
     log.info(`   Tags: ${tags.join(', ')}`);
   }
 
-  if (supersedes.length > 0) {
-    log.warn(`⚠️  Found ${supersedes.length} overlapping session learnings, marking as superseded`);
+  if (possibleDuplicates.length > 0) {
+    // Names the existing learnings; accepting the draft changes none of them.
+    log.warn(`Possible duplicate: this learning overlaps ${possibleDuplicates.length} existing learning(s): ${possibleDuplicates.join(', ')}.`);
   }
 
   // ── 步骤 5：交互确认 ───────────────────────────────────

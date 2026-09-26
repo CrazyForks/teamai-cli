@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { extractKeywords, overlapRatio, findSupersededLearnings } from '../utils/dedup.js';
+import { extractKeywords, overlapRatio, findOverlappingLearnings } from '../utils/dedup.js';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -78,9 +78,9 @@ describe('overlapRatio', () => {
   });
 });
 
-// ─── findSupersededLearnings ───────────────────────────────────────────────
+// ─── findOverlappingLearnings ───────────────────────────────────────────────
 
-describe('findSupersededLearnings', () => {
+describe('findOverlappingLearnings', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -102,7 +102,7 @@ optimize performance solution issue resolve method
     fs.writeFileSync(path.join(tmpDir, filename), content, 'utf-8');
 
     const draftKeywords = new Set(['optimize', 'performance', 'solution', 'issue', 'resolve']);
-    const results = await findSupersededLearnings(draftKeywords, [tmpDir], 14);
+    const results = await findOverlappingLearnings(draftKeywords, [tmpDir], { withinDays: 14 });
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].filename).toBe(filename);
@@ -120,7 +120,7 @@ optimize performance solution issue resolve method
     fs.writeFileSync(path.join(tmpDir, filename), content, 'utf-8');
 
     const draftKeywords = new Set(['optimize', 'performance', 'solution', 'issue', 'resolve']);
-    const results = await findSupersededLearnings(draftKeywords, [tmpDir], 14);
+    const results = await findOverlappingLearnings(draftKeywords, [tmpDir], { withinDays: 14 });
 
     expect(results).toHaveLength(0);
   });
@@ -128,7 +128,7 @@ optimize performance solution issue resolve method
   it('目录不存在时返回空数组', async () => {
     const nonExistentDir = path.join(tmpDir, 'not-exist');
     const draftKeywords = new Set(['optimize', 'performance']);
-    const results = await findSupersededLearnings(draftKeywords, [nonExistentDir], 14);
+    const results = await findOverlappingLearnings(draftKeywords, [nonExistentDir], { withinDays: 14 });
 
     expect(results).toEqual([]);
   });
@@ -144,8 +144,70 @@ kubernetes docker container deployment cluster
     fs.writeFileSync(path.join(tmpDir, filename), content, 'utf-8');
 
     const draftKeywords = new Set(['python', 'pandas', 'dataframe', 'numpy', 'csv']);
-    const results = await findSupersededLearnings(draftKeywords, [tmpDir], 14);
+    const results = await findOverlappingLearnings(draftKeywords, [tmpDir], { withinDays: 14 });
 
     expect(results).toHaveLength(0);
+  });
+});
+
+// ─── namespaces (#823) ─────────────────────────────────────────────────────
+
+describe('findOverlappingLearnings across project namespaces (#823)', () => {
+  let tmpDir: string;
+  const draftKeywords = new Set(['optimize', 'performance', 'solution', 'issue', 'resolve']);
+  const overlapping = '---\ntitle: note\n---\noptimize performance solution issue resolve method\n';
+  const write = (root: string, rel: string, content: string): void => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content, 'utf-8');
+  };
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('compares the root and the active namespaces, never an inactive one', async () => {
+    const root = path.join(tmpDir, 'learnings');
+    write(root, 'shared.md', overlapping);
+    write(root, 'alpha/x.md', overlapping);
+    write(root, 'beta/y.md', overlapping);
+
+    const results = await findOverlappingLearnings(draftKeywords, [root], { namespaces: ['alpha'] });
+
+    expect(results.map((r) => r.filename).sort()).toEqual([path.join('alpha', 'x.md'), 'shared.md']);
+  });
+
+  it('lets the first root win for one relative path', async () => {
+    const first = path.join(tmpDir, 'first');
+    const second = path.join(tmpDir, 'second');
+    write(first, 'alpha/x.md', '---\ntitle: note\n---\nkubernetes docker container deployment cluster\n');
+    write(second, 'alpha/x.md', overlapping);
+    write(second, 'alpha/w.md', overlapping);
+
+    const results = await findOverlappingLearnings(draftKeywords, [first, second], { namespaces: ['alpha'] });
+
+    expect(results.map((r) => r.filename)).toEqual([path.join('alpha', 'w.md')]);
+  });
+
+  it('dates a namespaced learning by its file name, as a root one', async () => {
+    const root = path.join(tmpDir, 'learnings');
+    write(root, `alpha/${formatDatePrefix(20)}-old.md`, overlapping);
+
+    const results = await findOverlappingLearnings(draftKeywords, [root], { namespaces: ['alpha'], withinDays: 14 });
+
+    expect(results).toEqual([]);
+  });
+
+  it('skips a namespace that is not a single safe path segment', async () => {
+    const root = path.join(tmpDir, 'learnings');
+    write(tmpDir, 'outside.md', overlapping);
+    fs.mkdirSync(root, { recursive: true });
+
+    const results = await findOverlappingLearnings(draftKeywords, [root], { namespaces: ['..'] });
+
+    expect(results).toEqual([]);
   });
 });

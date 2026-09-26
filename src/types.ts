@@ -2471,8 +2471,6 @@ export interface LearningDraft {
   title: string;
   /** 完整 Markdown 内容（含 YAML frontmatter） */
   content: string;
-  /** 被本 draft 取代的 session learning 文件名列表 */
-  supersedes?: string[];
 }
 
 /**

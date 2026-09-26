@@ -14,7 +14,7 @@ vi.mock('../utils/logger.js', () => ({
   isSilent: () => false,
 }));
 
-const { resolveVizRoot } = await import('../viz.js');
+const { resolveVizRoot, buildVizData } = await import('../viz.js');
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t.co', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t.co',
@@ -83,5 +83,55 @@ describe('viz with another repository\'s learnings checkout in the partition (#8
     expect(paths.learningsDirs).not.toContain(path.join(foreignCheckout, 'learnings'));
     // This project's own learnings stay.
     expect(paths.learningsDirs).toContain(path.join(businessRoot, '.teamai', 'learnings'));
+  });
+
+  it('leaves it out in user scope too, where the machine\'s own learnings stay (#823 item 16)', async () => {
+    const home = path.join(testRoot, 'home');
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    const own = path.join(home, '.teamai', 'learnings');
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'own-2026-01-01-aaaaaa.md'), '---\ntitle: Own learning\n---\n');
+
+    // This machine's team repository, and another one whose checkout of
+    // teamai-learnings sits where this team's would.
+    const remote = path.join(testRoot, 'team.git');
+    const seed = path.join(testRoot, 'seed');
+    git(['init', '-q', '--bare', remote], testRoot);
+    git(['init', '-q', '-b', 'main', seed], testRoot);
+    fs.writeFileSync(path.join(seed, 'teamai.yaml'), 'team: t\n');
+    git(['add', '-A'], seed);
+    git(['commit', '-q', '-m', 'init'], seed);
+    git(['remote', 'add', 'origin', remote], seed);
+    git(['push', '-q', 'origin', 'main'], seed);
+    const dataHome = path.join(home, '.teamai');
+    const teamClone = path.join(dataHome, 'team-repo');
+    git(['clone', '-q', remote, teamClone], testRoot);
+    const otherSeed = path.join(testRoot, 'other-seed');
+    git(['init', '-q', '-b', 'main', otherSeed], testRoot);
+    fs.mkdirSync(path.join(otherSeed, 'learnings'), { recursive: true });
+    fs.writeFileSync(path.join(otherSeed, 'learnings', 'foreign-2026-01-01-bbbbbb.md'), '---\ntitle: Foreign learning\n---\n');
+    git(['add', '-A'], otherSeed);
+    git(['commit', '-q', '-m', 'learnings'], otherSeed);
+    git(['branch', 'teamai-learnings'], otherSeed);
+    const foreignCheckout = path.join(dataHome, 'learnings-wt');
+    git(['worktree', 'add', '-q', foreignCheckout, 'teamai-learnings'], otherSeed);
+
+    const config = {
+      repo: { localPath: teamClone, kind: 'git' as const, remote },
+      username: 'test',
+      additionalRoles: [],
+      scope: 'user' as const,
+      dataHome,
+    };
+
+    try {
+      const data = await buildVizData(await resolveVizRoot({ config }));
+      const titles = [...data.topRecalled, ...data.silent].map((entry) => entry.title);
+      expect(titles).toContain('Own learning');
+      expect(titles).not.toContain('Foreign learning');
+    } finally {
+      process.env.HOME = realHome;
+    }
   });
 });

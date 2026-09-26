@@ -122,6 +122,17 @@ interface VizPaths {
   learningsDir: string;
   /** Every learnings root to read, highest precedence first. */
   learningsDirs: readonly string[];
+  /**
+   * The roots a temporary index is built from: learningsDirs plus the
+   * contribution queue, as recall's index. Promotion and pruning keep to
+   * learningsDirs: a queued learning has not reached the team yet.
+   */
+  indexLearningsDirs: readonly string[];
+  /**
+   * The active projects' learnings namespaces an index built here reads, as
+   * recall's and pull's do; why none, when manifest/projects.yaml cannot be read.
+   */
+  learningsNamespaces: { ok: true; namespaces: string[] } | { ok: false; reason: string };
   statsDir: string;
   indexPath: string | undefined;
   source: VizSource;
@@ -150,6 +161,9 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
       learningsDir: path.join(root, 'learnings'),
       // learnings-root ok: same explicit --repo path
       learningsDirs: [path.join(root, 'learnings')],
+      // learnings-root ok: same explicit --repo path
+      indexLearningsDirs: [path.join(root, 'learnings')],
+      learningsNamespaces: { ok: true, namespaces: [] },
       statsDir: path.join(root, 'stats'),
       indexPath: undefined,
       source: { scope: 'team', label: 'Team repo · aggregated across the team' },
@@ -190,7 +204,13 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
     // and the promotion/prune candidates are built from these.
     const learningsDirs = useProjectScope
       ? await indexableLearningsRoots(config)
-      : [getUserLearningsDir(), ...roots.read];
+      : [getUserLearningsDir(), ...await indexableLearningsRoots(config)];
+    const { pendingLearningsDir } = await import('./utils/pending-learnings.js');
+    const indexLearningsDirs = [pendingLearningsDir(config), ...learningsDirs];
+    const { resolveActiveLearningsNamespaces } = await import('./projects.js');
+    const learningsNamespaces: VizPaths['learningsNamespaces'] = await resolveActiveLearningsNamespaces(config.repo.localPath, config.projects ?? [])
+      .then((namespaces) => ({ ok: true as const, namespaces }))
+      .catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
     const source: VizSource = config.repo.kind === 'self'
       ? { scope: 'local', label: 'Personal repo · your recalls only' }
       : { scope: 'team', label: 'Team repo · aggregated across the team' };
@@ -200,6 +220,8 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
       votesDir: path.join(reportsRoot, 'votes'),
       learningsDir,
       learningsDirs,
+      indexLearningsDirs,
+      learningsNamespaces,
       statsDir: path.join(reportsRoot, 'stats'),
       indexPath,
       source,
@@ -214,6 +236,8 @@ export async function resolveVizRoot(opts: VizOptions): Promise<VizPaths> {
     votesDir: getUserVotesDir(),
     learningsDir: getUserLearningsDir(),
     learningsDirs: [getUserLearningsDir()],
+    indexLearningsDirs: [getUserLearningsDir()],
+    learningsNamespaces: { ok: true, namespaces: [] },
     statsDir: path.join(teamaiHome, 'stats'),
     indexPath: getUserSearchIndexPath(),
     source: { scope: 'local', label: 'Local ~/.teamai · your recalls only' },
@@ -285,9 +309,16 @@ async function loadEntries(paths: VizPaths): Promise<SearchIndexEntry[]> {
     // leaving this run reading a stale corpus from a different repo.
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'teamai-viz-'));
     const tmpIndexPath = path.join(tmpDir, 'index.json');
+    const namespaces = paths.learningsNamespaces;
+    if (!namespaces.ok) {
+      // The shared root only: every namespace would show other projects' learnings.
+      console.warn(`Warning: the report shows the shared learnings only: ${namespaces.reason}. `
+        + 'Your projects\' learnings are left out until manifest/projects.yaml is fixed; `teamai doctor` shows the problem.');
+    }
     try {
       await buildIndex({
-        learningsDirs: paths.learningsDirs,
+        learningsDirs: paths.indexLearningsDirs,
+        learningsNamespaces: namespaces.ok ? namespaces.namespaces : [],
         docsDir: path.join(paths.knowledgeRoot, 'docs'),
         rulesDir: path.join(paths.knowledgeRoot, 'rules'),
         skillsDir: path.join(paths.knowledgeRoot, 'skills'),

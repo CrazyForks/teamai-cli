@@ -48,6 +48,13 @@ This is the #1 onboarding issue. In order:
    belongs in the team repo's `manifest/roles.yaml` or `manifest/projects.yaml`,
    which the error names by entry — tell the user to ask a team admin. Do not
    delete the manifest or edit the local clone to get past it.
+   `recall` still searches learnings and warns once (`Recall indexed learnings
+   only…` or `Recall indexed the shared learnings only…`): what it names is
+   missing from results until the manifest is fixed and `teamai pull` rebuilds
+   the index, so do not report that the team has none of it. If recall also says
+   `Recall skips the older index at <path>…`, the smaller index could not be
+   written and that scope was not searched at all: resolve the error it names
+   (for example a read-only file or a full disk), then fix the manifest and pull.
 7. **`pull` says `Nothing was synced: <file>: <reason>`.** The project's teamai
    config exists but cannot be read, so no scope syncs there, not even the user
    scope, and the session-start hook syncs nothing either. Show the user the

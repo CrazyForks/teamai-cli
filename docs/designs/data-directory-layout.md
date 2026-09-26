@@ -587,8 +587,9 @@ worktrees.
 
 `import --from-mr` queues its learning in `pendingLearningsDir` and publishes
 it as `contribute` does (#823), so in self mode it lands in the partition queue
-and needs no checkout before the extraction. Its supersede check reads the
-queue and `indexableLearningsRoots`, never another repository's checkout.
+and needs no checkout before the extraction. Its possible-duplicate check reads
+the queue and `indexableLearningsRoots`, with the active project namespaces,
+never another repository's checkout.
 
 The self migration that moves queued learnings into the partition drops every
 checkout's `workspaces/*/search-index.json`: none of them has the moved

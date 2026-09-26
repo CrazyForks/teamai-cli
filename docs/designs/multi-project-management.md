@@ -330,6 +330,16 @@ replaces two earlier behaviours: an invalid hooks or MCP file reconciled to the
 empty set and removed every managed entry, and a skills or agents collision
 aborted the whole scope.
 
+A `recall` that has to build a missing index follows the same policy. Learnings
+do not depend on the manifests and are always indexed: when `projects.yaml`
+cannot be read, only the shared root, never every namespace. Docs, rules and
+skills that depend on an unreadable `roles.yaml` or `projects.yaml` are left out
+with one warning naming the cause, and a skills collision with no index to keep
+skills from is named the same way. The partial index is saved like any other;
+the next `pull` with the manifest fixed rebuilds it whole. When it cannot be
+saved, recall searches nothing in that scope rather than the older index, which
+still holds what the warning left out.
+
 ### Legacy mode
 
 Legacy mode is a directory with no active role and no active project in a team

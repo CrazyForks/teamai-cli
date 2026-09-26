@@ -7,7 +7,7 @@
  * and cannot be tested independently without hitting real I/O; their logic is therefore
  * covered indirectly through renderReport assertions on a hand-crafted VizData fixture.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -290,5 +290,86 @@ describe('buildVizData with explicit --repo', () => {
       ...data.silent.map((e) => e.title),
     ];
     expect(allTitles.some((t) => t.includes('TEAM ONLY skill'))).toBe(true);
+  });
+});
+
+/**
+ * The dashboard's own index build, when none was built by pull (#823 item 16):
+ * it reads the active projects' learnings namespaces, as recall and pull do,
+ * and never another project's.
+ */
+describe('buildVizData without a prebuilt index', () => {
+  let tmp: string;
+  let teamRepo: string;
+  let realHome: string | undefined;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'teamai-viz-ns-'));
+    teamRepo = path.join(tmp, 'team-repo');
+    realHome = process.env.HOME;
+    process.env.HOME = path.join(tmp, 'home');
+    await fs.mkdir(path.join(teamRepo, 'manifest'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    process.env.HOME = realHome;
+    vi.restoreAllMocks();
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  const learning = async (rel: string, title: string): Promise<void> => {
+    const file = path.join(teamRepo, 'learnings', rel);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, `---\ntitle: "${title}"\nauthor: alice\n---\n\nBody.\n`, 'utf-8');
+  };
+  const titles = (data: VizData): string[] => [...data.topRecalled, ...data.silent].map((entry) => entry.title);
+  const configFor = (scope: 'user' | 'project') => ({
+    repo: { localPath: teamRepo, kind: 'http' as const, remote: 'https://example.invalid/team' },
+    username: 'alice',
+    additionalRoles: [],
+    projects: ['alpha'],
+    scope,
+    ...(scope === 'project' ? { projectRoot: path.join(tmp, 'proj'), dataHome: path.join(tmp, 'partition') } : {}),
+  });
+
+  it.each(['user', 'project'] as const)('shows the active project\'s learnings and not another project\'s (%s scope)', async (scope) => {
+    await fs.writeFile(
+      path.join(teamRepo, 'manifest', 'projects.yaml'),
+      'version: 1\nprojects:\n  - id: alpha\n    name: Alpha\n    resources:\n      learnings: [alpha]\n'
+        + '  - id: beta\n    name: Beta\n    resources:\n      learnings: [beta]\n',
+    );
+    await learning('shared.md', 'Shared learning');
+    await learning('alpha/x.md', 'Alpha learning');
+    await learning('beta/y.md', 'Beta learning');
+
+    const data = await buildVizData(await resolveVizRoot({ config: configFor(scope) }));
+
+    expect(titles(data)).toEqual(expect.arrayContaining(['Shared learning', 'Alpha learning']));
+    expect(titles(data)).not.toContain('Beta learning');
+  });
+
+  it('shows the shared learnings, and says why no more, when projects.yaml does not parse', async () => {
+    await fs.writeFile(path.join(teamRepo, 'manifest', 'projects.yaml'), 'projects: [unclosed\n');
+    await learning('shared.md', 'Shared learning');
+    await learning('alpha/x.md', 'Alpha learning');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const data = await buildVizData(await resolveVizRoot({ config: configFor('user') }));
+
+    expect(titles(data)).toContain('Shared learning');
+    expect(titles(data)).not.toContain('Alpha learning');
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/shared learnings only: Invalid projects manifest YAML/));
+  });
+
+  it('shows a queued learning, as recall finds it, but leaves the queue out of promotion and pruning (#823 item 16)', async () => {
+    const queue = path.join(tmp, 'pending-learnings');
+    await fs.mkdir(queue, { recursive: true });
+    await fs.writeFile(path.join(queue, 'queued.md'), '---\ntitle: "Queued learning"\nauthor: alice\n---\n\nBody.\n', 'utf-8');
+
+    const paths = await resolveVizRoot({ config: configFor('user') });
+    const data = await buildVizData(paths);
+
+    expect(titles(data)).toContain('Queued learning');
+    expect(paths.learningsDirs).not.toContain(queue);
   });
 });

@@ -158,7 +158,8 @@ teamai recall "<关键词1> <关键词2> ..."
 If the output contains \`Nothing was searched:\`, this project's teamai config cannot be
 read and no team knowledge was searched: show that line to the user rather than
 concluding the team has no knowledge, and do not move the file or run \`teamai init\`
-without their consent.
+without their consent. If it contains \`Recall skips the older index\`, that scope was not
+searched: relay that warning rather than conclude the team has no knowledge there.
 
 **务必中英双语检索（跨语言召回）**：知识库中英文混杂，检索是纯词法匹配，
 中文 query 无法命中纯英文文档，反之亦然。因此每个领域术语都应**同时给出中英两种写法**
