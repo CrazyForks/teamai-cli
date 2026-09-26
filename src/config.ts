@@ -24,7 +24,17 @@ import { resolvePartitionDir, writeAnchorFile } from './utils/partition.js';
 import { log } from './utils/logger.js';
 import { loadRolesManifest, RolesManifestNotFoundError } from './roles.js';
 
-async function migrateLegacyRoleConfig(config: LocalConfig, configPath: string): Promise<LocalConfig> {
+/**
+ * Loads that serve a --dry-run write nothing: the legacy role migration, the
+ * partition adoption and the self-mode bootstrap stay in memory.
+ */
+type LoadOptions = { dryRun?: boolean };
+
+async function migrateLegacyRoleConfig(
+  config: LocalConfig,
+  configPath: string,
+  options: LoadOptions = {},
+): Promise<LocalConfig> {
   if (config.primaryRole) {
     return config;
   }
@@ -56,6 +66,10 @@ async function migrateLegacyRoleConfig(config: LocalConfig, configPath: string):
     resourceProfileVersion: manifest.version,
   };
 
+  if (options.dryRun) {
+    log.info('[dry-run] Would migrate legacy teamai config to default role profile: hai');
+    return migrated;
+  }
   await writeFileAtomic(expandHome(configPath), YAML.stringify(migrated));
   log.info('Migrated legacy teamai config to default role profile: hai');
   return migrated;
@@ -82,14 +96,14 @@ export async function loadTeamConfig(repoPath: string): Promise<TeamaiConfig | n
 /**
  * Load the local config (~/.teamai/config.yaml)
  */
-export async function loadLocalConfig(): Promise<LocalConfig | null> {
+export async function loadLocalConfig(options: LoadOptions = {}): Promise<LocalConfig | null> {
   const configPath = expandHome(getUserConfigPath());
   const content = await readFileSafe(configPath);
   if (!content) return null;
   try {
     const raw = YAML.parse(content);
     const parsed = LocalConfigSchema.parse(raw);
-    return await migrateLegacyRoleConfig(parsed, configPath);
+    return await migrateLegacyRoleConfig(parsed, configPath, options);
   } catch (e) {
     log.error(`Invalid local config: ${describeConfigError(e)}`);
     return null;
@@ -159,8 +173,8 @@ export function describeUnreadableConfig(problem: string): string {
 /**
  * Require that teamai is initialized (local config exists)
  */
-export async function requireInit(): Promise<TeamaiInit> {
-  const localConfig = await loadLocalConfig();
+export async function requireInit(options: LoadOptions = {}): Promise<TeamaiInit> {
+  const localConfig = await loadLocalConfig(options);
   if (!localConfig) return throwMissingOrInvalid(expandHome(getUserConfigPath()));
   const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
   if (!teamConfig) return throwTeamConfigMissingOrInvalid(localConfig.repo.localPath);
@@ -314,11 +328,11 @@ export async function saveStateForScope(state: State, localConfig: LocalConfig):
  * (non-git dir). Used by init to place a NEW project's data outside the
  * workspace. Self mode does not call this (its data stays in the repo until P2).
  */
-export async function resolveProjectDataHome(projectRoot: string): Promise<string> {
+export async function resolveProjectDataHome(projectRoot: string, options: LoadOptions = {}): Promise<string> {
   const anchors = await resolveAnchors(projectRoot);
   // resolvePartitionDir (not bare projectDataHome) so an install whose partition
   // predates the #546 naming widening is adopted (renamed) at init time too.
-  return anchors ? resolvePartitionDir(anchors.projectAnchor) : path.join(projectRoot, '.teamai');
+  return anchors ? resolvePartitionDir(anchors.projectAnchor, options) : path.join(projectRoot, '.teamai');
 }
 
 /**
@@ -387,7 +401,11 @@ export async function resolveMemberToolRoots(dir?: string): Promise<Record<strin
  */
 export type UnreadableConfigSink = (configPath: string, error: string) => void;
 
-export async function detectProjectConfig(cwd?: string, onUnreadable?: UnreadableConfigSink): Promise<LocalConfig | null> {
+export async function detectProjectConfig(
+  cwd?: string,
+  onUnreadable?: UnreadableConfigSink,
+  options: LoadOptions = {},
+): Promise<LocalConfig | null> {
   const dir = cwd ?? process.cwd();
 
   // Resolve git anchors FIRST so the result never depends on which directory of
@@ -407,14 +425,14 @@ export async function detectProjectConfig(cwd?: string, onUnreadable?: Unreadabl
     // before the #546 naming widening still carries the legacy
     // `<basename>-<hash>` name; adoption renames it into the current name so
     // detection — and every command after it — keeps finding the config.
-    const partitionDir = await resolvePartitionDir(anchors.projectAnchor);
+    const partitionDir = await resolvePartitionDir(anchors.projectAnchor, options);
     const fromPartition = await readConfigFrom(partitionDir, anchors.workspaceRoot, undefined, onUnreadable);
     if (fromPartition) return fromPartition;
     // 2. No partition config yet. A workspace that declares `mode: self` self-heals
     //    on a fresh clone (issue #198): bootstrapSelfRepo now writes the machine
     //    config into the PARTITION (P2), not <workspaceRoot>/.teamai. So run the
     //    self-heal and, on success, read the config back FROM THE PARTITION.
-    const healed = await selfHealAndReadPartition(anchors.workspaceRoot, partitionDir, onUnreadable);
+    const healed = await selfHealAndReadPartition(anchors.workspaceRoot, partitionDir, onUnreadable, options);
     if (healed) return healed;
     // 3. Otherwise read a legacy `<workspaceRoot>/.teamai` config directly — a
     //    pre-P2 self install (or any un-migrated install) whose config still lives
@@ -424,7 +442,7 @@ export async function detectProjectConfig(cwd?: string, onUnreadable?: Unreadabl
 
   // Not a git repo: fall back to a legacy `.teamai` directly at `dir` (also runs
   // the self-heal bootstrap for a freshly-cloned single-repo project).
-  return readConfigFrom(path.join(dir, '.teamai'), dir, dir, onUnreadable);
+  return readConfigFrom(path.join(dir, '.teamai'), dir, dir, onUnreadable, options);
 }
 
 /**
@@ -453,7 +471,9 @@ async function selfHealAndReadPartition(
   workspaceRoot: string,
   partitionDir: string,
   onUnreadable?: UnreadableConfigSink,
+  options: LoadOptions = {},
 ): Promise<LocalConfig | null> {
+  if (options.dryRun) return previewSelfHeal(workspaceRoot, partitionDir, workspaceRoot);
   try {
     const { bootstrapSelfRepo } = await import('./bootstrap.js');
     const result = await bootstrapSelfRepo(workspaceRoot, { silent: true });
@@ -469,10 +489,12 @@ export async function readConfigFrom(
   projectRoot: string,
   selfHealRepoRoot?: string,
   onUnreadable?: UnreadableConfigSink,
+  options: LoadOptions = {},
 ): Promise<LocalConfig | null> {
   const configPath = path.join(dataHomeDir, 'config.yaml');
   if (!(await pathExists(configPath))) {
     if (!selfHealRepoRoot) return null;
+    if (options.dryRun) return previewSelfHeal(selfHealRepoRoot, dataHomeDir, projectRoot);
     try {
       const { bootstrapSelfRepo } = await import('./bootstrap.js');
       const result = await bootstrapSelfRepo(selfHealRepoRoot, { silent: true });
@@ -500,33 +522,52 @@ export async function readConfigFrom(
       }
       return null;
     }
-    // Anchor projectRoot to the workspace root (resource landing) and dataHome to
-    // the directory this config lives in (machine-data location). A persisted
-    // projectRoot can be wrong (e.g. a `.teamai/` copied from the main checkout
-    // into a worktree names the main checkout); overriding keeps landing tied to
-    // the real workspace (also backfills when absent, #85).
-    const resolved: LocalConfig = { ...config, projectRoot, dataHome: dataHomeDir };
-    // Self mode (P2): the config now lives in the SHARED partition, but its
-    // persisted repo.localPath / businessRepoRoot name the checkout that first
-    // migrated (typically main). Every worktree reads that one config, so without
-    // rebinding, a feature worktree would read main's knowledge
-    // (getKnowledgeDir === repo.localPath) and write it into the feature tree.
-    // Self's invariant is localPath === <workspaceRoot>/.teamai and
-    // businessRepoRoot === <workspaceRoot>, so re-anchor both to THIS workspace.
-    // (Non-self localPath is the team-repo clone path — shared across worktrees on
-    // purpose — so it is left untouched.)
-    if (config.repo.kind === 'self') {
-      resolved.repo = {
-        ...config.repo,
-        localPath: path.join(projectRoot, '.teamai'),
-        businessRepoRoot: projectRoot,
-      };
-    }
-    return resolved;
+    return anchorProjectConfig(config, dataHomeDir, projectRoot);
   } catch (e) {
     onUnreadable?.(configPath, describeConfigError(e));
     return null;
   }
+}
+
+/**
+ * The config a self-mode bootstrap would write for `repoRoot`, read back as
+ * readConfigFrom would read it from `dataHomeDir` — for a --dry-run, which
+ * previews the bootstrap instead of running it. Null when it would not run.
+ */
+async function previewSelfHeal(repoRoot: string, dataHomeDir: string, projectRoot: string): Promise<LocalConfig | null> {
+  try {
+    const { previewSelfBootstrap } = await import('./bootstrap.js');
+    const config = await previewSelfBootstrap(repoRoot);
+    return config ? anchorProjectConfig(LocalConfigSchema.parse(config), dataHomeDir, projectRoot) : null;
+  } catch {
+    return null;
+  }
+}
+
+function anchorProjectConfig(config: LocalConfig, dataHomeDir: string, projectRoot: string): LocalConfig {
+  // Anchor projectRoot to the workspace root (resource landing) and dataHome to
+  // the directory this config lives in (machine-data location). A persisted
+  // projectRoot can be wrong (e.g. a `.teamai/` copied from the main checkout
+  // into a worktree names the main checkout); overriding keeps landing tied to
+  // the real workspace (also backfills when absent, #85).
+  const resolved: LocalConfig = { ...config, projectRoot, dataHome: dataHomeDir };
+  // Self mode (P2): the config now lives in the SHARED partition, but its
+  // persisted repo.localPath / businessRepoRoot name the checkout that first
+  // migrated (typically main). Every worktree reads that one config, so without
+  // rebinding, a feature worktree would read main's knowledge
+  // (getKnowledgeDir === repo.localPath) and write it into the feature tree.
+  // Self's invariant is localPath === <workspaceRoot>/.teamai and
+  // businessRepoRoot === <workspaceRoot>, so re-anchor both to THIS workspace.
+  // (Non-self localPath is the team-repo clone path — shared across worktrees on
+  // purpose — so it is left untouched.)
+  if (config.repo.kind === 'self') {
+    resolved.repo = {
+      ...config.repo,
+      localPath: path.join(projectRoot, '.teamai'),
+      businessRepoRoot: projectRoot,
+    };
+  }
+  return resolved;
 }
 
 /**
@@ -598,12 +639,12 @@ export async function requireInitForScope(
  * If cwd has a project-scope config, uses that; otherwise falls back to user scope.
  * This is the recommended entry point for commands that support both scopes.
  */
-export async function autoDetectInit(cwd?: string): Promise<TeamaiInit> {
-  const projectConfig = await detectProjectConfig(cwd);
+export async function autoDetectInit(cwd?: string, options: LoadOptions = {}): Promise<TeamaiInit> {
+  const projectConfig = await detectProjectConfig(cwd, undefined, options);
   if (projectConfig) {
     const teamConfig = await loadTeamConfig(projectConfig.repo.localPath);
     if (!teamConfig) return throwTeamConfigMissingOrInvalid(projectConfig.repo.localPath);
     return { localConfig: projectConfig, teamConfig };
   }
-  return requireInit();
+  return requireInit(options);
 }

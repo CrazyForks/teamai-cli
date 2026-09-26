@@ -57,6 +57,7 @@ import {
     loadStateForScope,
     saveStateForScope,
 } from '../config.js';
+import { log } from '../utils/logger.js';
 import type { LocalConfig } from '../types.js';
 
 describe('rolesSet — state invalidation', () => {
@@ -184,5 +185,21 @@ describe('rolesSet — state invalidation', () => {
         expect(saveStateForScope).toHaveBeenCalledTimes(1);
         const savedState = vi.mocked(saveStateForScope).mock.calls[0][0];
         expect(savedState.lastPullRev).toBeNull();
+    });
+
+    it('should preview under --dry-run without writing config or state', async () => {
+        await rolesSet('hai', { add: ['pm'], dryRun: true });
+
+        expect(log.info).toHaveBeenCalledWith('[dry-run] Would set primary role to: hai, additional roles: pm');
+        expect(saveLocalConfig).not.toHaveBeenCalled();
+        expect(saveLocalConfigForScope).not.toHaveBeenCalled();
+        expect(saveStateForScope).not.toHaveBeenCalled();
+    });
+
+    it('should preview clearing additional roles under --dry-run', async () => {
+        await rolesSet('hai', { dryRun: true });
+
+        expect(log.info).toHaveBeenCalledWith('[dry-run] Would set primary role to: hai, additional roles: none');
+        expect(saveLocalConfig).not.toHaveBeenCalled();
     });
 });

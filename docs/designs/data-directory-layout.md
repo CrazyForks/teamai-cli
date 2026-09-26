@@ -160,6 +160,9 @@ the canonical dir and is left untouched; an external clone outside the partition
 is left untouched) and self-healing (it finishes an adoption that crashed between
 the rename and the config rewrite) — the same `repo.localPath` rebase that
 `migrate.ts` applies when moving a legacy `.teamai/` into a partition.
+A `--dry-run` detection adopts nothing: `resolvePartitionDir(anchor, { dryRun })`
+returns the directory that holds the data now (the legacy name, where adoption
+would rename it) and rewrites no config.
 
 The rewrite is ATOMIC (same-dir temp file + rename, via `writeFileAtomic`). By
 this point the legacy source has already been renamed away, so config.yaml is the
@@ -385,7 +388,13 @@ stays in the checkout's `.teamai/`.
   self-heal bootstrap — which now writes the config into the PARTITION — then reads
   it back FROM the partition (`selfHealAndReadPartition`). A pre-P2 install whose
   config still sits in `<repo>/.teamai` is read via the legacy branch (double-read
-  compat) until migration relocates it.
+  compat) until migration relocates it. A `--dry-run` detection
+  (`roles set`, `tags subscribe`, `tags unsubscribe`) previews the bootstrap
+  instead (`previewSelfBootstrap`): it builds the config it would write, keeps it
+  in memory, and prints `[dry-run] Would bootstrap ...` without locking, writing,
+  injecting hooks or registering the member. It makes no provider auth call
+  either (a stale token can send `authenticate()` into an interactive login), so
+  the preview names the provider but not the username.
 - **migration** (`migrate.ts`, `mode: 'self'`): self CANNOT use the git-mode whole
   directory copy→rename (that would carry the knowledge off and rename `.teamai` to
   `.bak`, breaking "knowledge on main"). Instead it selectively relocates the A1

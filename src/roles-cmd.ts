@@ -181,7 +181,7 @@ export async function rolesSet(
     primaryRole: string,
     options: GlobalOptions & { add?: string[] },
 ): Promise<void> {
-    const { localConfig } = await autoDetectInit();
+    const { localConfig } = await autoDetectInit(undefined, options);
     const repoPath = localConfig.repo.localPath;
 
     let manifest;
@@ -208,6 +208,11 @@ export async function rolesSet(
             log.error(`Unknown additional role "${id}". Valid roles: ${[...validIds].join(', ')}`);
             return;
         }
+    }
+
+    if (options.dryRun) {
+        log.info(`[dry-run] Would set primary role to: ${primaryRole}, additional roles: ${additionalRoles.join(', ') || 'none'}`);
+        return;
     }
 
     // Update local config
