@@ -94,7 +94,6 @@ async function runStatus(opts: CacheCmdOptions): Promise<void> {
     const colKey = 50;
     const colSize = 12;
     const colUsed = 26;
-    const colSha = 10;
 
     const header = [
         'KEY'.padEnd(colKey),

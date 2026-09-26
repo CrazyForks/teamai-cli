@@ -6,7 +6,7 @@ import {
   indexedSkills, resolveDesiredAgents, resolveDesiredRules, resolveDesiredSkills, type RolePullContext,
 } from './resources/desired.js';
 import type { IndexedSkills } from './utils/search-index.js';
-import { requireInit, loadState, saveState, detectProjectConfig, describeUnreadableConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from './config.js';
+import { detectProjectConfig, describeUnreadableConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from './config.js';
 import { pullRepo, getHeadRev, createGit, getDefaultBranch, listWorktrees } from './utils/git.js';
 import { publishQueuedLearnings } from './utils/learnings-publish.js';
 import { pendingLearningsDir } from './utils/pending-learnings.js';
@@ -22,7 +22,7 @@ import { skillsDirForTool } from './resources/skills.js';
 import { ruleFileExtensionForTool } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
-import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, State, TagsConfig } from './types.js';
+import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, State } from './types.js';
 import {
   getUserLearningsDir,
   TEAMAI_CULTURE_START,

@@ -3,12 +3,12 @@ import { existsSync } from 'node:fs';
 import { requireInit, detectProjectConfig, describeUnreadableConfig, loadLocalConfigForScope } from './config.js';
 import { loadIndex, buildIndex, search, isLegacyIndex } from './utils/search-index.js';
 import type { BuildIndexOptions, SearchResult } from './utils/search-index.js';
-import { readFileSafe, ensureDir, pathExists } from './utils/fs.js';
+import { ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions, SearchIndex, LocalConfig } from './types.js';
 import { getProjectSearchIndexPath, getUserSearchIndexPath, getVotesDir } from './types.js';
 import { queryCodeKnowledge } from './code-knowledge-recall.js';
-import type { CodeKnowledgeResult, SourceAnchor } from './code-knowledge-recall.js';
+import type { SourceAnchor } from './code-knowledge-recall.js';
 import { recordRecallQuality } from './recall-quality.js';
 import { deriveSessionId } from './utils/session-id.js';
 

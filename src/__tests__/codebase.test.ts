@@ -164,7 +164,6 @@ describe('generateCodebaseIndex', () => {
 
     const result = await generateCodebaseIndex('# Codebase');
 
-    expect(result).not.toThrow;
     expect(result).toContain('title: Codebase 索引');
     expect(result).toContain('⚠️');
   });

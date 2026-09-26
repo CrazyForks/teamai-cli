@@ -125,7 +125,7 @@ describe('GitCode REST calls', () => {
     expect(await gitcodeWhoami()).toBe('octocat');
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('https://api.gitcode.com/api/v5/user');
-    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer test-token');
+    expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe('Bearer test-token');
   });
 
   it('pullCreate posts head/base/title/body and returns html_url', async () => {

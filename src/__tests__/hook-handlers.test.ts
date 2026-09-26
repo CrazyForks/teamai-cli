@@ -151,7 +151,7 @@ vi.mock('../project-agent-root.js', () => ({
   seedProjectAgentRoot: mockSeedProjectAgentRoot,
 }));
 
-import { buildAdoptedSummary, buildHandlerRegistry, filterHandlersForConfig, type HandlerRegistration } from '../hook-handlers.js';
+import { buildAdoptedSummary, buildHandlerRegistry, filterHandlersForConfig } from '../hook-handlers.js';
 import { createDispatcher } from '../hook-dispatch.js';
 import type { LocalConfig } from '../types.js';
 

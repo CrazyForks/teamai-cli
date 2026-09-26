@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathExists, ensureDir } from '../../utils/fs.js';
+import { ensureDir } from '../../utils/fs.js';
 import { log, spinner } from '../../utils/logger.js';
 import { isInteractive } from '../../utils/prompt.js';
 import { getTeamaiHomeDir } from '../../types.js';

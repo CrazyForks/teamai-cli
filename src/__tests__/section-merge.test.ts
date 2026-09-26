@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { mergeWithAnchors, splitToSections, joinSections } from '../section-patcher.js';
+import { mergeWithAnchors } from '../section-patcher.js';
 
 const META = { source: 'https://github.com/org/repo@deadbeef', syncedAt: '2024-01-01T00:00:00.000Z' };
 const META2 = { source: 'https://github.com/org/repo@cafebabe', syncedAt: '2024-06-01T00:00:00.000Z' };

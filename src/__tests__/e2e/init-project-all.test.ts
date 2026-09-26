@@ -82,12 +82,12 @@ function installGitRemoteGetUrlWrapper(binDir: string, syntheticOrigin: string):
 if [ "$1" = "remote" ] && [ "$2" = "get-url" ]; then
   case "$3" in
     ""|origin|--all)
-      printf '%s\\n' '${syntheticOrigin.replace(/'/g, `'\"'\"'`)}'
+      printf '%s\\n' '${syntheticOrigin.replace(/'/g, `'"'"'`)}'
       exit 0
       ;;
   esac
 fi
-exec '${realGit.replace(/'/g, `'\"'\"'`)}' "$@"
+exec '${realGit.replace(/'/g, `'"'"'`)}' "$@"
 `,
     { mode: 0o755 },
   );

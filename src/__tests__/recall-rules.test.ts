@@ -100,7 +100,7 @@ Custom user content below.
     // New block present
     expect(content).toContain('teamai-recall');
     // Only one occurrence of the markers
-    const startMatches = content.match(new RegExp(TEAMAI_RECALL_RULES_START.replace(/[\[\]\-]/g, '\\$&'), 'g')) ?? [];
+    const startMatches = content.match(new RegExp(TEAMAI_RECALL_RULES_START.replace(/[[\]-]/g, '\\$&'), 'g')) ?? [];
     expect(startMatches.length).toBe(1);
   });
 

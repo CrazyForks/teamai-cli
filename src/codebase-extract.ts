@@ -89,7 +89,6 @@ function detectKnowledgeGaps(
 ): KnowledgeGap[] {
   const gaps: KnowledgeGap[] = [];
   const scannedFiles = new Set(files.map((f) => f.relativePath));
-  const nodeSlugs = new Set(graph.nodes.map((n) => n.slug));
   const connectedNodes = new Set<string>();
   for (const edge of graph.edges) {
     connectedNodes.add(edge.from);

@@ -53,7 +53,7 @@ export function attributeRepo(cwd: string | undefined): string {
   if (!cwd || !cwd.trim()) return 'no_repo';
   const raw = cwd.trim();
 
-  if (/:\/\//.test(raw) || /^git@/.test(raw) || /^[^/\s]+\.[^/\s]+\//.test(raw)) {
+  if (/:\/\//.test(raw) || raw.startsWith('git@') || /^[^/\s]+\.[^/\s]+\//.test(raw)) {
     const c = canonicalRepo(raw);
     if (c) return c;
   }

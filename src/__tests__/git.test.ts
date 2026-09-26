@@ -66,7 +66,6 @@ describe('generateBranchName', () => {
   it('should use the correct current date components', () => {
     const before = new Date();
     const name = generateBranchName('bob');
-    const after = new Date();
 
     // Extract the date part
     const match = name.match(/^teamai\/push\/bob\/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);

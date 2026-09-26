@@ -121,7 +121,6 @@ export async function importFromRepoList(
                 explicitDomain: entry.domain,
                 dryRun,
                 output,
-                interactive: false,
                 incremental,
                 skipAutoPush: true,
                 skipEnrich,

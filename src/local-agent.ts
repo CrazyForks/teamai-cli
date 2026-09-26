@@ -73,7 +73,6 @@ import {
   type ManagedMcpRecord,
   type McpServerDef,
   type McpTransport,
-  type Scope,
   type TeamaiConfig,
 } from './types.js';
 import { getUserHome } from './utils/home.js';
@@ -748,7 +747,7 @@ async function localAgentFetch<T>(
   const url = `${config.endpoint}${resolveRoute(config, route)}`;
   const headers: Record<string, string> = {
     ...authHeaders(config, init?.body !== undefined),
-    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+    ...(init?.headers as Record<string, string> | undefined),
   };
   logHttpRequest(tag, method, url, headers, init?.body);
 
@@ -806,7 +805,7 @@ function redactSecrets(s: string): string {
   return s
     .replace(new RegExp(`(--(?:${names})[= ]+)\\S+`, 'gi'), '$1***')
     .replace(new RegExp(`((?:${names})"?\\s*[:=]\\s*"?)[^"\\s,}]+`, 'gi'), '$1***')
-    .replace(/(bearer\s+)[\w.\-]+/gi, '$1***');
+    .replace(/(bearer\s+)[\w.-]+/gi, '$1***');
 }
 
 /**
@@ -1041,7 +1040,7 @@ async function persistWorkspaceBinding(
   const boundAt = new Date().toISOString();
   for (const key of keys) {
     config.workspaceBindings[key] = {
-      ...(config.workspaceBindings[key] ?? {}),
+      ...config.workspaceBindings[key],
       projectId,
       projectName,
       boundAt,
@@ -1067,7 +1066,7 @@ async function inheritWorktreeBinding(
   const anchorBinding = config.workspaceBindings[anchors.projectAnchor];
   if (!anchorBinding) return false;
   config.workspaceBindings[resolvedPath] = {
-    ...(config.workspaceBindings[resolvedPath] ?? {}),
+    ...config.workspaceBindings[resolvedPath],
     projectId: anchorBinding.projectId,
     projectName: anchorBinding.projectName,
     boundAt: new Date().toISOString(),

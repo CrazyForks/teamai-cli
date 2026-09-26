@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ── Test doubles ────────────────────────────────────────
 
@@ -19,8 +19,6 @@ function createHandler(name: string, output?: string): TestHandler {
 
 import {
   createDispatcher,
-  type HookHandler,
-  type DispatchResult,
 } from '../hook-dispatch.js';
 
 // ── Tests ───────────────────────────────────────────────

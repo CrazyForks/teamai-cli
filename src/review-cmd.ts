@@ -16,7 +16,6 @@ import { log } from './utils/logger.js';
 import {
     loadPendingReview,
     removePendingReview,
-    savePendingReview,
     type PendingReviewItem,
     type Risk,
 } from './review-store.js';

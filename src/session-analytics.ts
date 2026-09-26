@@ -86,7 +86,7 @@ const ACTIVE_GAP_MS = 5 * 60_000;
  * stream. Hours use the local timezone of the machine running the command.
  */
 export function timeAnalytics(events: DashboardEvent[]): TimeAnalytics {
-  const byHour = new Array(24).fill(0) as number[];
+  const byHour = Array.from({ length: 24 }, () => 0);
   let nightOwl = 0;
   let total = 0;
 

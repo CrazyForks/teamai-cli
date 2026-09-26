@@ -1,5 +1,3 @@
-import path from 'node:path';
-import YAML from 'yaml';
 import {
     requireInit,
     saveLocalConfig,
@@ -12,7 +10,6 @@ import {
 import { buildRolePullContext, resolveDesiredSkills } from './resources/desired.js';
 import { loadTagsConfig, collectTagStats, saveTagsConfig } from './utils/tags.js';
 import { log } from './utils/logger.js';
-import { readFileSafe } from './utils/fs.js';
 import type { GlobalOptions, LocalConfig, TagsConfig } from './types.js';
 
 /**
@@ -51,7 +48,7 @@ async function saveTagsScopeConfig(localConfig: LocalConfig): Promise<void> {
  * List all available tags from the team repo's tags.yaml.
  * Shows tag name, skill count, and rule count.
  */
-export async function tagsList(options: GlobalOptions): Promise<void> {
+export async function tagsList(): Promise<void> {
     const localConfig = await resolveTagsScope();
     const tagsConfig = await loadTagsConfig(localConfig.repo.localPath);
 
@@ -88,7 +85,6 @@ export async function tagsList(options: GlobalOptions): Promise<void> {
         );
     }
 
-    const totalRules = Object.keys(tagsConfig.rules).length;
     const untaggedSkills = await countUntaggedDeliveredSkills(localConfig, tagsConfig);
 
     console.log('');

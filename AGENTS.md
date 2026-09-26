@@ -2,7 +2,7 @@
 
 CLI for syncing team skills, rules, docs, and env across AI coding tools. Package: [`teamai-cli`](https://www.npmjs.com/package/teamai-cli).
 
-TypeScript, Node 20+, tsup (ESM), Vitest. Commands: `npm run build`, `npx tsc --noEmit`, `npx vitest run`, `npm run test:e2e`.
+TypeScript, Node 20+ (`npm run lint` needs ^20.19 or >=22.12), tsup (ESM), Vitest. Commands: `npm run build`, `npx tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run test:e2e`.
 
 ## Git
 

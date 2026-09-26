@@ -95,15 +95,6 @@ function buildFullHooksContent(): string {
     return `{ "hooks": { ${lines.join(', ')} } }`;
 }
 
-// Build a settings content that is missing some subcommands
-function buildPartialHooksContent(exclude: string[]): string {
-    const subs = TEAMAI_HOOK_SUBCOMMANDS.filter((s) => !exclude.includes(s));
-    const lines = subs.map(
-        (sub) => `"command": "bash -lc \\"teamai ${sub}\\""`,
-    );
-    return `{ "hooks": { ${lines.join(', ')} } }`;
-}
-
 // ── Setup ────────────────────────────────────────────────
 
 // Suppress console.log output in tests

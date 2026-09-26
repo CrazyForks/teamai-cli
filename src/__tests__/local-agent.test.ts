@@ -19,7 +19,6 @@ vi.mock('../utils/logger.js', () => ({
 let tmpDir: string;
 let origHome: string | undefined;
 let origCopilotHome: string | undefined;
-let origPpid: number;
 
 // The hint markers are machine-wide files in os.tmpdir() keyed by session id,
 // so a fixed id let overlapping runs of this file delete each other's (#823).
@@ -30,7 +29,6 @@ beforeEach(async () => {
   origHome = process.env.HOME;
   origCopilotHome = process.env.COPILOT_HOME;
   process.env.HOME = tmpDir;
-  origPpid = process.ppid;
   // Bind prompt is on by default — start each test from that baseline.
   delete process.env.TEAMAI_BIND_PROMPT_ENABLED;
   // Clean hint markers (both old ppid-based and new sessionId-based)

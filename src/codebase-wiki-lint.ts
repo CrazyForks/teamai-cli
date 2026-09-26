@@ -165,7 +165,6 @@ export async function lintTeamwiki(opts: {
   // Graph health metrics
   let graphHealth = { nodeCount: 0, edgeCount: 0, orphanNodes: 0, connectivity: 0 };
   if (graph) {
-    const nodeSlugs = new Set(graph.nodes.map(n => n.slug));
     const connectedNodes = new Set<string>();
     for (const edge of graph.edges) {
       connectedNodes.add(edge.from);

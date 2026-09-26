@@ -1,19 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
-import { log, spinner } from '../../utils/logger.js';
+import { log } from '../../utils/logger.js';
 import { resolveCliPath } from '../../utils/cli-path.js';
 import { isInteractive } from '../../utils/prompt.js';
 
 // ─── Constants ───────────────────────────────────────────
 
 const GITHUB_API = 'https://api.github.com';
-
-// ─── Shell helpers ───────────────────────────────────────
-
-/** Shell-quote a string using single quotes. */
-function shellQuote(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
 
 // ─── gh CLI detection ────────────────────────────────────
 
@@ -62,14 +55,14 @@ export function ghExec(
   if (options?.inheritStdio) {
     const result = crossSpawn.sync(ghPath, args, {
       stdio: 'inherit',
-      env: { ...process.env, ...(options.env ?? {}) },
+      env: { ...process.env, ...options.env },
       cwd: options.cwd,
     });
     return { stdout: '', stderr: '', status: result.status ?? 1 };
   }
 
   const result = crossSpawn.sync(ghPath, args, {
-    env: { ...process.env, ...(options?.env ?? {}) },
+    env: { ...process.env, ...options?.env },
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
     cwd: options?.cwd,

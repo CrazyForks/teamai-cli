@@ -103,7 +103,6 @@ describe('importFromRepo — incremental mode', () => {
         await importFromRepo({
             url: TEST_URL,
             incremental: true,
-            interactive: false,
         });
 
         expect(shallowClone).toHaveBeenCalledTimes(1);
@@ -116,7 +115,6 @@ describe('importFromRepo — incremental mode', () => {
         await importFromRepo({
             url: TEST_URL,
             incremental: true,
-            interactive: false,
         });
 
         expect(shallowFetch).toHaveBeenCalledTimes(1);
@@ -130,7 +128,6 @@ describe('importFromRepo — incremental mode', () => {
         await importFromRepo({
             url: TEST_URL,
             incremental: true,
-            interactive: false,
         });
 
         expect(shallowFetch).toHaveBeenCalledTimes(1);
@@ -143,7 +140,6 @@ describe('importFromRepo — incremental mode', () => {
         await importFromRepo({
             url: TEST_URL,
             incremental: false,
-            interactive: false,
         });
 
         expect(shallowClone).toHaveBeenCalledTimes(1);
@@ -154,7 +150,6 @@ describe('importFromRepo — incremental mode', () => {
         await importFromRepo({
             url: TEST_URL,
             incremental: false,
-            interactive: false,
         });
 
         const lastSyncPath = path.join(workdir, 'cache', 'github', 'owner', 'testrepo', 'LAST_SYNC');

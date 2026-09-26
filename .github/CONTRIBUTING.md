@@ -15,10 +15,13 @@ npm install
 ```bash
 npm run build          # Build with tsup → dist/
 npx tsc --noEmit       # Type check
+npm run lint           # oxlint; CI fails on any warning
 npx vitest run         # Run unit tests
 npx vitest run --coverage
 npm run test:e2e       # E2E tests (optional, requires a live test repo)
 ```
+
+`npm run lint` needs Node ^20.19 or >=22.12 (oxlint's requirement); the CLI itself still supports Node 20.
 
 ### Running your local build
 
@@ -75,7 +78,7 @@ See [docs/providers.md](../docs/providers.md) for how to add a new git provider.
 
 1. Fork the repo and create a feature branch from the latest `origin/main`. Prefer a git worktree for code changes when practical.
 2. Write tests for your change (we target 80%+ coverage).
-3. Run `npx vitest run` and `npx tsc --noEmit` — both must pass.
+3. Run `npx vitest run`, `npx tsc --noEmit` and `npm run lint` — all must pass.
 4. Use conventional commits where possible: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 5. Open a PR with a clear description: what's the problem, what's the fix, anything reviewers should pay attention to.
 

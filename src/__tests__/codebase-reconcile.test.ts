@@ -228,7 +228,6 @@ describe('codebase reconciliation', () => {
 
   it('normalizes graph variants emitted by legacy aggregation', async () => {
     const root = createWikiFixture();
-    const graphPath = path.join(root, 'teamwiki', '.indices', 'graph-index.json');
     const repoGraphPath = path.join(root, 'teamwiki', 'evidence', 'code', 'auth', '.indices', 'graph-index.json');
     const legacyGraph = {
       schemaVersion: 1,

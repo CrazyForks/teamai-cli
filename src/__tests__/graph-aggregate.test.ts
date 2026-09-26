@@ -98,7 +98,7 @@ describe('aggregateGlobalGraph', () => {
       edges: [],
     });
 
-    const result = await aggregateGlobalGraph(tmpDir);
+    await aggregateGlobalGraph(tmpDir);
     const global = JSON.parse(await fs.readFile(
       path.join(tmpDir, '.indices', 'graph-index.json'), 'utf8',
     ));

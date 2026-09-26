@@ -19,6 +19,7 @@ Thanks for opening a PR! Please fill out this template to help reviewers underst
 <!-- How did you verify this works? Include commands you ran, new tests added, etc. -->
 
 - [ ] `npx tsc --noEmit` passes
+- [ ] `npm run lint` passes
 - [ ] `npx vitest run` passes
 - [ ] Added/updated tests for the change
 

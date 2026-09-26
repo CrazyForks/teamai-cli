@@ -1,4 +1,4 @@
-import { readdir, readFile, rm } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import chalk from 'chalk';

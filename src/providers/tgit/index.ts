@@ -8,7 +8,6 @@ import {
   gfRepoClone,
   gfCreateRepo,
   gfMrCreate,
-  gfGetOAuthToken,
   RepoNotFoundError as GfRepoNotFoundError,
 } from './gf-cli.js';
 import { gfListOrgRepos } from './gf-org.js';

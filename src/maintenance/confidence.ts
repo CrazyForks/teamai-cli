@@ -98,7 +98,7 @@ export async function writeBackConfidence(
   let updated = 0;
   const files = await listLearningFiles(learningsDirs);
 
-  for (const { file, absPath, root } of files) {
+  for (const { file, absPath } of files) {
     const docId = file.replace(/\.md$/i, '');
     const newConf = confidenceMap.get(docId);
     if (newConf === undefined) continue;

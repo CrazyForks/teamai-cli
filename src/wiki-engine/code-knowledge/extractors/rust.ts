@@ -97,7 +97,7 @@ export function extractRust(files: CodeCollectedFile[]): CodeFact[] {
       const errorEnum = /^pub(?:\(crate\))?\s+enum\s+([A-Z][A-Za-z0-9_]*(?:Error)?)/u.exec(line);
       if (errorEnum && thiserror) {
         facts.push(makeFact("error", errorEnum[1], file.relativePath, lineNumber, line, "EXTRACTED"));
-      } else if (errorEnum && /Error$/u.test(errorEnum[1])) {
+      } else if (errorEnum && errorEnum[1].endsWith('Error')) {
         facts.push(makeFact("error", errorEnum[1], file.relativePath, lineNumber, line, "INFERRED"));
       }
 

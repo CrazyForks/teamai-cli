@@ -30,7 +30,6 @@ import {
   type DashboardEvent,
   type DashboardEventType,
   type DashboardSession,
-  type DashboardSessionStatus,
   type TokenUsage,
   type TokenSnapshotScope,
   type SessionMetrics,

@@ -188,7 +188,7 @@ describe('tags list', () => {
     addSkill('hai', 'c');
     writeFileSync(path.join(repoPath, 'tags.yaml'), 'skills:\n  a: [frontend]\nrules: {}\n');
 
-    await tagsList({});
+    await tagsList();
 
     expect(log.dim).toHaveBeenCalledWith('  3 skill(s) have no tags and are always synced.');
   });
@@ -206,7 +206,7 @@ describe('tags list', () => {
     writeFileSync(path.join(repoPath, 'tags.yaml'), 'skills:\n  a: [frontend]\nrules: {}\n');
     useConfig({ primaryRole: 'hai' });
 
-    await tagsList({});
+    await tagsList();
 
     // pm/x is untagged but outside the member's namespaces, so pull never delivers it.
     expect(log.dim).toHaveBeenCalledWith('  1 skill(s) have no tags and are always synced.');
@@ -218,7 +218,7 @@ describe('tags list', () => {
     addSkill('hai', 'a');
     writeFileSync(path.join(repoPath, 'tags.yaml'), 'skills:\n  a: [frontend]\nrules: {}\n');
 
-    await tagsList({});
+    await tagsList();
 
     expect(log.dim).toHaveBeenCalledWith('  1 skill(s) have no tags and are always synced.');
   });
@@ -230,7 +230,7 @@ describe('tags list', () => {
     writeFileSync(path.join(repoPath, 'tags.yaml'), 'skills:\n  a: [frontend]\nrules: {}\n');
     useConfig({ primaryRole: 'hai' });
 
-    await expect(tagsList({})).resolves.toBeUndefined();
+    await expect(tagsList()).resolves.toBeUndefined();
 
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('frontend'));
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Could not count untagged skills'));

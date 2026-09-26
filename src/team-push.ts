@@ -448,7 +448,7 @@ export function droppedRollouts(
       const day = parseDailySnapshot(daily[sid]);
       const left = {
         prompts: total.prompts, tokens: { ...total.tokens }, interrupt: iv.interrupt, toolReject: iv.toolReject,
-        correction: iv.correction, durationMs: day?.durationMs ?? 0, requestDaily: { ...(day?.requestDaily ?? {}) },
+        correction: iv.correction, durationMs: day?.durationMs ?? 0, requestDaily: { ...day?.requestDaily },
       };
       const covered = Object.values((writtenAt !== undefined && before?.get(sid)?.segments) || cur.segments)
         .filter((segment) => writtenAt === undefined || Date.parse(segment.since) <= writtenAt)
@@ -708,7 +708,7 @@ function raiseToCredit(
     cacheRead: Math.max(a.cacheRead, b.cacheRead), cacheCreation: Math.max(a.cacheCreation, b.cacheCreation),
   });
   result.promptTokens[runId] = {
-    ...(own ?? {}),
+    ...own,
     prompts: Math.max(ownTokens.prompts, credit.promptTokens.prompts),
     tokens: greater(ownTokens.tokens, credit.promptTokens.tokens),
   };

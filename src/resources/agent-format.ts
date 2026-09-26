@@ -262,7 +262,7 @@ function isManagedKiroSessionHook(value: unknown): boolean {
  * Kiro-private fields and hook entries from `tool_extras.kiro`.
  */
 export function renderForKiro(spec: AgentSpec): RenderResult {
-  const extras = { ...(spec.tool_extras?.['kiro'] ?? {}) };
+  const extras = { ...spec.tool_extras?.['kiro'] };
   const existingHooks = isRecord(extras['hooks']) ? { ...extras['hooks'] } : {};
   const existingAgentSpawn = Array.isArray(existingHooks['agentSpawn'])
     ? existingHooks['agentSpawn'].filter((entry) => !isManagedKiroSessionHook(entry))
@@ -449,12 +449,10 @@ function canUseTomlLiteral(value: string): boolean {
   if (!value.includes('\n')) return false;
   if (value.includes("'''")) return false;
   if (value.endsWith("'")) return false;
-  // Control characters a literal string cannot carry (`\r`, NUL, ...).
-  // U+007F DEL is one of them — TOML 1.0 bans it from literal strings
-  // alongside C0, and smol-toml rejects the whole document on it. The range
-  // `\x7f` sits outside the `\x00-\x1f` C0 block, so it needs its own
-  // alternative in the class.
-  if (/[\r\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) return false;
+  // Control characters a literal string cannot carry (`\r`, NUL, DEL, ...):
+  // TOML 1.0 bans C0 other than tab and newline, plus DEL, and smol-toml
+  // rejects the whole document on them. C1 (U+0080-U+009F) is allowed.
+  if (/(?![\t\n\u0080-\u009f])\p{Cc}/u.test(value)) return false;
   return true;
 }
 

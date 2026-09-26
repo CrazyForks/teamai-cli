@@ -67,16 +67,3 @@ function groupByLanguage(files: CodeCollectedFile[]): Map<string, CodeCollectedF
   }
   return map;
 }
-
-function dedupe(facts: CodeFact[]): CodeFact[] {
-  const seen = new Set<string>();
-  const result: CodeFact[] = [];
-  for (const fact of facts) {
-    const key = `${fact.kind}:${fact.name}:${fact.file}:${fact.lineStart}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(fact);
-    }
-  }
-  return result;
-}

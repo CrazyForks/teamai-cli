@@ -1,6 +1,6 @@
 import { type MRData } from '../../types.js';
 import { log } from '../../utils/logger.js';
-import { getGitLabToken, gitlabApiBase } from './gitlab-api.js';
+import { getGitLabToken } from './gitlab-api.js';
 import { GITLAB_HOST } from './repo-url.js';
 
 /** GitLab MR URL 解析结果 */

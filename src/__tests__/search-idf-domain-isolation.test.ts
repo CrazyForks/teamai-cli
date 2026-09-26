@@ -26,12 +26,6 @@ const N_TECH = 3;
 const N_OPS = 12;
 
 // ---------------------------------------------------------------------------
-// Shared token set: words that appear in BOTH technical AND ops fixture docs.
-// Must be plain ASCII so tokenize() handles them predictably.
-// ---------------------------------------------------------------------------
-const SHARED_TOKENS = ['timeout', 'retry', 'config'];
-
-// ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
 

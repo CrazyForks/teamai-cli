@@ -139,7 +139,6 @@ export function indexTemplate(
 
   sections.push('## 文档导航', '');
   for (const p of projects) {
-    const desc = p.description ?? p.label;
     sections.push(`### ${p.slug}`, '');
     sections.push(`- [overview.md](./evidence/code/${p.slug}/overview.md) — 架构概览`);
     sections.push(`- [modules/](./evidence/code/${p.slug}/modules/) — 模块级摘要（推荐首选）`);

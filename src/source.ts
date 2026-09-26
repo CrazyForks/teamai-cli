@@ -2,7 +2,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import YAML from 'yaml';
 import { loadTeamConfig, autoDetectInit, loadLocalConfig, detectProjectConfig } from './config.js';
-import { createGit, pullRepo } from './utils/git.js';
+import { pullRepo } from './utils/git.js';
 import { parseFrontmatter } from './utils/frontmatter.js';
 import { detectProvider, getProvider } from './providers/index.js';
 import { log, spinner } from './utils/logger.js';
@@ -644,7 +644,7 @@ async function removeSkillFromToolPaths(skillName: string, teamConfig: TeamaiCon
     return;
   }
 
-  for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+  for (const toolPath of Object.values(scopedToolPaths(teamConfig, localConfig))) {
     if (!toolPath.skills) continue;
     const skillDir = path.join(baseDir, toolPath.skills, skillName);
     if (await pathExists(skillDir)) {

@@ -11,7 +11,6 @@ import { DocsHandler } from './resources/docs.js';
 import { detectInstalledAgents, type ResolvedAgent } from './known-agents.js';
 import {
   buildClassifyContext,
-  classifySkill,
   formatSkillSource,
   scanAgentSkills,
   truncate,

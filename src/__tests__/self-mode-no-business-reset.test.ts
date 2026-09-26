@@ -53,14 +53,6 @@ describe('E2E self-mode: business repo working tree is never reset', () => {
     const teamaiDir = path.join(businessRoot, '.teamai');
     fs.mkdirSync(teamaiDir, { recursive: true });
 
-    // self-mode user-scope config: localPath = <businessRoot>/.teamai
-    const cfg: LocalConfig = {
-      repo: { localPath: teamaiDir, remote: '', kind: 'self', businessRepoRoot: businessRoot },
-      username: 'me',
-      scope: 'user',
-      additionalRoles: [],
-    } as unknown as LocalConfig;
-
     // The bug path: pull passes selfConfig now (fix 1). Even without it, the
     // isDedicatedRoot guard (fix 2) must protect the tree — test the guard by
     // NOT passing selfConfig, forcing the else branch.

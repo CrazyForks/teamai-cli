@@ -17,7 +17,6 @@ import { incrementRecalled, incrementUpvoted, syncVotesToTeam, loadUserVotes } f
 import { parseTranscriptForVotes } from '../transcript-parser.js';
 import { buildIndex, loadIndex, search } from '../utils/search-index.js';
 import { computeAllConfidence, writeBackConfidence } from '../maintenance/confidence.js';
-import { annotateHotness, HOT_THRESHOLD } from '../maintenance/hot-cold.js';
 import { findPruneCandidates } from '../maintenance/prune.js';
 import type { UserVotesV2 } from '../types.js';
 

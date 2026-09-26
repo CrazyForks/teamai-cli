@@ -19,7 +19,9 @@ stages:
         cmds:
         - node --version && npm --version
         - npm ci --ignore-scripts
-        - echo "=== Lint (typecheck) ==="
+        - echo "=== Lint ==="
+        - npm run lint
+        - echo "=== Typecheck ==="
         - npx tsc --noEmit
         - echo "=== Unit Tests + Coverage ==="
         - npx vitest run --coverage

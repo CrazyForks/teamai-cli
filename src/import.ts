@@ -328,7 +328,6 @@ export async function importCmd(opts: ImportOptions): Promise<void> {
                 await importFromRepo({
                   url: ctx.repoUrl,
                   incremental: true,
-                  interactive: false,
                   skipAutoPush: true,
                   sourceMrUrl: opts.fromMr,
                 });

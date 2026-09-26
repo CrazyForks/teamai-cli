@@ -232,7 +232,7 @@ vi.mock('../utils/prompt.js', () => ({
 const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
 import { init } from '../init.js';
-import { RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError } from '../providers/types.js';
+import { RepoNotFoundError, RepoCreatePermissionError } from '../providers/types.js';
 import { CnbRepoNotFoundError } from '../providers/cnb/cnb-cli.js';
 import { saveLocalConfig, loadLocalConfigForScope } from '../config.js';
 import fse from 'fs-extra';

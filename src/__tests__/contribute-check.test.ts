@@ -121,7 +121,7 @@ describe('contributeState', () => {
     const persisted = JSON.parse(fs.readFileSync(statePath, 'utf-8')) as ContributeState;
     expect(persisted.promptSummary).toContain('<REDACTED:gh_tok>');
     expect(persisted.promptSummary).not.toContain(rawToken);
-    expect(persisted.promptSummary).not.toMatch(/[\r\n\t\u0000]/);
+    expect(persisted.promptSummary).not.toMatch(/\p{Cc}/u);
     expect(persisted.promptSummary).toHaveLength(160);
     expect(persisted.promptSummary).toMatch(/…$/);
     expect(await readContributeState('safe-prompt-session')).toEqual(persisted);

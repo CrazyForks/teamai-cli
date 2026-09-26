@@ -53,7 +53,7 @@ export function parseGitLabRepoInput(input: string): RepoInfo {
 
   // Short format: owner/repo or group/subgroup/repo (host = configured default)
   const shortMatch = trimmed.match(
-    /^([A-Za-z0-9_.\-]+(?:\/[A-Za-z0-9_.\-]+)*)\/([A-Za-z0-9_.\-]+)$/,
+    /^([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)\/([A-Za-z0-9_.-]+)$/,
   );
   if (shortMatch) {
     return buildRepoInfo(GITLAB_HOST, shortMatch[1], shortMatch[2]);

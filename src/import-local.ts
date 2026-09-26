@@ -446,7 +446,6 @@ export async function interactiveReview(
 
     let answered = false;
     while (!answered) {
-      // eslint-disable-next-line no-await-in-loop
       const input = await question('[A]ccept  [E]dit  [S]kip  > ');
       const choice = input.trim().toLowerCase();
 
@@ -457,7 +456,6 @@ export async function interactiveReview(
         sessionItem.status = 'skipped';
         answered = true;
       } else if (choice === 'e') {
-        // eslint-disable-next-line no-await-in-loop
         const newTitle = await question('  New title: ');
         const trimmedTitle = newTitle.trim();
         if (trimmedTitle.length > 0 && sessionItem.learningDraft) {
@@ -477,7 +475,6 @@ export async function interactiveReview(
     processedCount++;
     session.progress = processedCount;
     // 每次选择后立即持久化，支持中断恢复
-    // eslint-disable-next-line no-await-in-loop
     await persistSession(session, sessionPath);
   }
 

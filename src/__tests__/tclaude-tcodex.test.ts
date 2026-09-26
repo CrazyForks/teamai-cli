@@ -1,6 +1,5 @@
 // -*- coding: utf-8 -*-
 import { describe, it, expect } from 'vitest';
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'fs-extra';
 

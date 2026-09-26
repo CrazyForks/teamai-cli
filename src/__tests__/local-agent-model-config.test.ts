@@ -378,7 +378,7 @@ describe('local-agent: apply_model_config', () => {
     await reportAndSyncLocalAgent({ tool: 'codebuddy', status: 'running' });
 
     expect(reports).toHaveLength(2);
-    expect((reports[1]?.user_level as { models?: unknown[] }).models).toEqual([
+    expect((reports[1]?.user_level as { models?: unknown[] } | undefined)?.models).toEqual([
       {
         provider: 'tokenhub',
         model_id: 'deepseek-v3-0324',

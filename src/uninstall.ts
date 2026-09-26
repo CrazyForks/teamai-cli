@@ -557,7 +557,7 @@ async function buildRemovalPlan(
         tool,
         toolPath,
         resolveToolBaseDir(tool, localConfig),
-        resolveBaseDir(localConfig),
+        baseDir,
         teamSkillNames,
         teamRuleNames,
         teamAgentNames,

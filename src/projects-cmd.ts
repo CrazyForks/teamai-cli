@@ -2,7 +2,6 @@ import path from 'node:path';
 import YAML from 'yaml';
 import {
   autoDetectInit,
-  loadLocalConfig,
   saveLocalConfig,
   saveLocalConfigForScope,
   loadStateForScope,
@@ -14,7 +13,6 @@ import {
   validateProjectsManifest,
   findProject,
   listProjectIds,
-  describeProjects,
   unknownProjectMessage,
   PROJECT_RESOURCE_TYPES,
 } from './projects.js';

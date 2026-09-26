@@ -561,7 +561,6 @@ describe('pull role-aware sync and cleanup', () => {
     await fse.ensureDir(path.join(repoPath, 'skills', 'hai', 'shared-skill'));
     await fse.writeFile(path.join(repoPath, 'skills', 'hai', 'shared-skill', 'SKILL.md'), '# HAI');
 
-    const teamConfig = await vi.mocked(loadTeamConfig).mock.results.at(-1)?.value;
     const localConfig: LocalConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',

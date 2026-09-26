@@ -71,7 +71,7 @@ vi.mock('../doctor.js', async (importOriginal) => ({
   buildChecks: vi.fn(),
 }));
 
-import { detectProjectConfig, loadLocalConfigForScope, loadStateForScope, loadTeamConfig, saveStateForScope } from '../config.js';
+import { detectProjectConfig, loadLocalConfigForScope, loadStateForScope, loadTeamConfig } from '../config.js';
 import { acquireLock } from '../update.js';
 import { buildChecks, resolveDoctorContext, type DoctorContext } from '../doctor.js';
 import { log } from '../utils/logger.js';

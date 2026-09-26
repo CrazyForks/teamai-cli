@@ -6,7 +6,6 @@ import {
     parseSections,
     patchManagedSection,
     hashBody,
-    mergeWithAnchors,
 } from '../section-patcher.js';
 
 // ─── hashBody ────────────────────────────────────────────

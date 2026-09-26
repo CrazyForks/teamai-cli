@@ -7,7 +7,7 @@ import { parseLearningDoc, titleFromFilename } from './utils/search-index.js';
 import { requireInit, detectProjectConfig } from './config.js';
 import { calculateTeamHealth } from './skill-health.js';
 import { createGit } from './utils/git.js';
-import type { GlobalOptions, UserStats, TokenUsage } from './types.js';
+import type { UserStats, TokenUsage } from './types.js';
 import { totalTokens } from './types.js';
 import { mergeDailyStats, summarizeTrendWindow, type TrendPeriod } from './session-trends.js';
 
@@ -405,7 +405,7 @@ export function formatTrendLines(periods: { current: TrendPeriod; previous: Tren
 /**
  * Generate and display weekly team digest.
  */
-export async function generateDigest(options: GlobalOptions): Promise<void> {
+export async function generateDigest(): Promise<void> {
   try {
     const projectConfig = await detectProjectConfig();
     const localConfig = projectConfig ?? (await requireInit()).localConfig;

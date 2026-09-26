@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { autoUpvote } from '../recall.js';
 import { buildIndex, loadIndex, search } from '../utils/search-index.js';
 import type { SearchResult } from '../utils/search-index.js';
-import type { LocalConfig, SearchIndex, UserVotesV2 } from '../types.js';
+import type { LocalConfig, UserVotesV2 } from '../types.js';
 
 // ─── Test helpers ──────────────────────────────────────────
 

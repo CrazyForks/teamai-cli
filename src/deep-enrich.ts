@@ -410,7 +410,7 @@ async function runPhaseComponents(
     let results: string[];
     try {
       results = await callClaudeParallel(tasks, BATCH);
-    } catch (err) {
+    } catch {
       // AggregateError — 部分可能成功，graceful fallback
       log.warn(`deep-enrich[${project}]: batch[${i}] partially failed, falling back to sequential`);
       results = await Promise.all(
@@ -624,7 +624,7 @@ async function runPhaseAiGraph(
   ctx: EnrichContext,
   docsDir: string,
 ): Promise<{ g5Generated: boolean; g6Generated: boolean }> {
-  const { project, evidenceDir } = opts;
+  const { project } = opts;
   log.info(`deep-enrich[${project}]: Phase 4 — Generating AI graph docs (G5/G6)`);
 
   await mkdir(docsDir, { recursive: true });

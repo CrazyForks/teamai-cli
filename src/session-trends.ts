@@ -301,7 +301,7 @@ export function mergeDailyStats(
   existing: Record<string, DailyUserStats> | undefined,
   delta: Record<string, DailyUserStats>,
 ): Record<string, DailyUserStats> {
-  const merged: Record<string, DailyUserStats> = { ...(existing ?? {}) };
+  const merged: Record<string, DailyUserStats> = { ...existing };
   for (const [date, increment] of Object.entries(delta)) {
     const current = merged[date] ?? emptyDaily();
     merged[date] = {

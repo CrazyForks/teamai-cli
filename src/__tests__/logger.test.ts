@@ -10,7 +10,7 @@ vi.mock('chalk', () => ({
   default: { blue: (s: string) => s, green: (s: string) => s, yellow: (s: string) => s, red: (s: string) => s, gray: (s: string) => s, dim: (s: string) => s },
 }));
 
-import { log, setVerbose, setSilent, setStderrOnly, MAX_LOG_BYTES, _setLogFilePath, _resetState } from '../utils/logger.js';
+import { log, setVerbose, setSilent, setStderrOnly, _setLogFilePath, _resetState } from '../utils/logger.js';
 
 let tmpDir: string;
 let logFile: string;

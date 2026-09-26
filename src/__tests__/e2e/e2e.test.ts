@@ -3,15 +3,12 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
 // ─── Helpers ─────────────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const CLI = path.join(ROOT, 'dist', 'index.js');
-
-const require = createRequire(import.meta.url);
 
 interface RunResult {
   code: number | null;
@@ -133,7 +130,7 @@ describe('tags CLI', () => {
 
   it('teamai tags list (no init) should show error', async () => {
     // Run in a temp dir with no teamai init
-    const { output, code } = await runCLI(['tags', 'list']);
+    const { output } = await runCLI(['tags', 'list']);
     // Either shows tags or shows "not initialized" error — both valid
     expect(output.length).toBeGreaterThan(0);
   });

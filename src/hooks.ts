@@ -218,11 +218,6 @@ const TEAMAI_COMMAND_MARKERS = [
   'teamai auto-recall', 'teamai todowrite-hint', 'teamai mr-hint', 'teamai hook-dispatch',
 ];
 
-function extractTeamaiSubcommand(command: string): string | null {
-  const match = command.match(/teamai\s+([\w-]+)/);
-  return match ? match[1] : null;
-}
-
 function isTeamaiHookCommand(command: string): boolean {
   return /(?:^|"|\s)teamai\s/.test(command);
 }

@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import { classifyWithAI, interactiveReview, pushAccepted } from './import-local.js';
 import { IWikiClient } from './utils/iwiki-client.js';

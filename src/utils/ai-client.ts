@@ -203,7 +203,7 @@ async function runWithConcurrency<T>(
   tasks: Array<{ prompt: string; parse: (output: string) => T }>,
   concurrency: number
 ): Promise<PromiseSettledResult<T>[]> {
-  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  const results = Array.from<PromiseSettledResult<T>>({ length: tasks.length });
   let running = 0;
   let index = 0;
 

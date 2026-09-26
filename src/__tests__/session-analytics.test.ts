@@ -239,22 +239,22 @@ describe('timeAnalytics', () => {
 
   it('returns empty analytics for no events', () => {
     const ta = timeAnalytics([]);
-    expect(ta).toEqual({ byHour: new Array(24).fill(0), peakHour: -1, nightOwlRatio: 0, activeMinutes: 0, totalEvents: 0 });
+    expect(ta).toEqual({ byHour: Array.from({ length: 24 }, () => 0), peakHour: -1, nightOwlRatio: 0, activeMinutes: 0, totalEvents: 0 });
   });
 });
 
 describe('renderHourSparkline', () => {
   it('renders 24 characters', () => {
-    const spark = renderHourSparkline(new Array(24).fill(0).map((_, i) => i));
+    const spark = renderHourSparkline(Array.from({ length: 24 }, (_, i) => i));
     expect(spark.length).toBe(24);
   });
 
   it('renders all-zero input as 24 dots (idle is distinct from low activity)', () => {
-    expect(renderHourSparkline(new Array(24).fill(0))).toBe('·'.repeat(24));
+    expect(renderHourSparkline(Array.from({ length: 24 }, () => 0))).toBe('·'.repeat(24));
   });
 
   it('renders a single peak as a full bar and empty hours as dots', () => {
-    const byHour = new Array(24).fill(0);
+    const byHour = Array.from({ length: 24 }, () => 0);
     byHour[9] = 42;
     const spark = renderHourSparkline(byHour);
     expect(spark[9]).toBe('█');

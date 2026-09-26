@@ -1,4 +1,4 @@
-import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   loadGraphIndex,
@@ -13,7 +13,6 @@ import type { WikiConfidence } from './core/wiki-protocol.js';
 import { buildConfidence } from './reconciler-v2-types.js';
 import type {
   ConfidenceFactor,
-  NumericConfidence,
   ApiInterfaceMatch,
   RuleCodeMatch,
   ReconcileStaleWarning,

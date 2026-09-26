@@ -258,7 +258,7 @@ export async function reconcileCoAuthorForConfig(
   localConfig: LocalConfig,
   state: State,
 ): Promise<CoAuthorReconcileResult> {
-  const managed: Record<string, boolean> = { ...(state.coAuthorManaged ?? {}) };
+  const managed: Record<string, boolean> = { ...state.coAuthorManaged };
   const changes: CoAuthorChange[] = [];
 
   const intent = resolveCoAuthor(localConfig, teamConfig);

@@ -20,7 +20,7 @@ import { warnOnce } from './utils/warn-once.js';
 // The control ranges are both of them, C0 with DEL and C1: a segment carrying one
 // is a name no admin typed on purpose, and it renders as something other than
 // what it is in a terminal that reports the path back.
-const UNSAFE_SEGMENT = /[/\\:\u0000-\u001f\u007f-\u009f]/;
+const UNSAFE_SEGMENT = /[/\\:\p{Cc}]/u;
 
 // Win32 strips trailing spaces and periods from every path component, so a
 // namespace ending in one is not the directory the manifest names: `.. ` arrives

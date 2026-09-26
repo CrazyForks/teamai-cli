@@ -34,12 +34,6 @@ export interface ImportFromRepoOptions {
     dryRun?: boolean;
     /** Custom output root directory; defaults to .teamai/team-repo/teamwiki */
     output?: string;
-    /**
-     * Whether to enable interactive confirmation.
-     * Default true (shows AI recommendation and waits for user input in TTY);
-     * pass false for batch imports → non-TTY path (assign to uncategorized when confidence is low).
-     */
-    interactive?: boolean;
     /** Incremental mode: on cache hit do fetch+reset only; on miss fall back to full clone */
     incremental?: boolean;
     /** In batch mode, skip per-repo autoPushTeamRepo (caller handles it collectively) */
@@ -193,7 +187,7 @@ export function detectCrossRepoEdges(
 export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void> {
     const {
         url, depth = 1, forceSsh = false, forceAnonymous = false,
-        explicitDomain, dryRun = false, output, interactive = true,
+        explicitDomain, dryRun = false, output,
         incremental = false, skipAutoPush = false, skipEnrich = false, sourceMrUrl,
     } = opts;
 

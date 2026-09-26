@@ -102,14 +102,12 @@ describe('contribute', () => {
     }));
 
     const { contribute } = await import('../contribute.js');
+    const before = fs.readdirSync(tmpDir, { recursive: true });
 
-    // dry-run should not push
+    // dry-run should not push, nor write anything into the repo (tmpDir is also HOME)
     await contribute({ file: contentFile, title: 'Test', dryRun: true });
 
-    // No learnings directory should be created in the repo
-    const aiDocsDir = path.join(tmpDir, 'learnings');
-    // In dry-run, the file should NOT be copied
-    // (contribute exits early before mkdir)
+    expect(fs.readdirSync(tmpDir, { recursive: true })).toEqual(before);
     vi.doUnmock('../config.js');
   });
 });

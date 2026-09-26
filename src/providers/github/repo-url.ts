@@ -31,7 +31,7 @@ export function parseGitHubRepoInput(input: string): RepoInfo {
 
   // Short format: owner/repo (single slash only, no subgroups on GitHub)
   const shortMatch = trimmed.match(
-    /^([A-Za-z0-9_.\-]+)\/([A-Za-z0-9_.\-]+)$/,
+    /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/,
   );
   if (shortMatch) {
     return buildRepoInfo(shortMatch[1], shortMatch[2]);

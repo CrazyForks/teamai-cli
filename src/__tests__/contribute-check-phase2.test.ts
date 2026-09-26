@@ -2,13 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { applyPhase2Adjustments, hasGitCommitInSession, contributeCheckForSession, writeContributeState } from '../contribute-check.js';
+import { applyPhase2Adjustments, hasGitCommitInSession, contributeCheckForSession } from '../contribute-check.js';
 import { appendEvent } from '../dashboard-collector.js';
 import {
     CONTRIBUTE_KNOWLEDGE_GAP_BONUS,
     CONTRIBUTE_LOW_QUALITY_BONUS,
-    CONTRIBUTE_LOW_QUALITY_THRESHOLD,
-    CONTRIBUTE_GIT_COMMIT_DOWNWEIGHT,
 } from '../types.js';
 
 function makeTmpDir(): string {

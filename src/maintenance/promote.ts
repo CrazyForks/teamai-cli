@@ -2,7 +2,7 @@
 import path from 'node:path';
 
 import matter from 'gray-matter';
-import { readFileSafe, writeFile, listFiles, ensureDir, copyFile } from '../utils/fs.js';
+import { readFileSafe, writeFile, listFiles, ensureDir } from '../utils/fs.js';
 import { isInWriteRoot, listLearningFiles } from '../utils/learnings-roots.js';
 import { log } from '../utils/logger.js';
 import { computeAllConfidence } from './confidence.js';
