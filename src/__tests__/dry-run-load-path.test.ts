@@ -39,6 +39,16 @@ const ROLES_YAML =
   'version: 1\nroles:\n  - id: hai\n    resources: { knowledge: [], skills: [hai] }\n' +
   '  - id: pm\n    resources: { knowledge: [], skills: [pm] }\n';
 
+/**
+ * `git init` with git's background upkeep off. A commit starts a detached `git maintenance
+ * run --auto`, which holds .git/objects/maintenance.lock while the test snapshots the tree.
+ */
+function gitInit(dir: string): void {
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: dir, stdio: 'ignore' });
+}
+
 /** A teammate's fresh clone of a single-repo project: the marker travels, no machine config does. */
 function setupSelfModeClone(root: string): string {
   const project = path.join(root, 'app');
@@ -50,7 +60,7 @@ function setupSelfModeClone(root: string): string {
   fs.writeFileSync(path.join(project, '.teamai', 'manifest', 'roles.yaml'), ROLES_YAML);
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: project, stdio: 'ignore' });
-  git('init', '-q');
+  gitInit(project);
   git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
   git('add', '-A');
   git('commit', '-q', '-m', 'init');
@@ -79,7 +89,7 @@ function setupLegacyRoleConfig(root: string): string {
 function setupLegacyNamedPartition(root: string): string {
   const project = path.join(root, 'app');
   fs.mkdirSync(project);
-  execFileSync('git', ['init', '-q'], { cwd: project, stdio: 'ignore' });
+  gitInit(project);
   const partition = path.join(root, 'home', '.teamai', 'projects', legacyProjectSlug(fs.realpathSync(project)));
   const repoDir = path.join(partition, 'team-repo');
   fs.mkdirSync(path.join(repoDir, 'manifest'), { recursive: true });
@@ -93,6 +103,11 @@ function setupLegacyNamedPartition(root: string): string {
   return project;
 }
 
+function isGitTransientLock(rel: string): boolean {
+  const name = path.basename(rel);
+  return rel.split(path.sep).includes('.git') && (name.endsWith('.lock') || name === 'gc.pid');
+}
+
 /** Every file under root (HOME, the project and its .git, state.json) mapped to a content hash. */
 function snapshotTree(root: string): Record<string, string> {
   const files: Record<string, string> = {};
@@ -102,6 +117,9 @@ function snapshotTree(root: string): Record<string, string> {
       const rel = path.relative(root, full);
       // Diagnostics, not state: log.debug appends here on every run.
       if (rel.startsWith(path.join('home', '.teamai', 'debug.log'))) continue;
+      // Git's own transient locks, in case some git process still runs in the background.
+      // Only these: a real write to .git (config, hooks, refs) must still fail the test.
+      if (isGitTransientLock(rel)) continue;
       if (entry.isDirectory()) {
         files[`${rel}/`] = 'dir';
         walk(full);
