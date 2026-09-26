@@ -2,7 +2,7 @@ import { requireInit, detectProjectConfig } from './config.js';
 import { pullRepo } from './utils/git.js';
 import { pathExists } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
-import { EnvHandler, maskEnvValue, ENV_KEY_RE, envEntryReader, type EnvYaml } from './resources/env.js';
+import { EnvHandler, maskEnvValue, ENV_KEY_RE, envEntryReader, unknownEnvVariableKeys, type EnvYaml } from './resources/env.js';
 import { describeEntryFailure, describeOrigin, entryFileAbsolutePath, entryFilePath, entryNamespaceFromFlags, resolveEntriesFor } from './namespaced-entries.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
 import { isSelfMode } from './types.js';
@@ -77,7 +77,7 @@ export async function envAdd(
 
   const target = await envFileFromFlags(repoPath, options);
   if (!target) return;
-  const { envYamlPath, where } = target;
+  const { envYamlPath, relativePath, where } = target;
 
   // The target env.yaml, or a new one when it does not exist.
   const envConfig = await readEnvFileForEdit(envYamlPath);
@@ -91,6 +91,16 @@ export async function envAdd(
     envConfig.variables[existingIdx].value = value;
     if (options.description) {
       envConfig.variables[existingIdx].description = options.description;
+    }
+    // The update keeps an unknown key, so the variable stays undelivered.
+    const unknown = unknownEnvVariableKeys(envConfig.variables[existingIdx]);
+    if (unknown.length > 0) {
+      const one = unknown.length === 1;
+      log.warn(
+        `${relativePath}: variable "${key}" has unknown ${one ? 'key' : 'keys'} `
+          + `${unknown.map((k) => `\`${k}:\``).join(', ')}, so pull does not deliver it. `
+          + `Correct the ${one ? 'key' : 'keys'} or remove ${one ? 'it' : 'them'} in ${relativePath}.`,
+      );
     }
   } else {
     const newVar: { key: string; value: string; description?: string } = { key, value };

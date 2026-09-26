@@ -280,6 +280,24 @@ scope: 'user',
       });
     });
 
+    // A variable with a misspelled `roles:` reaches nobody (#822); a rewrite
+    // that drops the key would deliver it to the whole team.
+    it('preserves a key env does not know on a variable it updates', async () => {
+      await fse.writeFile(
+        path.join(repoPath, 'env', 'env.yaml'),
+        YAML.stringify({ variables: [{ key: 'DB_URL', value: 'old', role: ['frontend'] }] }),
+      );
+
+      await envAdd('DB_URL', 'new', {});
+
+      const parsed = YAML.parse(await fse.readFile(path.join(repoPath, 'env', 'env.yaml'), 'utf-8'));
+      expect(parsed.variables).toEqual([{ key: 'DB_URL', value: 'new', role: ['frontend'] }]);
+      expect(log.warn).toHaveBeenCalledWith(
+        'env/env.yaml: variable "DB_URL" has unknown key `role:`, so pull does not deliver it. '
+          + 'Correct the key or remove it in env/env.yaml.',
+      );
+    });
+
     it('preserves the scope of other variables when adding a new one', async () => {
       await fse.writeFile(
         path.join(repoPath, 'env', 'env.yaml'),

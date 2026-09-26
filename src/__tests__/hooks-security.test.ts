@@ -309,3 +309,79 @@ projects:
     ));
   });
 });
+
+// A typo of a scoping key (#822) must not widen who runs the hook: the hook
+// reaches nobody and the warning names the file, the hook and the key.
+describe('resolveTeamHooks — unknown entry keys', () => {
+  const warningsAbout = (file: string, id: string): string[] =>
+    logWarn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes(file) && m.includes(`"${id}"`));
+
+  it('delivers no hook that carries a key hooks do not know, and names the file, hook and key', async () => {
+    await writeYaml(`
+hooks:
+  - id: fe-lint
+    description: frontend only
+    event: Stop
+    command: 'bash -lc "~/.teamai/team-scripts/ok.sh" || true'
+    role: [frontend]
+  - id: everyone
+    description: for all
+    event: Stop
+    command: 'bash -lc "~/.teamai/team-scripts/ok.sh" || true'
+`);
+    const defs = await defsFor(teamConfig(), member(), { auto: true });
+    expect(defs.map((d) => d.key)).toEqual(['everyone']);
+    const warnings = warningsAbout('hooks/hooks.yaml', 'fe-lint');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/\brole\b/);
+  });
+
+  it('keeps the root hook when the active namespace copy of it carries an unknown key', async () => {
+    await writeYaml(`
+hooks:
+  - id: lint
+    description: root
+    event: Stop
+    command: 'bash -lc "~/.teamai/team-scripts/root-lint.sh" || true'
+`);
+    await fse.outputFile(path.join(repo, 'hooks', 'checkout', 'hooks.yaml'), `
+hooks:
+  - id: lint
+    description: checkout
+    event: Stop
+    command: 'bash -lc "~/.teamai/team-scripts/checkout-lint.sh" || true'
+    role: [frontend]
+`);
+    await fse.outputFile(path.join(repo, 'manifest', 'projects.yaml'), `
+version: 1
+projects:
+  - id: checkout
+    resources: { hooks: [checkout] }
+`);
+    const defs = await defsFor(teamConfig(), member({ projects: ['checkout'] }), { auto: true });
+    expect(defs.map((d) => d.command)).toEqual(['bash -lc "~/.teamai/team-scripts/root-lint.sh" || true']);
+    const warnings = warningsAbout('hooks/checkout/hooks.yaml', 'lint');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/\brole\b/);
+  });
+
+  it('delivers a hook with every key hooks know, with no warning beyond the roles: deprecation', async () => {
+    await writeYaml(`
+hooks:
+  - id: full
+    description: every known key
+    event: PreToolUse
+    matcher: Bash
+    command: 'bash -lc "~/.teamai/team-scripts/ok.sh" || true'
+    timeout: 30
+    tools: [claude]
+    roles: [frontend]
+`);
+    await writeRolesYaml();
+    const defs = await defsFor(teamConfig(), member({ primaryRole: 'frontend' }), { auto: true });
+    expect(defs.map((d) => d.key)).toEqual(['full']);
+    const warnings = warningsAbout('hooks/hooks.yaml', 'full');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('is scoped with per-entry `roles:`, which is deprecated');
+  });
+});

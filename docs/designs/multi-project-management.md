@@ -271,7 +271,9 @@ resolved env set.
 Skills keep one difference: in role/project mode the root `skills/` stays the tag
 catalog and is not delivered by default. A root skill that arrives through a
 subscribed tag is replaced by an active namespace skill of the same name, and
-among tag matches the root skill wins over one in an inactive namespace. Installing
+among tag matches the root skill wins over one in an inactive namespace. A tagged
+skill that exists only in an inactive namespace still reaches a subscribed member:
+tags cross namespaces by design (#337). Installing
 a skill removes the files that another team version of that skill (root or any
 namespace) has and the new one lacks, when they match that version byte for
 byte, so switching versions leaves no team file behind; a file the member added
@@ -408,7 +410,20 @@ and pull warns with the namespace file to move it to, one per listed id.
 `roles:` on hooks and MCP shipped in 0.25.0 and keeps filtering for one more
 minor release; pull warns once per run and `doctor` has an informational check,
 both naming every target file. Model profiles are strict, so a per-entry key
-fails the file. There is no automatic migration.
+fails the file. An env, hook or MCP entry with any other key its schema does not
+know, such as a mistyped `role:`, reaches nobody too, and pull and `doctor` name
+the file, the entry and the key (#822); `env add`, `env remove` and `remove mcp`
+keep such a key when they rewrite the file. A key that a later version adds is
+unknown to this one as well, so an entry that uses it is not delivered to a member
+still on this version: every member has to upgrade before the team uses a new
+entry key, as for a new `resources:` key. A hooks or MCP file with none of its
+top-level keys (`server:` for `servers:`, `hook:` for `hooks:`) used to read as
+empty and remove every installed server or hook; it now fails like a file that
+does not parse, naming the keys it found, as `env.yaml` has since #662. An extra
+top-level key beside a known one is still ignored. `pull --dry-run` resolves the hooks
+and MCP entries and reports their warnings (an unknown id, a per-entry key, a file
+that does not parse) without writing, so a maintainer can see them before a real
+pull applies them. There is no automatic migration.
 
 ### Push and commands
 
@@ -434,15 +449,8 @@ entry comes from.
 
 ### Known gaps
 
-- The tag channel matches skills by name across every namespace, so a tagged
-  skill that exists only in an inactive namespace still reaches the member.
 - No pull protects a local edit from being overwritten, override transitions
   included.
-- A mistyped per-entry key (`role:`) is stripped by the schema and the entry
-  reaches everyone. `pull --dry-run` resolves the hooks and MCP entries and
-  reports their warnings (an unknown id, a deprecated per-entry `roles:`, a file
-  that does not parse) without writing, so a maintainer can see them before a
-  real pull applies them.
 
 ## Backward compatibility
 

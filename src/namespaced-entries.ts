@@ -78,13 +78,67 @@ export async function listEntryFiles(repoPath: string, type: EntryType): Promise
 
 /** One parsed file, or why it cannot be used; the reason names the file. */
 export type EntryFileRead<E> =
-  | { readonly ok: true; readonly entries: readonly E[]; readonly notes?: readonly string[] }
+  | {
+    readonly ok: true;
+    readonly entries: readonly E[];
+    readonly notes?: readonly string[];
+    /** The keys an entry carries that its schema does not know, for the entries that carry any. */
+    readonly unknownKeys?: ReadonlyMap<E, readonly string[]>;
+  }
   | { readonly ok: false; readonly reason: string };
 
 /** The per-entry scoping keys the namespaces replace. */
 export interface EntryScopeKeys {
   readonly roles?: readonly string[];
   readonly projects?: readonly string[];
+}
+
+/** The list under `listKey` of a parsed file, as written, before its schema drops any key. */
+export function writtenList(document: unknown, listKey: string): unknown {
+  if (document === null || typeof document !== 'object') return undefined;
+  const fields: [string, unknown][] = Object.entries(document);
+  return fields.find(([key]) => key === listKey)?.[1];
+}
+
+/**
+ * The keys each entry was written with that `schema` does not know, for the
+ * entries that have any. zod drops such a key without a word, so a misspelled
+ * `roles:` would send the entry to every member (#822). `entries` is the
+ * `listKey` list of `document`, parsed, in the same order.
+ */
+export function unknownEntryKeys<E>(
+  document: unknown,
+  listKey: string,
+  entries: readonly E[],
+  schema: { readonly shape: object },
+): Map<E, string[]> {
+  const byEntry = new Map<E, string[]>();
+  const raw = writtenList(document, listKey);
+  if (!Array.isArray(raw)) return byEntry;
+  const known = Object.keys(schema.shape);
+  entries.forEach((entry, index) => {
+    const written: unknown = raw[index];
+    if (written === null || typeof written !== 'object') return;
+    const unknown = Object.keys(written).filter((key) => !known.includes(key));
+    if (unknown.length > 0) byEntry.set(entry, unknown);
+  });
+  return byEntry;
+}
+
+/**
+ * Why a file that has none of its schema's top-level keys cannot be read, or
+ * null when it has one (or is not a non-empty mapping). zod defaults the
+ * missing list to empty and drops the key it does not know, so `server:` for
+ * `servers:` read as "no entries" and removed every installed one (#822). An
+ * extra key beside a known one stays permitted, as for env.yaml (#662).
+ */
+export function missingTopLevelKeyReason(document: unknown, schema: { readonly shape: object }): string | null {
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) return null;
+  const found = Object.keys(document);
+  const expected = Object.keys(schema.shape);
+  if (found.length === 0 || found.some((key) => expected.includes(key))) return null;
+  const quote = (keys: string[], suffix = ''): string => keys.map((key) => `\`${key}${suffix}\``).join(', ');
+  return `it has no top-level ${quote(expected, ':').replace(/, (?=[^,]*$)/, ' or ')} key, only ${quote(found)}`;
 }
 
 /** How one type's files are read. */
@@ -141,7 +195,7 @@ export type EntryFailure =
 
 /** A warning about an entry that still resolves, worded for the admin who can fix it. */
 export interface EntryNotice {
-  readonly kind: 'removed-key' | 'deprecated-roles' | 'file-note';
+  readonly kind: 'unknown-key' | 'removed-key' | 'deprecated-roles' | 'file-note';
   readonly message: string;
 }
 
@@ -220,7 +274,8 @@ export async function resolveEntries<E>(
     for (const entry of read.entries) {
       const name = reader.nameOf(entry);
       const scope = reader.scopeOf(entry);
-      if (!await keepScopedEntry(type, name, source, scope, localConfig, targets, notices)) continue;
+      const unknownKeys = read.unknownKeys?.get(entry) ?? [];
+      if (!await keepScopedEntry(type, name, source, scope, unknownKeys, localConfig, targets, notices)) continue;
       const candidate = { name, source, namespace, value: entry };
       candidates.push(candidate);
       if (scope.roles !== undefined) roleScoped.add(candidate);
@@ -312,6 +367,9 @@ export async function resolveEntriesFor<E>(
  * Whether an entry's per-entry keys let it through, recording a notice when it
  * carries one.
  *
+ * A key the schema does not know (`unknownKeys`) may be a misspelled scoping
+ * key, so such an entry is not delivered, as with a removed key.
+ *
  * `projects:` (every type) and `roles:` on env exist only in the 0.26.0 betas
  * and are removed: such an entry reaches nobody, which is the direction that
  * cannot leak a project's value to the whole team. `roles:` on hooks and MCP
@@ -322,11 +380,23 @@ async function keepScopedEntry(
   name: string,
   source: string,
   scope: EntryScopeKeys,
+  unknownKeys: readonly string[],
   localConfig: LocalConfig,
   targets: TargetFiles,
   notices: EntryNotice[],
 ): Promise<boolean> {
   const label = `${source}: ${ENTRY_NOUN[type]} "${name}"`;
+  if (unknownKeys.length > 0) {
+    const one = unknownKeys.length === 1;
+    const keys = unknownKeys.map((key) => `\`${key}:\``).join(', ');
+    notices.push({
+      kind: 'unknown-key',
+      message: `${label} has unknown ${one ? 'key' : 'keys'} ${keys}, so this entry is not delivered. `
+        + `Correct the ${one ? 'key' : 'keys'} or remove ${one ? 'it' : 'them'}.`,
+    });
+    return false;
+  }
+
   const removedKeys: ('projects' | 'roles')[] = [];
   if (scope.projects !== undefined) removedKeys.push('projects');
   if (type === 'env' && scope.roles !== undefined) removedKeys.push('roles');

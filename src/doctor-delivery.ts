@@ -500,11 +500,12 @@ export async function buildMcpDeliveryChecks(ctx: DoctorContext): Promise<Check[
 }
 
 /**
- * The per-entry `roles:` / `projects:` keys that namespace files replace (#707).
- * `roles:` on hooks and MCP still filters for one minor release and `projects:`
- * (and `roles:` on env) already reaches nobody; pull warns once per run, and
- * this is the standing version of that warning, naming each target file.
- * Informational: every entry still resolves as the warning says.
+ * Env, hook and MCP entries carrying a key to fix: the per-entry `roles:` /
+ * `projects:` keys that namespace files replace (#707), or a key the entry's
+ * schema does not know (#822). An entry with an unknown key or `projects:` (and
+ * `roles:` on env) is not delivered; `roles:` on hooks and MCP still filters
+ * for one minor release. Pull warns once per run, and this is the standing
+ * version of that warning. Informational: each entry resolves as its warning says.
  */
 export async function buildEntryScopeKeyCheck(ctx: DoctorContext): Promise<Check[]> {
   const messages = (await resolveEntryTypes(ctx.localConfig))
@@ -513,7 +514,7 @@ export async function buildEntryScopeKeyCheck(ctx: DoctorContext): Promise<Check
     .map((notice) => notice.message);
   if (messages.length === 0) return [];
   return [{
-    name: 'Team env, hooks and MCP are scoped by namespace files, not per-entry keys',
+    name: 'Team env, hooks and MCP entries have no per-entry key to fix',
     source: 'local',
     informational: true,
     check: async () => false,

@@ -148,9 +148,11 @@ hooks:
     expect(await parseTeamHooks(repo)).toBeNull();
   });
 
-  it('skips the whole file on malformed yaml', async () => {
+  // It parses as a mapping with no `hooks:` key, which read as no hooks and
+  // removed every installed one (#822).
+  it('fails the whole file on malformed yaml that parses as a mapping without hooks:', async () => {
     await writeHooksYaml(':::not yaml:::\n  - broken');
-    expect(await parseTeamHooks(repo)).toEqual([]);
+    expect(await parseTeamHooks(repo)).toBeNull();
   });
 
   it('fails the whole file when it is not YAML at all', async () => {

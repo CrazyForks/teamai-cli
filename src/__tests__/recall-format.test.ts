@@ -172,3 +172,21 @@ describe('formatResults — a path that no longer exists', () => {
     }
   });
 });
+
+describe('formatResults — closing line', () => {
+  // CLI output is English only (#822).
+  it('ends with the English reference note and prints no CJK text', () => {
+    const output = formatResults([
+      {
+        entry: makeEntry({ title: 'Regular Learning' }),
+        score: 6.0,
+        scope: 'user',
+      },
+    ]);
+
+    expect(output.split('\n').at(-1)).toBe(
+      'The above comes from the team knowledge base and is for reference only. Use the Read tool to open the listed files for details.',
+    );
+    expect(output).not.toMatch(/[\u3400-\u9fff]/);
+  });
+});

@@ -7,9 +7,10 @@ vi.mock('../utils/logger.js', () => ({
   log: { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), persist: vi.fn() },
 }));
 
-import { mcpEntryReader } from '../resources/mcp.js';
+import YAML from 'yaml';
+import { McpHandler, mcpEntryReader } from '../resources/mcp.js';
 import { resolveEntriesFor } from '../namespaced-entries.js';
-import type { LocalConfig } from '../types.js';
+import type { LocalConfig, TeamaiConfig } from '../types.js';
 
 let repo: string;
 
@@ -83,5 +84,37 @@ servers:
     url: https://example.com/api/mcp
 `);
     expect((await serversFor(member({ projects: ['checkout'] }))).map((s) => s.name)).toEqual(['shared']);
+  });
+});
+
+describe('McpHandler.removeItem', () => {
+  // A server with a misspelled `roles:` reaches nobody (#822); a rewrite that
+  // drops the key would install it for the whole team.
+  it('keeps a key MCP does not know on the servers it leaves', async () => {
+    await writeMcpYaml(`
+servers:
+  - name: gone
+    transport: http
+    url: https://example.com/gone
+  - name: fe-db
+    transport: http
+    url: https://example.com/fe-db
+    role: [frontend]
+`);
+    const teamConfig: TeamaiConfig = {
+      team: 'test',
+      description: '',
+      repo: 'owner/repo',
+      provider: 'github',
+      reviewers: [],
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: {},
+    };
+    await new McpHandler().removeItem('gone', teamConfig, member());
+
+    const written = YAML.parse(await fse.readFile(path.join(repo, 'mcp', 'mcp.yaml'), 'utf-8'));
+    expect(written.servers).toEqual([
+      { name: 'fe-db', transport: 'http', url: 'https://example.com/fe-db', role: ['frontend'] },
+    ]);
   });
 });

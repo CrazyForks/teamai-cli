@@ -8,7 +8,7 @@ import { pathExists, readFileSafe, writeFile, ensureDir, fileContentEqual } from
 import { log } from '../utils/logger.js';
 import {
   entryFileAbsolutePath, listEntryFiles, readEntryFileText, reportEntryResolution, resolveEntriesFor,
-  type EntryReader,
+  unknownEntryKeys, writtenList, type EntryReader,
 } from '../namespaced-entries.js';
 import {
   resolveActiveShellProfile,
@@ -37,6 +37,11 @@ const EnvYamlSchema = z.object({
 export type EnvVariable = z.infer<typeof EnvVariableSchema>;
 export type EnvYaml = z.infer<typeof EnvYamlSchema>;
 
+/** The keys `variable` was written with that env.yaml does not know: pull does not deliver it (#822). */
+export function unknownEnvVariableKeys(variable: object): string[] {
+  return Object.keys(variable).filter((key) => !Object.hasOwn(EnvVariableSchema.shape, key));
+}
+
 /** A parsed env.yaml, or the reason it declares nothing. See `readEnvYaml`. */
 export type EnvYamlRead =
   | { ok: true; variables: EnvVariable[] }
@@ -63,7 +68,8 @@ export const envEntryReader: EntryReader<EnvVariable> = {
     const shapeProblem = describeEnvYamlShapeProblem(raw);
     if (shapeProblem) return { ok: false, reason: `${relativePath} declares no variables: ${shapeProblem}` };
     const read = parseEnvYamlDocument(raw, relativePath);
-    return read.ok ? { ok: true, entries: read.variables } : read;
+    if (!read.ok) return read;
+    return { ok: true, entries: read.variables, unknownKeys: unknownEntryKeys(raw, 'variables', read.variables, EnvVariableSchema) };
   },
   nameOf: (variable) => variable.key,
   scopeOf: (variable) => variable,
@@ -362,7 +368,18 @@ export class EnvHandler extends ResourceHandler {
     } catch (e) {
       return { ok: false, reason: `${filePath} is not valid YAML: ${(e as Error).message}` };
     }
-    return parseEnvYamlDocument(raw, filePath);
+    const read = parseEnvYamlDocument(raw, filePath);
+    if (!read.ok) return read;
+    // A rewrite keeps every key a variable was written with: dropping a
+    // misspelled `roles:` would deliver the variable to every member (#822).
+    const written = writtenList(raw, 'variables');
+    return {
+      ok: true,
+      variables: read.variables.map((variable, index) => {
+        const entry: unknown = Array.isArray(written) ? written[index] : undefined;
+        return entry !== null && typeof entry === 'object' ? { ...entry, ...variable } : variable;
+      }),
+    };
   }
 
   /**

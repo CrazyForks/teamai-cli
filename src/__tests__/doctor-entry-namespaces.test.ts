@@ -103,6 +103,18 @@ describe('doctor — env, hooks and MCP namespaces', () => {
     expect(check.fix).toContain('env/env.yaml: variable "A" is scoped with per-entry `projects:`');
   });
 
+  it('names an entry with a key its schema does not know in the same check (#822)', async () => {
+    await fse.outputFile(path.join(repoPath, 'mcp', 'mcp.yaml'), [
+      'servers:',
+      '  - { name: db, transport: http, url: https://a.example.com, role: [frontend] }',
+      '',
+    ].join('\n'));
+
+    const [check] = await buildEntryScopeKeyCheck(ctx());
+    if (!check) throw new Error('expected the scope-key check');
+    expect(check.fix).toContain('mcp/mcp.yaml: server "db" has unknown key `role:`, so this entry is not delivered');
+  });
+
   it('adds no check when no entry carries a per-entry key', async () => {
     await fse.outputFile(path.join(repoPath, 'hooks', 'hooks.yaml'), 'hooks:\n  - { id: lint, description: x, event: Stop, command: echo }\n');
     expect(await buildEntryScopeKeyCheck(ctx())).toEqual([]);

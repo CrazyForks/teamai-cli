@@ -5,7 +5,7 @@ import type { ResourceItem, TeamaiConfig, LocalConfig, McpServerDef } from '../t
 import { readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import {
-  entryFileAbsolutePath, entryFilePath, listEntryFiles, readEntryFileText,
+  entryFileAbsolutePath, entryFilePath, listEntryFiles, missingTopLevelKeyReason, readEntryFileText, unknownEntryKeys,
   type EntryReader,
 } from '../namespaced-entries.js';
 
@@ -15,7 +15,7 @@ import {
 //  names; each tool's own spelling (the claude/cursor/codebuddy `type` field,
 //  Codex's TOML table) is applied at render time by mcp-format.ts.
 
-const TeamMcpServerSchema = z
+const TeamMcpServerFields = z
   .object({
     name: z.string().regex(/^[A-Za-z0-9_-]+$/, 'name must be alphanumeric with - or _'),
     description: z.string().optional(),
@@ -32,7 +32,9 @@ const TeamMcpServerSchema = z
     roles: z.array(z.string()).optional(),
     /** Removed (0.26.0 betas only): kept so it is detected; such a server reaches nobody. */
     projects: z.array(z.string()).optional(),
-  })
+  });
+
+const TeamMcpServerSchema = TeamMcpServerFields
   .refine((s) => (s.transport === 'stdio' ? !!s.command : true), {
     message: 'stdio transport requires `command`',
   })
@@ -54,7 +56,7 @@ export type McpYaml = z.infer<typeof McpYamlSchema>;
  * whose MCP is entirely broken (#624 review).
  */
 type McpYamlRead =
-  | { ok: true; yaml: McpYaml | null }
+  | { ok: true; yaml: McpYaml | null; unknownKeys: ReadonlyMap<TeamMcpServer, readonly string[]> }
   | { ok: false; reason: string };
 
 /** Read one MCP file, keeping why it cannot be used; `yaml: null` when absent. */
@@ -64,9 +66,13 @@ async function readMcpFile(absolutePath: string): Promise<McpYamlRead> {
 
 /** Parse one MCP file's text; `yaml: null` when it is absent or empty. */
 function parseMcpContent(content: string | null): McpYamlRead {
-  if (!content) return { ok: true, yaml: null };
+  if (!content) return { ok: true, yaml: null, unknownKeys: new Map() };
   try {
-    return { ok: true, yaml: McpYamlSchema.parse(YAML.parse(content)) };
+    const raw: unknown = YAML.parse(content);
+    const shapeProblem = missingTopLevelKeyReason(raw, McpYamlSchema);
+    if (shapeProblem) return { ok: false, reason: shapeProblem };
+    const yaml = McpYamlSchema.parse(raw);
+    return { ok: true, yaml, unknownKeys: unknownEntryKeys(raw, 'servers', yaml.servers, TeamMcpServerFields) };
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
@@ -80,7 +86,7 @@ export const mcpEntryReader: EntryReader<TeamMcpServer> = {
     if (!file.ok) return file;
     const read = parseMcpContent(file.text);
     if (!read.ok) return { ok: false, reason: `${relativePath} does not parse: ${read.reason}` };
-    return read.yaml === null ? null : { ok: true, entries: read.yaml.servers };
+    return read.yaml === null ? null : { ok: true, entries: read.yaml.servers, unknownKeys: read.unknownKeys };
   },
   nameOf: (server) => server.name,
   scopeOf: (server) => server,
@@ -164,16 +170,22 @@ export class McpHandler extends ResourceHandler {
     const namespace = slash === -1 ? null : name.slice(0, slash);
     const serverName = slash === -1 ? name : name.slice(slash + 1);
     const yamlPath = entryFileAbsolutePath(localConfig.repo.localPath, 'mcp', namespace);
-    const read = await readMcpFile(yamlPath);
+    const content = await readFileSafe(yamlPath);
+    const read = parseMcpContent(content);
     if (!read.ok) {
       log.warn(`${entryFilePath('mcp', namespace)} does not parse, so "${serverName}" was not removed: ${read.reason}`);
       return [];
     }
     const servers = read.yaml?.servers ?? [];
-    const remaining = servers.filter((s) => s.name !== serverName);
-    if (remaining.length === servers.length) return [];
+    const removed = servers.flatMap((s, index) => (s.name === serverName ? [index] : []));
+    if (content === null || removed.length === 0) return [];
 
-    await writeFile(yamlPath, YAML.stringify({ servers: remaining }));
+    // Edit the document rather than write the parsed servers back: the schema
+    // drops a key it does not know, and dropping a misspelled `roles:` would
+    // install that server for every member (#822).
+    const doc = YAML.parseDocument(content);
+    for (const index of removed.reverse()) doc.deleteIn(['servers', index]);
+    await writeFile(yamlPath, doc.toString());
     await this.addTombstone(serverName, localConfig);
     return [yamlPath];
   }

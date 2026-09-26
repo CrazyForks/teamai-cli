@@ -363,6 +363,28 @@ describe('project-scoped hooks, MCP servers and env variables via the real CLI (
     expect(pull.output).toContain('Move it to mcp/billing/mcp.yaml and drop the key.');
     expect(readClaudeMcp()).not.toContain('legacy-api');
   }, 60_000);
+
+  // A typo of a scoping key (#822) must not widen who gets the server.
+  it('installs no server that carries an unknown key, and warns naming the file, server and key', async () => {
+    const teamRepo = path.join(projectRoot, '.teamai', 'team-repo');
+    fs.writeFileSync(path.join(teamRepo, 'mcp', 'mcp.yaml'), [
+      'servers:',
+      '  - name: typo-api',
+      '    transport: http',
+      '    url: https://typo.example.com/mcp',
+      '    role: [frontend]',
+      '  - name: shared-api',
+      '    transport: http',
+      '    url: https://shared.example.com/mcp',
+      '',
+    ].join('\n'));
+
+    const pull = await runCLI(['pull', '--force'], projectRoot, home);
+    expect(pull.code, pull.output).toBe(0);
+    expect(pull.output).toMatch(/mcp\/mcp\.yaml: server "typo-api".*\brole\b/);
+    expect(readClaudeMcp()).not.toContain('typo-api');
+    expect(readClaudeMcp()).toContain('shared-api');
+  }, 60_000);
 });
 
 // Codex has no project-scope MCP location (no `mcpProject` in toolPaths), so its

@@ -690,6 +690,60 @@ scope: 'user',
       ));
     });
 
+    // A typo of a scoping key (#822) must not widen who gets the variable.
+    it('delivers no variable that carries a key env does not know, and names the file, variable and key', async () => {
+      await fse.writeFile(path.join(repoPath, 'env', 'env.yaml'), YAML.stringify({
+        variables: [
+          { key: 'DB_URL', value: 'db', role: ['frontend'] },
+          { key: 'SHARED', value: 's' },
+        ],
+      }));
+      const { log } = await import('../utils/logger.js');
+      vi.mocked(log.warn).mockClear();
+
+      await handler.pullItem(item, teamConfig, localConfig);
+
+      const content = await envSh();
+      expect(content).toContain('export SHARED=');
+      expect(content).not.toContain('DB_URL');
+      const warnings = vi.mocked(log.warn).mock.calls.map(([m]) => String(m))
+        .filter((m) => m.includes('env/env.yaml') && m.includes('"DB_URL"'));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/\brole\b/);
+    });
+
+    it('keeps the root variable when the active namespace copy of it carries an unknown key', async () => {
+      await writeCheckoutProject();
+      await fse.outputFile(path.join(repoPath, 'env', 'checkout', 'env.yaml'), YAML.stringify({
+        variables: [{ key: 'MODEL_ENDPOINT', value: 'https://checkout.example.com', role: ['frontend'] }],
+      }));
+      const { log } = await import('../utils/logger.js');
+      vi.mocked(log.warn).mockClear();
+
+      await handler.pullItem(item, teamConfig, { ...localConfig, projects: ['checkout'] });
+
+      const content = await envSh();
+      expect(content).toContain("export MODEL_ENDPOINT='https://api.example.com'");
+      expect(content).not.toContain('https://checkout.example.com');
+      const warnings = vi.mocked(log.warn).mock.calls.map(([m]) => String(m))
+        .filter((m) => m.includes('env/checkout/env.yaml') && m.includes('"MODEL_ENDPOINT"'));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/\brole\b/);
+    });
+
+    it('delivers a variable with every key env knows, without a warning about it', async () => {
+      await fse.writeFile(path.join(repoPath, 'env', 'env.yaml'), YAML.stringify({
+        variables: [{ key: 'FULL', value: 'f', description: 'every known key' }],
+      }));
+      const { log } = await import('../utils/logger.js');
+      vi.mocked(log.warn).mockClear();
+
+      await handler.pullItem(item, teamConfig, localConfig);
+
+      expect(await envSh()).toContain("export FULL='f'");
+      expect(vi.mocked(log.warn).mock.calls.map(([m]) => String(m)).filter((m) => m.includes('"FULL"'))).toEqual([]);
+    });
+
     it('should handle invalid env.yaml gracefully', async () => {
       await fse.writeFile(path.join(repoPath, 'env', 'env.yaml'), ':::bad yaml');
 

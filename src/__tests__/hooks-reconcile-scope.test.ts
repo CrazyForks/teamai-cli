@@ -248,6 +248,47 @@ hooks:
     expect((await manifest()).claude.map((r) => r.id)).toEqual(['lint']);
   });
 
+  // #822: `hook:` for `hooks:` parsed as "no hooks" and removed every installed
+  // team hook, with no warning.
+  it('keeps the installed team hooks when hooks.yaml has no top-level hooks: key, and names the file and key', async () => {
+    const lint = '\n  - id: lint\n    description: lint\n    event: Stop\n    command: npm run lint\n';
+    await writeYaml(`hooks:${lint}`);
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+    const before = await claudeSettings();
+    const { log } = await import('../utils/logger.js');
+    vi.mocked(log.warn).mockClear();
+
+    await writeYaml(`hook:${lint}`);
+    const applied = await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(applied).toEqual({ ok: false, builtins: 'defaults-where-none' });
+    expect(await claudeSettings()).toEqual(before);
+    expect((await manifest()).claude.map((r) => r.id)).toEqual(['lint']);
+    const warnings = vi.mocked(log.warn).mock.calls.map(([m]) => String(m));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('hooks/hooks.yaml');
+    expect(warnings[0]).toContain('`hook`');
+    expect(warnings[0]).toContain('`hooks:`');
+  });
+
+  it('still applies the hooks of a hooks.yaml that carries an extra top-level key', async () => {
+    await writeYaml('version: 1\nhooks:\n  - id: lint\n    description: lint\n    event: Stop\n    command: npm run lint\n');
+
+    const applied = await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(applied.ok).toBe(true);
+    expect((await manifest()).claude.map((r) => r.id)).toEqual(['lint']);
+  });
+
+  it('still reads a hooks.yaml that declares only builtin: overrides', async () => {
+    await writeYaml('builtin:\n  overrides:\n    Hook dispatch stop: { timeout: 99 }\n');
+
+    const applied = await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(applied.ok).toBe(true);
+    expect((await codexSettings()).hooks.Stop[0].hooks[0].timeout).toBe(99);
+  });
+
   // #707: a first install whose team hooks do not resolve still gets the
   // built-in hooks, above all the session-start pull that heals the member.
   it('installs the built-in hooks with the root overrides on a first install whose namespaces clash', async () => {

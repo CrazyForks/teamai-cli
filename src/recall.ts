@@ -233,7 +233,7 @@ export function formatResults(results: ScopedSearchResult[]): string {
 
   lines.push('--- [teamai:recall:end] ---');
   lines.push('');
-  lines.push('以上内容来自团队知识库，仅供参考。如需详细信息，请用 Read 工具读取对应文件。');
+  lines.push('The above comes from the team knowledge base and is for reference only. Use the Read tool to open the listed files for details.');
   return lines.join('\n');
 }
 
