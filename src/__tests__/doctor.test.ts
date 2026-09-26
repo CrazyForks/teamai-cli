@@ -501,6 +501,19 @@ describe('doctor — hook checks', () => {
         expect(allPassed).toBe(false);
     });
 
+    // #789: a member on `init --provider git` is not asked for the team
+    // provider's CLI or token.
+    it('checks the member\'s provider instead of the team\'s', async () => {
+        mockedLoadLocalConfig.mockResolvedValue({ ...mockLocalConfig, provider: 'git' });
+
+        await doctor({});
+
+        const allLines = consoleSpy.mock.calls.map((c) => String(c[0]));
+        expect(allLines.some((line) => line.includes('gf CLI'))).toBe(false);
+        expect(mockedIsGfInstalled).not.toHaveBeenCalled();
+        expect(mockedGfIsAuthenticated).not.toHaveBeenCalled();
+    });
+
     it('checks hooks only for enabled agents', async () => {
         mockedLoadLocalConfig.mockResolvedValue({
             ...mockLocalConfig,

@@ -233,12 +233,13 @@ async function resolveNamespaceForNew(
  */
 async function createPrWithFallback(
   teamConfig: { repo: string; provider?: string; reviewers?: string[] },
-  localConfig: { repo: { remote: string; localPath: string } },
+  localConfig: { repo: { remote: string; localPath: string }; provider?: string },
   branchName: string,
   title: string,
   description: string,
 ): Promise<string | null> {
-  const provider = getProvider(teamConfig.provider);
+  // A member's `init --provider` choice outranks the team's provider (#789).
+  const provider = getProvider(localConfig.provider ?? teamConfig.provider);
   const mrSpin = spinner('Creating Pull Request...').start();
   let repoInput = teamConfig.repo;
   try {
@@ -265,7 +266,9 @@ async function createPrWithFallback(
   } catch (e) {
     mrSpin.fail(`Failed to create PR: ${(e as Error).message}`);
     log.info(`Branch ${branchName} has been pushed. You can create a PR manually.`);
-    if (provider.name === 'git') {
+    if (localConfig.provider === 'git') {
+      log.info('This machine uses provider git (teamai init --provider git), which does not create pull/merge requests.');
+    } else if (provider.name === 'git') {
       const { detectProvider } = await import('./providers/registry.js');
       const { probeSelfHostedGitLab } = await import('./providers/gitlab/probe.js');
       const repoUrl = repoInput || localConfig.repo.remote;

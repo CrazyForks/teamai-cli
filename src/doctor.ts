@@ -355,7 +355,8 @@ export type CheckStage = 'pull' | 'doctor';
  */
 export async function buildChecks(ctx: DoctorContext, stage: CheckStage = 'doctor'): Promise<Check[]> {
   const { localConfig, teamConfig, toolPaths, hookToolPaths, baseDir } = ctx;
-  const providerName = teamConfig?.provider;
+  // A member's `init --provider` choice outranks the team's provider (#789).
+  const providerName = localConfig.provider ?? teamConfig?.provider;
   const checks: Check[] = [];
 
   // Provider-specific checks: gf CLI only needed for TGit, gh CLI for GitHub

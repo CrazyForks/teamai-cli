@@ -111,7 +111,11 @@ export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxx
 teamai init https://git.example.com/yourgroup/yourrepo
 ```
 
+也可以不设 `GITLAB_URL`，只设 `TEAMAI_GITLAB_HOST=git.example.com`：此时 API 指向 `https://git.example.com`。两者同时设置时必须是同一个 host，否则 teamai 会在发送 token 前停止。
+
 对于未知 host，`init` 会匿名检查 GitLab 登录页，总超时为三秒。确认是 GitLab 后，会在认证、克隆或写入配置前停止，提示设置实例地址和 token 后重试。探测不发送 token，也不跟随重定向。无法确认时，初始化继续使用通用 `git` provider；它支持 Git 传输，但不能自动建仓或创建 PR/MR。实例若由 SSO 遮蔽、部署在子路径下，或无法被探测访问，请显式设置 `GITLAB_URL`。
+
+只同步资源、从不需要 CLI 创建 MR 的成员可以不配 token：见[成员接入](#成员接入)中的 `--provider git`。
 
 **已经初始化为 `provider: git`？** 设置上述环境变量，并把团队仓库 `teamai.yaml` 中的 `provider` 改为 `gitlab`。仅设置环境变量不会改变已有 provider 选择。失败的 `teamai push` 可能已经推送了分支；若其诊断探测到 GitLab，会输出这些修复步骤。详见 [Provider 配置](providers.md#gitlab-provider含自托管)。
 
@@ -481,6 +485,20 @@ teamai init https://github.com/yourorg/yourrepo
 npm install -g teamai-cli
 teamai init https://github.com/yourorg/yourrepo --scope user
 ```
+
+**纯 Git、无需平台 token（`--provider git`）：**
+
+团队仓库所在平台的 provider 需要 token 时（例如自建 GitLab 需要 `GITLAB_TOKEN`），从不需要 CLI 创建 PR/MR 的成员可以改用已有的 Git 认证（SSH Key 或 Credential Helper）：
+
+```bash
+teamai init https://gitlab.example.com/yourgroup/yourrepo --provider git
+```
+
+- `--provider` 跳过自动检测，直接使用指定的 provider：`tgit`、`github`、`cnb`、`gitlab`、`gitcode` 或 `git`。`git` 不做平台登录，也不检查 token。
+- 该选择只保存在本机的本地配置中。已有的 `teamai.yaml` 不变，其他成员仍使用团队的 provider。`init` 新建 `teamai.yaml` 时，`--provider git` 写入的仍是 `init` 不带该参数时检测到的 provider；若 host 是尚未配置的自建 GitLab，`init` 会停止并提示设置 `GITLAB_URL`，而不是写入 `git`。
+- 自建 GitLab 使用 `--provider gitlab` 时仍需设置 `GITLAB_URL` 或 `TEAMAI_GITLAB_HOST`（以及 `GITLAB_TOKEN`）。两者都未设置时 `init` 会直接停止，否则 GitLab API 会指向 gitlab.com。
+- `pull` 照常工作。`push` 会推送分支，但无法创建 PR/MR，需要到 Git 平台上手动创建；由于这一步没有完成，命令以非零退出码结束。
+- 不带 `--provider` 重新运行 `teamai init` 即恢复自动检测。
 
 **HTTP 模式（只读消费者）：**
 

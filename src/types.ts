@@ -264,12 +264,15 @@ export const SOURCE_PULL_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const TEAMAI_SOURCES_DIR = path.join(getUserHome(), '.teamai', 'sources');
 
+/** Git hosting provider. `git` is the transport-only fallback for arbitrary hosts. */
+export const ProviderNameSchema = z.enum(['tgit', 'github', 'cnb', 'gitlab', 'gitcode', 'git']);
+export type ProviderName = z.infer<typeof ProviderNameSchema>;
+
 export const TeamaiConfigSchema = z.object({
   team: z.string(),
   description: z.string().default(''),
   repo: z.string(),
-  /** Git hosting provider. `git` is the transport-only fallback for arbitrary hosts. */
-  provider: z.enum(['tgit', 'github', 'cnb', 'gitlab', 'gitcode', 'git']).default('tgit'),
+  provider: ProviderNameSchema.default('tgit'),
   /**
    * @deprecated Ignored by `teamai init` (issue #250). Local install scope is
    * decided only by CLI `--scope` / default. Kept optional for old teamai.yaml files.
@@ -536,6 +539,12 @@ export const LocalConfigSchema = z.object({
     businessRepoRoot: z.string().optional(),
   }),
   username: z.string(),
+  /**
+   * The provider this member uses for the team repo, set by `init --provider`
+   * (#789). It overrides teamai.yaml `provider` on this machine only, e.g. `git`
+   * so a member of a GitLab team needs no GITLAB_TOKEN. Absent = the team's.
+   */
+  provider: ProviderNameSchema.optional(),
   updatePolicy: z.enum(['auto', 'prompt', 'skip']).optional(),
   // Read-compat default for historical configs that omit `scope` (pre-project era).
   // NOT the write default for `teamai init` — init defaults to project (issue #250).

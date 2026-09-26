@@ -359,7 +359,7 @@ export async function importCmd(opts: ImportOptions): Promise<void> {
               `[teamai] Import from MR: ${opts.fromMr}`,
               ['.'],
               { repo: teamConfig.repo, provider: teamConfig.provider, reviewers: teamConfig.reviewers },
-              { repo: localConfig.repo, username: localConfig.username },
+              { repo: localConfig.repo, username: localConfig.username, provider: localConfig.provider },
             );
           },
         },

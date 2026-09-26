@@ -290,6 +290,15 @@ describe('gitlabWhoami', () => {
     expect(await gitlabWhoami()).toBeNull();
   });
 
+  it('reports a GitLab URL configuration error instead of a failed login, without a request', async () => {
+    process.env.GITLAB_TOKEN = 'glpat_test';
+    process.env.TEAMAI_GITLAB_HOST = 'gitlab.corp';
+    process.env.GITLAB_URL = 'https://gitlab.com';
+    global.fetch = vi.fn() as never;
+    await expect(gitlabWhoami()).rejects.toThrow(/name different GitLab hosts/);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('returns null when no token is set', async () => {
     delete process.env.GITLAB_TOKEN;
     delete process.env.GITLAB_PRIVATE_TOKEN;
@@ -522,6 +531,20 @@ describe('gitlabBaseUrl', () => {
   it('rejects a GITLAB_URL without a scheme instead of silently diverging', () => {
     process.env.GITLAB_URL = 'gitlab.example.com';
     expect(() => gitlabBaseUrl()).toThrow(/Invalid GITLAB_URL/);
+  });
+
+  it('refuses a TEAMAI_GITLAB_HOST that names a different host than GITLAB_URL', () => {
+    process.env.TEAMAI_GITLAB_HOST = 'gitlab.corp';
+    process.env.GITLAB_URL = 'https://gitlab.com';
+    expect(() => gitlabBaseUrl()).toThrow(/TEAMAI_GITLAB_HOST \(gitlab\.corp\) and GITLAB_URL \(https:\/\/gitlab\.com\)/);
+  });
+
+  it('accepts a TEAMAI_GITLAB_HOST that matches GITLAB_URL with or without its port', () => {
+    process.env.GITLAB_URL = 'https://gitlab.corp:8443/gitlab';
+    for (const host of ['gitlab.corp:8443', 'GITLAB.corp']) {
+      process.env.TEAMAI_GITLAB_HOST = host;
+      expect(gitlabBaseUrl()).toBe('https://gitlab.corp:8443/gitlab');
+    }
   });
 });
 

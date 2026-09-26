@@ -78,6 +78,23 @@ describe('GitLab guidance after generic Git PR creation fails', () => {
     expect(process.env.GITLAB_URL).toBe('https://private-code.example.test');
   });
 
+  // #789: the member chose plain git with `init --provider git`; the team's
+  // teamai.yaml still says gitlab and must not be used for the PR step.
+  it('uses the member\'s git provider over the team\'s gitlab and asks for no token', async () => {
+    vi.stubEnv('GITLAB_URL', 'https://private-code.example.test');
+    const teamConfig = { repo: REMOTE, provider: 'gitlab' };
+    const memberConfig = { ...localConfig, provider: 'git' };
+
+    await expect(createPrWithFallback(teamConfig, memberConfig, BRANCH, 'Title', 'Body')).resolves.toBeNull();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fail).toHaveBeenCalledWith(UNSUPPORTED_PR);
+    expect(log.info).toHaveBeenCalledWith(`Branch ${BRANCH} has been pushed. You can create a PR manually.`);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('teamai init --provider git'));
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining('GITLAB_TOKEN'));
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining('Change it to provider: gitlab'));
+  });
+
   it('preserves the original failure and manual PR guidance when an unknown host is not GitLab', async () => {
     const teamConfig = { repo: REMOTE, provider: 'git' };
     const originalConfig = structuredClone(teamConfig);

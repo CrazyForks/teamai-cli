@@ -419,7 +419,7 @@ export async function autoPushViaMR(
   message: string,
   files: string[],
   teamConfig: { repo: string; provider?: string; reviewers?: string[] },
-  localConfig: { repo: { remote: string; localPath: string }; username: string },
+  localConfig: { repo: { remote: string; localPath: string }; username: string; provider?: string },
 ): Promise<string | null> {
   try {
     const branchName = generateBranchName(localConfig.username);

@@ -101,3 +101,56 @@ describe('self-hosted GitLab detection through the built CLI', () => {
     expect(requests).toHaveLength(before);
   });
 });
+
+describe('GitLab token requests through the built CLI stay on the repository host', () => {
+  let sandbox: string;
+  let stub: string;
+
+  beforeAll(() => {
+    expect(fs.existsSync(CLI), 'Run npm run build first').toBe(true);
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-gitlab-host-'));
+    // Preloaded into the CLI: records each request host and answers 401, so no
+    // request leaves the machine.
+    stub = path.join(sandbox, 'stub-fetch.mjs');
+    fs.writeFileSync(stub, [
+      "import fs from 'node:fs';",
+      'globalThis.fetch = async (input) => {',
+      "  fs.appendFileSync(process.env.FETCH_LOG, new URL(String(input)).host + '\\n');",
+      "  return new Response('{}', { status: 401 });",
+      '};',
+    ].join('\n'));
+  });
+
+  afterAll(() => {
+    if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function runInit(extraArgs: string[], env: Record<string, string>) {
+    const dir = fs.mkdtempSync(path.join(sandbox, 'run-'));
+    const log = path.join(dir, 'fetch.log');
+    const result = await runCLI(
+      ['init', 'https://gitlab.corp/team/repo.git', '--agent', 'claude', '--force', ...extraArgs],
+      dir, dir, { NODE_OPTIONS: `--import=${stub}`, FETCH_LOG: log, GITLAB_TOKEN: 'corp-token', ...env },
+    );
+    const hosts = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+    return { ...result, hosts };
+  }
+
+  for (const [label, extraArgs] of [['auto-detected', []], ['--provider gitlab', ['--provider', 'gitlab']]] as const) {
+    it(`${label}: TEAMAI_GITLAB_HOST without GITLAB_URL sends the token only to that host`, async () => {
+      const result = await runInit([...extraArgs], { TEAMAI_GITLAB_HOST: 'gitlab.corp' });
+      expect(result.hosts.length, result.output).toBeGreaterThan(0);
+      expect(new Set(result.hosts)).toEqual(new Set(['gitlab.corp']));
+    });
+
+    it(`${label}: TEAMAI_GITLAB_HOST and GITLAB_URL naming different hosts sends no request`, async () => {
+      const result = await runInit([...extraArgs], {
+        TEAMAI_GITLAB_HOST: 'gitlab.corp', GITLAB_URL: 'https://gitlab.com',
+      });
+      expect(result.code, result.output).toBe(1);
+      expect(result.hosts).toEqual([]);
+      expect(result.output).toContain('TEAMAI_GITLAB_HOST');
+      expect(result.output).not.toContain('corp-token');
+    });
+  }
+});

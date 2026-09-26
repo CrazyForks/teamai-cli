@@ -60,9 +60,25 @@ function resolveGitLabBaseUrl(): string {
           'scheme, e.g. https://gitlab.example.com',
       );
     }
+    assertSameGitLabHost(new URL(gitlabUrl));
     return gitlabUrl.replace(/\/+$/, '');
   }
   return `https://${GITLAB_HOST}`;
+}
+
+/**
+ * Repo URLs on TEAMAI_GITLAB_HOST are routed to the GitLab provider, and its
+ * API calls go to GITLAB_URL. When the two name different hosts, the token for
+ * one instance would be sent to the other, so refuse instead of choosing.
+ */
+function assertSameGitLabHost(gitlabUrl: URL): void {
+  const override = process.env.TEAMAI_GITLAB_HOST?.trim().toLowerCase();
+  if (!override || override === gitlabUrl.host || override === gitlabUrl.hostname) return;
+  throw new Error(
+    `TEAMAI_GITLAB_HOST (${override}) and GITLAB_URL (${gitlabUrl.origin}) name different GitLab `
+      + 'hosts, so teamai cannot tell which one your token belongs to. Unset TEAMAI_GITLAB_HOST, '
+      + 'or set GITLAB_URL to the base URL of that host, then run the command again.',
+  );
 }
 
 /** Resolve the GitLab token from env, honouring the documented aliases. */
@@ -112,8 +128,11 @@ export function gitlabIsAuthenticated(): boolean {
 export async function gitlabWhoami(): Promise<string | null> {
   const token = getGitLabToken();
   if (!token) return null;
+  // Resolved outside the try: a GITLAB_URL configuration error must reach the
+  // user instead of reading as a failed login.
+  const url = `${gitlabApiBase()}/user`;
   try {
-    const resp = await fetch(`${gitlabApiBase()}/user`, {
+    const resp = await fetch(url, {
       headers: authHeaders(token),
       redirect: 'manual',
     });

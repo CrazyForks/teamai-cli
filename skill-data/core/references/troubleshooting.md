@@ -87,6 +87,9 @@ read -rs GITLAB_TOKEN && export GITLAB_TOKEN   # paste when prompted; api scope
 teamai init https://git.example.com/yourgroup/yourrepo
 ```
 
+A member who only syncs and never needs the CLI to open merge requests can skip
+both: `teamai init <url> --provider git` uses their existing Git authentication.
+
 ## Which tools actually get hooks
 
 `teamai hooks inject` prints **"Hooks injected into all AI tool settings"** even

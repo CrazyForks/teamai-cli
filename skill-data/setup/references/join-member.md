@@ -58,7 +58,11 @@ Match the login to the URL's host (do NOT create a second repo):
   before continuing. (Headless/CI only: pre-set `GITHUB_TOKEN` — a token with `repo`
   scope — instead.)
 - **`gitlab.com/...`** or self-hosted GitLab → set `GITLAB_TOKEN` (and `GITLAB_URL`
-  for self-hosted, with `api` scope)
+  for self-hosted, with `api` scope). **Exception:** a member who only syncs and
+  never needs the CLI to open merge requests (typical for non-developers) can skip
+  the token: add `--provider git` to the `init` in Step 4. Git then uses their
+  existing SSH key or credential helper, and `push` leaves the MR for them to open
+  on the web.
 
 If they have no account on that platform, they register there, then ask the admin
 to add them to the repo.

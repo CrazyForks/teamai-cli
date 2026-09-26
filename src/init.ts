@@ -5,8 +5,9 @@ import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConf
 import { describeUnappliedTeamHooks, hasTeamaiHooks, reconcileHooks, reconcileTeamHooksForConfig } from './hooks.js';
 import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials, pullRepoFastForward } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
-import { getProvider, detectProviderForInit, RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError } from './providers/index.js';
+import { getProvider, detectProvider, detectProviderForInit, RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError } from './providers/index.js';
 import { parseGenericGitExistingRemote } from './providers/git/repo-url.js';
+import { probeSelfHostedGitLab } from './providers/gitlab/probe.js';
 import { ensureDir, writeFile, writeFileAtomic, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { queueOwner, sameQueueOwner, setAsideQueueOnModeSwitch } from './utils/pending-learnings.js';
 import { dropAllSearchIndexes } from './utils/search-index.js';
@@ -47,6 +48,8 @@ import {
   REPORTS_BRANCH,
   type GlobalOptions,
   type LocalConfig,
+  ProviderNameSchema,
+  type ProviderName,
   type Scope,
   getTeamaiHome,
   getConfigPath,
@@ -416,6 +419,61 @@ export function resolveInitRepo(
     );
   }
   return pos ?? flag;
+}
+
+/**
+ * Validate `init --provider`: an explicit provider that replaces auto-detection
+ * (#789), so a member of a GitLab team can use plain git without a token.
+ */
+export function resolveInitProvider(raw: string | undefined): ProviderName | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = ProviderNameSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid --provider "${raw}". Use one of: ${ProviderNameSchema.options.join(', ')}, `
+      + 'or omit --provider to detect it from the repo URL.',
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * The provider init uses for `input`: the `--provider` choice when given, else
+ * auto-detection.
+ */
+async function selectInitProvider(input: string, forced: ProviderName | undefined): Promise<string> {
+  if (!forced) return detectProviderForInit(input);
+  // The GitLab API client targets GITLAB_URL or TEAMAI_GITLAB_HOST (default
+  // gitlab.com), not the repo URL's host, so on an unconfigured host it would
+  // send the token elsewhere.
+  if (forced === 'gitlab' && detectProvider(input) === 'git') {
+    throw new Error(
+      '--provider gitlab needs this GitLab instance configured. Set GITLAB_URL to its base URL '
+      + '(for example https://gitlab.example.com) and GITLAB_TOKEN, then run teamai init again. '
+      + 'To use your existing Git authentication without a token, pass --provider git.',
+    );
+  }
+  log.info(`Provider: ${forced} (--provider; auto-detection skipped)`);
+  return forced;
+}
+
+/**
+ * The provider a new teamai.yaml records for the whole team. `--provider git`
+ * is one member's opt-out, so the host's provider is resolved as init would
+ * without the flag. An unconfigured self-hosted GitLab stops init: recording
+ * `git` there would cost every teammate automatic merge requests.
+ */
+async function newTeamConfigProvider(input: string, providerName: string, forced: ProviderName | undefined): Promise<string> {
+  if (forced !== 'git') return providerName;
+  const detected = detectProvider(input);
+  if (detected !== 'git') return detected;
+  const gitlab = await probeSelfHostedGitLab(input);
+  if (!gitlab) return 'git';
+  throw new Error(
+    `Creating teamai.yaml records the team's provider, and ${gitlab.baseUrl} is a self-hosted GitLab `
+    + `that is not configured. Set GITLAB_URL=${gitlab.baseUrl} and run teamai init again. `
+    + '--provider git still keeps this machine on your Git authentication, without a GitLab token.',
+  );
 }
 
 function printScopeSummary(
@@ -880,6 +938,7 @@ export async function promptForSelfModeAgents(options: {
 export async function initSelfRepo(options: GlobalOptions & {
   repo?: string;
   repoPositional?: string;
+  provider?: ProviderName;
   role?: string;
   project?: string;
   agent?: string | string[];
@@ -946,14 +1005,14 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
   let providerName: string;
   try {
-    providerName = await detectProviderForInit(remoteUrl);
+    providerName = await selectInitProvider(remoteUrl, options.provider);
   } catch (e) {
     log.error((e as Error).message);
     process.exit(1);
     return;
   }
   const provider = getProvider(providerName);
-  log.debug(`Detected provider: ${providerName} (from ${redactGitCredentials(remoteUrl)})`);
+  if (!options.provider) log.debug(`Detected provider: ${providerName} (from ${redactGitCredentials(remoteUrl)})`);
 
   let repoInfo;
   try {
@@ -995,12 +1054,20 @@ export async function initSelfRepo(options: GlobalOptions & {
   // teamai.yaml carries `mode: self` so teammates auto-bootstrap after clone.
   const teamaiYamlPath = path.join(localPath, 'teamai.yaml');
   if (!await pathExists(teamaiYamlPath)) {
+    let teamProvider: string;
+    try {
+      teamProvider = await newTeamConfigProvider(remoteUrl, providerName, options.provider);
+    } catch (e) {
+      log.error((e as Error).message);
+      process.exit(1);
+      return;
+    }
     const defaultConfig = YAML.stringify({
       team: repoInfo.repo,
       mode: 'self',
       description: 'TeamAI single-repo (knowledge on main, reports on teamai-reports)',
       repo: repoInfo.httpsUrl,
-      provider: providerName,
+      provider: teamProvider,
       sharing: {
         rules: { enforced: [] },
         docs: { localDir: './.teamai/docs' },
@@ -1023,6 +1090,7 @@ export async function initSelfRepo(options: GlobalOptions & {
   const localConfig: LocalConfig = {
     repo: { localPath, remote: repoInfo.httpsUrl, kind: 'self', businessRepoRoot },
     username,
+    ...(options.provider ? { provider: options.provider } : {}),
     scope: 'project',
     projectRoot: businessRepoRoot,
     dataHome: partitionHome,
@@ -1240,7 +1308,19 @@ export async function init(options: GlobalOptions & {
   token?: string;
   inheritUserScope?: boolean;
   self?: boolean;
+  provider?: string;
 }): Promise<void> {
+  let forcedProvider: ProviderName | undefined;
+  try {
+    forcedProvider = resolveInitProvider(options.provider);
+    if (forcedProvider && options.http) {
+      throw new Error('--provider cannot be combined with --http: an HTTP team repo has no git provider.');
+    }
+  } catch (e) {
+    log.error((e as Error).message);
+    process.exit(1);
+    return;
+  }
   if (options.http) {
     return initHttp(options.http, options);
   }
@@ -1249,7 +1329,7 @@ export async function init(options: GlobalOptions & {
   // the teamai-reports orphan branch. No separate team repo is cloned.
   const repoArg = (options.repoPositional ?? options.repo ?? '').trim();
   if (options.self || repoArg === '.') {
-    return initSelfRepo(options);
+    return initSelfRepo({ ...options, provider: forcedProvider });
   }
   log.info('Initializing teamai...');
 
@@ -1332,14 +1412,14 @@ export async function init(options: GlobalOptions & {
   // Step 1b: Detect and initialize provider from URL
   let providerName: string;
   try {
-    providerName = await detectProviderForInit(repoInput);
+    providerName = await selectInitProvider(repoInput, forcedProvider);
   } catch (e) {
     log.error((e as Error).message);
     process.exit(1);
     return;
   }
   const provider = getProvider(providerName);
-  log.debug(`Detected provider: ${providerName}`);
+  if (!forcedProvider) log.debug(`Detected provider: ${providerName}`);
 
   let repoInfo;
   try {
@@ -1547,11 +1627,19 @@ export async function init(options: GlobalOptions & {
   const createdSkeleton = !teamConfig;
   if (!teamConfig) {
     log.warn('teamai.yaml not found in repo. Creating default config...');
+    let teamProvider: string;
+    try {
+      teamProvider = await newTeamConfigProvider(repoInput, providerName, forcedProvider);
+    } catch (e) {
+      log.error((e as Error).message);
+      process.exit(1);
+      return;
+    }
     const defaultConfig = YAML.stringify({
       team: 'my-team',
       description: 'TeamAI shared resources',
       repo: repoInfo.httpsUrl,
-      provider: providerName,
+      provider: teamProvider,
       sharing: {
         rules: { enforced: [] },
         docs: { localDir: scope === 'project' ? './.teamai/docs' : '~/.teamai/docs' },
@@ -1703,6 +1791,7 @@ export async function init(options: GlobalOptions & {
   const localConfig: LocalConfig = {
     repo: { localPath, remote: repoInfo.httpsUrl },
     username,
+    ...(forcedProvider ? { provider: forcedProvider } : {}),
     scope,
     projectRoot,
     additionalRoles: [],
